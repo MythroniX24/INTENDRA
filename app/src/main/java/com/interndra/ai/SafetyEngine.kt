@@ -10,8 +10,8 @@ import com.interndra.data.model.ShellCommand
  *  1. NORMALIZATION: before matching, commands are normalized:
  *     - collapse all whitespace runs to single spaces
  *     - strip bash quotes (' ', " ") that break substring matching
- *     - strip `${IFS}` and `$IFS` substitutions used to evade matching
- *     - decode `base64 -d` piped payloads so encoded attacks are caught
+ *     - strip ${IFS} and $IFS substitutions used to evade matching
+ *     - decode base64 -d piped payloads so encoded attacks are caught
  *     This closes the "rm  -rf  /" and `r''m -rf /` bypasses.
  *
  *  2. REGEX PATTERNS: dangerous patterns now use regex with word boundaries
@@ -46,7 +46,7 @@ class SafetyEngine {
         // Mass deletion / wipe — covers /, /sdcard, /storage, /system, /data,
         // ~, *, alternate paths, and any rm -rf targeting a top-level dir.
         Regex("""\brm\s+(-[a-z]*r[a-z]*f[a-z]*|--recursive\s+--force)\s+/(sdcard|storage|system|data|cache|proc|dev|sbin|etc|root|var|tmp|\*|\s*$|\s*/\s*$)""") to "rm -rf against a system path",
-        Regex("""\brm\s+(-[a-z]*r[a-z]*f[a-z]*|--recursive\s+--force)\s+(~|\$HOME|\*|/+(?:\s|$))""") to "rm -rf against home or root",
+        Regex("""\brm\s+(-[a-z]*r[a-z]*f[a-z]*|--recursive\s+--force)\s+(~|\$\{'$'}HOME|\*|/+(?:\s|\$))""") to "rm -rf against home or root",
         Regex("""\brmdir\s+/(\s|$)""") to "rmdir of root",
         Regex("""\bmkfs\b""") to "filesystem format (mkfs)",
         Regex("""\bdd\s+if\s*=\s*/dev/(zero|urandom|random)""") to "dd from /dev/zero or /dev/urandom",
@@ -95,9 +95,8 @@ class SafetyEngine {
     )
 
     // ── Hard blocked — literal substrings (post-normalization) ───────────
-    // Used for patterns that don't need regex (exact tokens).
     private val HARD_BLOCKED_LITERALS = listOf(
-        ":(){ :|:& };:",      // fork bomb literal (in case regex doesn't match)
+        ":(){ :|:& };:",
         "rm -rf /*",
         "rm -rf /system",
         "rm -rf /data",
@@ -138,29 +137,16 @@ class SafetyEngine {
         Regex("""\bip\s+addr\b""") to "ip addr (network info)"
     )
 
-    /**
-     * Normalize a command for safety checking:
-     *  - collapse whitespace runs to single spaces
-     *  - strip ${IFS} and $IFS (used to break up substrings)
-     *  - strip single and double quotes (used to break substrings)
-     *  - decode `base64 -d` payloads inline so they can be pattern-matched
-     */
     private fun normalize(command: String): String {
         var c = command
-        // Strip ${IFS} / $IFS / ${IFS:+ } substitutions
         c = c.replace(Regex("""\$\{?IFS:?(\+\s)?\}?"""), " ")
-        // Strip bash quotes (used to break up dangerous substrings like r''m)
         c = c.replace(Regex("""['"]"""), "")
-        // Collapse all whitespace runs to single spaces
         c = c.replace(Regex("""\s+"""), " ")
-        // Normalize path: collapse runs of slashes (so /sdcard//foo matches /sdcard/foo)
         c = c.replace(Regex("""(?<!:)//+"""), "/")
-        // Decode base64 payloads inline (so `echo cm0gLXJmIC8= | base64 -d | sh` reveals `rm -rf /`)
         c = decodeBase64Payloads(c)
         return c.trim().lowercase()
     }
 
-    /** Find `echo <b64> | base64 -d` and inline-decode the b64 segment. */
     private fun decodeBase64Payloads(c: String): String {
         val pattern = Regex("""echo\s+([A-Za-z0-9+/=]{8,})\s*\|\s*base64\s+-d""")
         var result = c
@@ -179,7 +165,6 @@ class SafetyEngine {
     fun isSafe(command: String): Boolean =
         validate(command).result != ValidationResult.BLOCKED
 
-    /** Convenience for callers that just want a safe/reason pair. */
     fun safeVerdict(command: String): Verdict {
         val report = validate(command)
         return Verdict(
@@ -188,24 +173,20 @@ class SafetyEngine {
         )
     }
 
-    /** Backward-compatible alias used by InterndraNotificationListener. */
     fun verdict(command: String): Verdict = safeVerdict(command)
 
     fun validate(command: String): Report {
         val normalized = normalize(command)
 
-        // Hard block — literals first (fast path)
         HARD_BLOCKED_LITERALS.firstOrNull { normalized.contains(it.lowercase()) }
             ?.let { return Report(ValidationResult.BLOCKED, "Destructive command blocked: $it", it) }
 
-        // Hard block — regex
         for ((pattern, label) in HARD_BLOCKED_REGEX) {
             if (pattern.containsMatchIn(normalized)) {
                 return Report(ValidationResult.BLOCKED, "Blocked: $label", pattern.pattern)
             }
         }
 
-        // Privacy-sensitive (treat as REQUIRES_CONFIRMATION so user is warned)
         for ((pattern, label) in PRIVACY_SENSITIVE_REGEX) {
             if (pattern.containsMatchIn(normalized)) {
                 return Report(
@@ -216,7 +197,6 @@ class SafetyEngine {
             }
         }
 
-        // Needs confirmation
         for ((pattern, label) in NEEDS_CONFIRMATION_REGEX) {
             if (pattern.containsMatchIn(normalized)) {
                 return Report(
@@ -230,11 +210,6 @@ class SafetyEngine {
         return Report(ValidationResult.SAFE, "Safe to execute")
     }
 
-    /**
-     * Validate a batch of commands. Short-circuits on the first BLOCKED
-     * verdict but still returns a Report per command (remaining commands
-     * after a block are marked SAFE with a "skipped" reason).
-     */
     fun validateAll(commands: List<ShellCommand>): List<Report> {
         val reports = mutableListOf<Report>()
         var blocked = false
