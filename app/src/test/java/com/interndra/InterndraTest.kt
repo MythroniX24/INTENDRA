@@ -51,7 +51,7 @@ class InterndraTest {
     }
 
     @Test
-    fun `safety engine blocks rm -rf /storage`() {
+    fun `safety engine blocks rm -rf slash storage`() {
         val safety = SafetyEngine()
         val report = safety.validate("rm -rf /storage/emulated/0")
         assertEquals(SafetyEngine.ValidationResult.BLOCKED, report.result)
@@ -139,7 +139,7 @@ class InterndraTest {
         val detected = planner.detect("find PDF files in downloads")
         val workflow = planner.plan(detected!!)
         assertNotNull(workflow)
-        assertTrue(workflow.steps.first().command.command.contains("find"))
+        assertTrue(workflow!!.steps.first().command.command.contains("find"))
         assertTrue(workflow.steps.first().command.command.contains("pdf"))
     }
 
