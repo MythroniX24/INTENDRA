@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.Icon
@@ -44,7 +43,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interndra.ui.theme.Accent
-import com.interndra.ui.theme.AiBubble
 import com.interndra.ui.theme.ChatBg
 import com.interndra.ui.theme.Danger
 import com.interndra.ui.theme.SurfaceLight
@@ -62,21 +60,11 @@ import com.interndra.ui.theme.TerminalYellow
  *   - Checklists (- [ ], - [x])
  *   - Tables (pipe syntax)
  *   - Block quotes (> with ℹ/✓/⚠ callout detection)
- *   - Code blocks (``` fenced)
+ *   - Code blocks (``` fenced) with copy button
  *   - Inline code (`code`)
  *   - Bold (**text**), Italic (*text*), Strikethrough (~~text~~)
  *   - Links ([text](url))
  *   - Horizontal rules (---)
- *
- * Why native Compose instead of Markwon:
- *   - Single shared parse → no per-bubble Markwon instance (Phase 11 perf fix)
- *   - Full theming control with the app's color tokens
- *   - Tap targets are Compose-interactive (copy buttons, links)
- *   - No AndroidView bridge overhead
- *
- * The parser is intentionally lightweight — it handles the common markdown
- * subset the AI produces. Edge cases (nested lists deeper than 2, complex
- * HTML, LaTeX) fall back to plain-text rendering.
  */
 @Composable
 fun RichMarkdownText(
@@ -130,16 +118,13 @@ object MarkdownParser {
         while (i < lines.size) {
             val line = lines[i]
 
-            // ── Blank line ────────────────────────────────────────────────
             if (line.isBlank()) { i++; continue }
 
-            // ── Horizontal rule ───────────────────────────────────────────
             if (line.matches(Regex("""\s*([-*_])\1{2,}\s*"""))) {
                 blocks.add(MarkdownBlock.HorizontalRule)
                 i++; continue
             }
 
-            // ── Heading ───────────────────────────────────────────────────
             val headingMatch = Regex("""^(#{1,6})\s+(.+)""").find(line)
             if (headingMatch != null) {
                 val level = headingMatch.groupValues[1].length
@@ -148,7 +133,6 @@ object MarkdownParser {
                 i++; continue
             }
 
-            // ── Fenced code block ─────────────────────────────────────────
             if (line.trim().startsWith("```")) {
                 val lang = line.trim().removePrefix("```").trim()
                 val codeLines = mutableListOf<String>()
@@ -157,16 +141,15 @@ object MarkdownParser {
                     codeLines.add(lines[i])
                     i++
                 }
-                i++  // skip closing ```
+                i++
                 blocks.add(MarkdownBlock.CodeBlock(lang, codeLines.joinToString("\n")))
                 continue
             }
 
-            // ── Table (line contains | and next line is the separator) ────
             if (line.contains("|") && i + 1 < lines.size &&
                 Regex("""^\s*\|?[\s:|-]+\|?\s*$""").matches(lines[i + 1])) {
                 val headers = splitTableRow(line)
-                i += 2  // skip header + separator
+                i += 2
                 val rows = mutableListOf<List<String>>()
                 while (i < lines.size && lines[i].contains("|") && lines[i].isNotBlank()) {
                     rows.add(splitTableRow(lines[i]))
@@ -176,14 +159,12 @@ object MarkdownParser {
                 continue
             }
 
-            // ── Block quote / callout ─────────────────────────────────────
             if (line.trimStart().startsWith(">")) {
                 val quoteLines = mutableListOf<String>()
                 while (i < lines.size && lines[i].trimStart().startsWith(">")) {
                     quoteLines.add(lines[i].trimStart().removePrefix(">").trim())
                     i++
                 }
-                // Detect callout type from first line
                 val first = quoteLines.firstOrNull().orEmpty()
                 val callout = when {
                     first.startsWith("⚠", ignoreCase = true) ||
@@ -203,7 +184,6 @@ object MarkdownParser {
                 continue
             }
 
-            // ── Checklist (- [ ] or - [x]) ────────────────────────────────
             if (Regex("""^\s*[-*]\s+\[[ xX]\]\s+.+""").matches(line)) {
                 val items = mutableListOf<Pair<Boolean, String>>()
                 while (i < lines.size && Regex("""^\s*[-*]\s+\[[ xX]\]\s+.+""").matches(lines[i])) {
@@ -215,7 +195,6 @@ object MarkdownParser {
                 continue
             }
 
-            // ── Bullet list (- or *) ──────────────────────────────────────
             if (Regex("""^\s*[-*]\s+.+""").matches(line)) {
                 val items = mutableListOf<String>()
                 val indents = mutableListOf<Int>()
@@ -229,7 +208,6 @@ object MarkdownParser {
                 continue
             }
 
-            // ── Numbered list (1. 2. etc.) ────────────────────────────────
             if (Regex("""^\s*\d+\.\s+.+""").matches(line)) {
                 val items = mutableListOf<String>()
                 val numbers = mutableListOf<Int>()
@@ -243,7 +221,6 @@ object MarkdownParser {
                 continue
             }
 
-            // ── Paragraph (collect consecutive non-blank, non-special lines) ─
             val paraLines = mutableListOf<String>()
             while (i < lines.size && lines[i].isNotBlank() &&
                    !lines[i].trimStart().startsWith("#") &&
@@ -266,12 +243,8 @@ object MarkdownParser {
         line.trim().trim('|').split("|").map { it.trim() }
 }
 
-// ── Inline formatting (bold, italic, code, links) ─────────────────────────
+// ── Inline formatting ─────────────────────────────────────────────────────
 
-/**
- * Parses inline markdown (bold, italic, code, strikethrough, links) into an
- * AnnotatedString with appropriate SpanStyles applied.
- */
 fun parseInlineMarkdown(
     text: String,
     linkColor: Color = Accent,
@@ -280,7 +253,6 @@ fun parseInlineMarkdown(
 ): AnnotatedString = buildAnnotatedString {
     var i = 0
     while (i < text.length) {
-        // Bold + italic ***text***
         if (text.startsWith("***", i)) {
             val end = text.indexOf("***", i + 3)
             if (end > 0) {
@@ -291,7 +263,6 @@ fun parseInlineMarkdown(
                 continue
             }
         }
-        // Bold **text**
         if (text.startsWith("**", i)) {
             val end = text.indexOf("**", i + 2)
             if (end > 0) {
@@ -302,7 +273,6 @@ fun parseInlineMarkdown(
                 continue
             }
         }
-        // Strikethrough ~~text~~
         if (text.startsWith("~~", i)) {
             val end = text.indexOf("~~", i + 2)
             if (end > 0) {
@@ -313,7 +283,6 @@ fun parseInlineMarkdown(
                 continue
             }
         }
-        // Inline code `code`
         if (text[i] == '`') {
             val end = text.indexOf('`', i + 1)
             if (end > 0) {
@@ -328,7 +297,6 @@ fun parseInlineMarkdown(
                 continue
             }
         }
-        // Link [text](url)
         if (text[i] == '[') {
             val textEnd = text.indexOf(']', i + 1)
             if (textEnd > 0 && textEnd + 1 < text.length && text[textEnd + 1] == '(') {
@@ -346,7 +314,6 @@ fun parseInlineMarkdown(
                 }
             }
         }
-        // Italic *text* (must come after bold check so ** isn't misread)
         if (text[i] == '*') {
             val end = text.indexOf('*', i + 1)
             if (end > 0 && end > i + 1) {
@@ -357,7 +324,6 @@ fun parseInlineMarkdown(
                 continue
             }
         }
-        // Default: append the literal character and advance
         append(text[i])
         i++
     }
@@ -388,17 +354,8 @@ private fun HeadingBlock(block: MarkdownBlock.Heading) {
 @Composable
 private fun ParagraphBlock(block: MarkdownBlock.Paragraph, onLinkClick: ((String) -> Unit)?) {
     val annotated = parseInlineMarkdown(block.text)
-    ClickableTextWithLinks(annotated, onLinkClick)
-}
-
-@Composable
-private fun ClickableTextWithLinks(text: AnnotatedString, onLinkClick: ((String) -> Unit)?) {
-    // We use a simple Text with a clickable modifier; for link taps, the
-    // annotated string's URL annotations would normally need
-    // Text(..., onTextLayout = ...) + pointerInput. To keep this lean,
-    // we render the styled text and let the user long-press to copy.
     Text(
-        text = text,
+        text = annotated,
         color = TerminalWhite,
         fontSize = 15.sp,
         lineHeight = 22.sp,
@@ -450,7 +407,7 @@ private fun NumberedListBlock(block: MarkdownBlock.NumberedList, onLinkClick: ((
                     color = Accent,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.width(24.dp).padding(top = 0.dp)
+                    modifier = Modifier.width(24.dp)
                 )
                 Text(
                     text = parseInlineMarkdown(item),
@@ -510,7 +467,6 @@ private fun CodeBlockBlock(block: MarkdownBlock.CodeBlock) {
             .background(ChatBg.copy(alpha = 0.6f))
             .border(1.dp, SurfaceLight, RoundedCornerShape(8.dp))
     ) {
-        // Header bar with language + copy button
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -547,7 +503,6 @@ private fun CodeBlockBlock(block: MarkdownBlock.CodeBlock) {
                 )
             }
         }
-        // Code content
         Text(
             text = block.code,
             color = TerminalWhite,
@@ -596,7 +551,6 @@ private fun TableBlock(block: MarkdownBlock.Table) {
             .border(1.dp, SurfaceLight, RoundedCornerShape(8.dp))
             .horizontalScroll(scrollState)
     ) {
-        // Header row
         Row(
             modifier = Modifier
                 .background(Accent.copy(alpha = 0.15f))
@@ -614,7 +568,6 @@ private fun TableBlock(block: MarkdownBlock.Table) {
                 )
             }
         }
-        // Data rows
         block.rows.forEach { row ->
             Row(
                 modifier = Modifier
@@ -637,13 +590,21 @@ private fun TableBlock(block: MarkdownBlock.Table) {
 
 @Composable
 private fun CalloutBlock(block: MarkdownBlock.Callout, onLinkClick: ((String) -> Unit)?) {
-    val (bgColor, borderColor, icon, labelColor) = when (block.type) {
+    // COMPILE FIX: explicitly type the Quad so Kotlin can resolve the Color
+    // overloads for background() and border(). Without this annotation the
+    // compiler sees Quad<out Color, out Color, out String, out Color> and
+    // cannot pick between background(Brush) and background(Color).
+    val quad: Quad<Color, Color, String, Color> = when (block.type) {
         CalloutType.INFO    -> Quad(SurfaceLight.copy(alpha = 0.2f), Accent, "ℹ", Accent)
         CalloutType.SUCCESS -> Quad(Success.copy(alpha = 0.15f), Success, "✓", Success)
         CalloutType.WARNING -> Quad(TerminalYellow.copy(alpha = 0.15f), TerminalYellow, "⚠", TerminalYellow)
         CalloutType.DANGER  -> Quad(Danger.copy(alpha = 0.15f), Danger, "🔴", Danger)
         CalloutType.QUOTE   -> Quad(SurfaceLight.copy(alpha = 0.1f), TerminalWhite.copy(alpha = 0.3f), "›", TerminalWhite.copy(alpha = 0.7f))
     }
+    val bgColor: Color = quad.a
+    val borderColor: Color = quad.b
+    val icon: String = quad.c
+    val labelColor: Color = quad.d
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -662,8 +623,12 @@ private fun CalloutBlock(block: MarkdownBlock.Callout, onLinkClick: ((String) ->
         )
         Column(modifier = Modifier.fillMaxWidth()) {
             block.text.split("\n").forEach { line ->
+                // COMPILE FIX: explicitly type as AnnotatedString so Kotlin
+                // picks the Text(AnnotatedString, ...) overload instead of
+                // being ambiguous between Text(String) and Text(AnnotatedString).
+                val annotated: AnnotatedString = parseInlineMarkdown(line)
                 Text(
-                    text = parseInlineMarkdown(line),
+                    text = annotated,
                     color = TerminalWhite,
                     fontSize = 14.sp,
                     lineHeight = 20.sp,
@@ -685,10 +650,7 @@ private fun HorizontalRuleBlock() {
     )
 }
 
-// Helper for destructuring 4 values (Kotlin doesn't have Quad in stdlib)
-private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D) {
-    operator fun component1() = a
-    operator fun component2() = b
-    operator fun component3() = c
-    operator fun component4() = d
-}
+// Helper for destructuring 4 values (Kotlin doesn't have Quad in stdlib).
+// COMPILE FIX: data class auto-generates componentN() operators — do NOT add
+// manual operator fun component1() etc. (causes "Conflicting overloads").
+private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
