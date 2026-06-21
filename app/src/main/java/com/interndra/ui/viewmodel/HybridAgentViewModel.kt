@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.util.Log
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -46,7 +47,11 @@ private val WORKSPACE_ID_PREF     = stringPreferencesKey("active_workspace_id")
 // Phase 2 FIX: remember the user's previous mode so deactivateEmergencyLock()
 // can restore it instead of stranding them on LOCAL_ONLY.
 private val PRE_LOCK_MODE_PREF    = stringPreferencesKey("pre_lock_privacy_mode")
-private val EMERGENCY_LOCK_PREF   = stringPreferencesKey("emergency_lock_active")
+// COMPILE FIX: must be booleanPreferencesKey, not stringPreferencesKey —
+// we store Boolean values (true/false) in this key. With stringPreferencesKey
+// the line `prefs[EMERGENCY_LOCK_PREF] = true` fails to compile with
+// "The boolean literal does not conform to the expected type String".
+private val EMERGENCY_LOCK_PREF   = booleanPreferencesKey("emergency_lock_active")
 
 data class HybridUiState(
     val isLoading: Boolean                  = false,
@@ -197,7 +202,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             }
         }
 
-        // Rebuild knowledge graph when vault entries change
         viewModelScope.launch {
             knowledgeEntries.collect { entries ->
                 if (entries.isNotEmpty()) {
@@ -208,13 +212,11 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             }
         }
 
-        // Register active automation triggers from DB on startup
         viewModelScope.launch {
             val activeTriggers = db.dao().getActiveTriggerRules()
             automationEngine.updateRuleList(activeTriggers)
         }
 
-        // Register built-in plugins
         pluginManager.registerBuiltInPlugins()
     }
 
@@ -251,8 +253,8 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         _uiState.update { it.copy(emergencyLockActive = true, privacyMode = PrivacyMode.LOCAL_ONLY) }
         viewModelScope.launch {
             app.dataStore.edit { prefs ->
-                prefs[PRE_LOCK_MODE_PREF] = previousMode.name
-                prefs[PRIVACY_MODE_PREF]  = PrivacyMode.LOCAL_ONLY.name
+                prefs[PRE_LOCK_MODE_PREF]  = previousMode.name
+                prefs[PRIVACY_MODE_PREF]   = PrivacyMode.LOCAL_ONLY.name
                 prefs[EMERGENCY_LOCK_PREF] = true
             }
         }
@@ -326,10 +328,12 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                                 WorkflowEngine.NarrationLevel.PARTIAL          -> "⚠️ Partial"
                             }
                             narrationLines.add("$prefix: $msg")
-                            repo.log(session, LogType.INFO, "$prefix: $msg")
+                            // COMPILE FIX: repo.log() is a suspend function —
+                            // wrap in viewModelScope.launch so it can be called
+                            // from this non-suspend narration lambda.
+                            viewModelScope.launch { repo.log(session, LogType.INFO, "$prefix: $msg") }
                         }
 
-                        // Build a rich markdown summary for the chat bubble
                         val sb = StringBuilder()
                         sb.appendLine("## ⚙️ Workflow: ${workflow.name}")
                         sb.appendLine()
@@ -345,7 +349,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                             sb.appendLine("> ⚠️ **Workflow finished with ${result.failedSteps} failed step(s)** " +
                                           "out of ${result.stepResults.size}.")
                         }
-                        // Include any command output from successful steps
                         val outputs = result.stepResults.filter { it.success && it.output.isNotBlank() && it.output != "(no output)" }
                         if (outputs.isNotEmpty()) {
                             sb.appendLine()
@@ -377,12 +380,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                     }
                 }
             } catch (e: Exception) {
-                // Workflow planner is best-effort — if it throws, fall through
-                // to the AI orchestrator instead of failing the whole request.
                 Log.w(TAG, "Workflow planner failed, falling back to AI: ${e.message}")
                 repo.log(session, LogType.INFO, "⚠️ Workflow planner unavailable, using AI")
             }
-            // ── End workflow planner — fall through to AI orchestrator ──────
 
             try {
                 val cloudEngine  = CloudAiEngine(key, selectedModel.value)
@@ -399,6 +399,11 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 }
 
                 // ── Web search ────────────────────────────────────────────
+                // Phase 2 FIX: wrapped in withContext(Dispatchers.IO) — OkHttp's
+                // synchronous execute() would otherwise block the main thread
+                // (viewModelScope.launch defaults to Dispatchers.Main).
+                // Phase 4: also fetch + extract page content for top results so
+                // the AI can summarize the actual article, not just the snippet.
                 var webSources: List<WebSearchEngine.SearchResult> = emptyList()
                 if (!_uiState.value.emergencyLockActive && webSearch.shouldSearch(trimmed)) {
                     repo.log(session, LogType.INFO, "🔍 Web search for context...")
@@ -455,16 +460,10 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                     lastModelUsed = engResult.modelUsed
                 )}
 
-                // ── Safety ────────────────────────────────────────────────
-                // Search both the literal message AND the AI's chosen action name —
-                // fixes follow-ups like "yes do it" / "give me answer" where the
-                // actual keyword (e.g. "storage") was only in an earlier message,
-                // but the AI still picked an action like "get_storage_full_gb".
                 val fallbackSearchText = "$trimmed ${intent.action.replace('_', ' ')}"
                 val commands = intent.commands.ifEmpty {
                     CommandRegistry.findAllMatches(fallbackSearchText)
                 }
-                // Did the registry fallback supply commands the AI itself didn't provide?
                 val usingFallbackCommands = intent.commands.isEmpty() && commands.isNotEmpty()
                 val safetyReports = safety.validateAll(commands)
 
@@ -554,7 +553,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         val engine = HybridExecutionEngine(app, repo, shell, safety)
         var allSuccess = true
 
-        // Collect all command outputs to append to the chat bubble
         val chatOutputLines = mutableListOf<String>()
 
         engine.execute(session, userInput, intent.copy(commands = commands)) { result ->
@@ -566,8 +564,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 val outputSnippet = result.output.trim().take(600).ifBlank { "Done" }
                 chatOutputLines.add("**$label**\n```\n$outputSnippet\n```")
             } else {
-                // Plain conversational line instead of a raw error box —
-                // includes a short human explanation for common cases.
                 val rawError = result.error.trim().take(200)
                 val friendly = friendlyError(rawError)
                 chatOutputLines.add("**$label** — $friendly")
@@ -586,7 +582,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             }
         }
 
-        // Append all results to the chat bubble via chatMessageId
+        // Phase 11 FIX: removed the artificial `delay(200)` — engine.execute
+        // runs its callback synchronously inside its forEachIndexed loop, so
+        // all results are already collected by the time we reach this point.
         if (chatMessageId != null && chatOutputLines.isNotEmpty()) {
             val allOutput = chatOutputLines.joinToString("\n\n")
             val existing  = repo.getMessageText(chatMessageId) ?: ""
@@ -673,11 +671,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         timelineEngine.recordKnowledgeAdd(title, KnowledgeType.WEB_CLIP.label, id)
     }
 
-    /**
-     * "Train Memory" — fetches fresh trending/news info into the Knowledge
-     * Vault and compresses old auto-trained entries into a compact digest.
-     * Pinned entries and anything the user created manually are untouched.
-     */
     fun trainMemory() {
         if (_uiState.value.isTraining) return
         viewModelScope.launch {
@@ -700,7 +693,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
 
     fun runRagSearch(query: String, onDone: (() -> Unit)? = null) = viewModelScope.launch {
         val chunks = ragEngine.retrieve(query)
-        // Convert chunk results back to matching knowledge entries
         val entryIds = chunks.map { it.entryId }.toSet()
         _ragResults.value = knowledgeEntries.value.filter { it.id in entryIds }
         onDone?.invoke()
@@ -809,16 +801,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
     }
 
-    /**
-     * Builds a visible "Sources" block with real titles + URLs from web search.
-     * Previously, search results were only fed into the AI's hidden prompt context —
-     * the AI's bracket citations like [9] pointed to nothing the user could see.
-     * Now the actual links are appended directly to the chat message.
-     */
-    /**
-     * Maps common shell/Android error patterns to a short, plain-language
-     * explanation instead of dumping raw Linux error text on the user.
-     */
     private fun friendlyError(raw: String): String {
         val lower = raw.lowercase()
         return when {
@@ -857,29 +839,24 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     ): String {
         val sb = StringBuilder()
 
-        // Main reply content
         if (!intent.reply.isNullOrBlank()) {
             sb.append(intent.reply)
         }
 
-        // Steps only for destructive/manual actions (not suppressed)
         if (intent.steps.isNotEmpty() && !suppressSteps) {
             if (sb.isNotEmpty()) sb.append("\n\n")
             sb.append("**Steps:**\n")
             intent.steps.forEachIndexed { i, step -> sb.append("${i + 1}. $step\n") }
         }
 
-        // If we have commands to execute, show "Checking..." while results load
         if (sb.isEmpty() && suppressSteps) {
             sb.append("🔍 Checking...")
         }
 
-        // Fallback for truly empty (parse failed, model returned nothing)
         if (sb.isEmpty()) {
             sb.append("*Processing...*")
         }
 
-        // Small footer showing engine/latency (not the whole reply)
         sb.append("\n\n*$explanation*")
         return sb.toString().trim()
     }
