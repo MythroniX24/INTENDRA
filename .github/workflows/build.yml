@@ -25,14 +25,12 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: |
-            tools
-            platform-tools
-            build-tools;35.0.0
-            platforms;android-35
+          accept-license: true
 
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses || true
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platform-tools" "build-tools;35.0.0" "platforms;android-35"
         shell: bash
 
       - name: Cache Gradle dependencies
