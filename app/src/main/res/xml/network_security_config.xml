@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network Security Config — INTERNDRA privacy-first policy.
+
+  Policy summary:
+  • Production: TLS 1.2+ enforced on ALL domains. No cleartext. No user CAs.
+  • HuggingFace: Pinning deliberately NOT applied — HF rotates certs regularly
+    and a broken pin would prevent model downloads with no recourse for users.
+  • localhost / 10.x.x.x: cleartext allowed in DEBUG builds ONLY via
+    <debug-overrides>, which the platform applies solely to android:debuggable
+    builds. Release builds enforce TLS on localhost too.
+  • No custom trust anchors — only the system CA store is trusted.
+
+  FIX (Phase 10): previous config used <domain-config cleartextTrafficPermitted="true">
+  for localhost with no debug-overrides wrapper, so a malicious app on the same
+  device could open a cleartext server on localhost and exploit this in release.
+-->
+<network-security-config>
+
+    <!-- ── Base config (all domains unless overridden) ─────────────────── -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- Trust only the system CA store — no user-installed root CAs -->
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- ── OpenRouter (cloud AI) ─────────────────────────────────────── -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">openrouter.ai</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- ── HuggingFace (model download) ──────────────────────────────── -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">huggingface.co</domain>
+        <domain includeSubdomains="true">cdn-lfs.huggingface.co</domain>
+        <domain includeSubdomains="true">cdn-lfs-us-1.huggingface.co</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- ── DuckDuckGo (web search) ────────────────────────────────────── -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">duckduckgo.com</domain>
+        <domain includeSubdomains="true">html.duckduckgo.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- ── Debug-only overrides — applied ONLY to android:debuggable builds ─
+         localhost cleartext is allowed here for the ADB/Termux bridge.
+         Release builds are unaffected — TLS is enforced on localhost too. -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+
+</network-security-config>

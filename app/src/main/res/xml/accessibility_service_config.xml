@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Accessibility Service configuration for INTERNDRA.
+
+  event types: WINDOW_STATE_CHANGED + NOTIFICATION_STATE_CHANGED only.
+  No TYPE_VIEW_TEXT_CHANGED, TYPE_VIEW_CLICKED, or TYPE_WINDOWS_CHANGED —
+  limiting what events are delivered reduces privacy surface and battery use.
+
+  flags: FLAG_REPORT_VIEW_IDS lets the engine match views by resource ID
+  without reading their text content.
+
+  canRetrieveWindowContent: false — deliberately NOT enabled.
+  The service does NOT need to read text from other apps' windows.
+  Set to true only if UI-scraping features are added in a future version.
+-->
+<accessibility-service
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/accessibility_service_description"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeNotificationStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds"
+    android:canRetrieveWindowContent="false"
+    android:notificationTimeout="100"
+    android:settingsActivity=".MainActivity" />

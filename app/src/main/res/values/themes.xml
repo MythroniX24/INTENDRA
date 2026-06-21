@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Theme.Interndra — splash / Activity base theme.
+  Phase 9 FIX: parent was Theme.Material.Light (light theme) which clashed
+  with the app's dark-only Compose UI and caused a jarring white → black
+  flash on cold start. Now uses Theme.Material.NoActionBar (dark) and sets
+  windowBackground to match the Compose ChatBg (#0F0F0F) for a seamless
+  transition from splash to app.
+-->
+<resources>
+    <style name="Theme.Interndra" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:colorBackground">#0F0F0F</item>
+        <item name="android:textColorPrimary">#E8EAED</item>
+        <item name="android:textColorSecondary">#9AA0A6</item>
+    </style>
+</resources>

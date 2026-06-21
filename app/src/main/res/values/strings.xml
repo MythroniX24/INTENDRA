@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ── App identity ─────────────────────────────────────────────── -->
+    <string name="app_name">INTERNDRA</string>
+    <string name="app_tagline">Private AI Operating System</string>
+    <string name="app_version">v2.1.0</string>
+
+    <!-- ── Accessibility service ────────────────────────────────────── -->
+    <string name="accessibility_service_label">INTERNDRA AI Agent</string>
+    <string name="accessibility_service_description">
+        Enables INTERNDRA to perform UI automation tasks on your behalf —
+        such as tapping buttons, filling forms, and navigating apps —
+        only when you explicitly issue a command.\n\n
+        INTERNDRA does not read, record, or transmit the content of
+        other apps\' screens or text fields.
+    </string>
+    <string name="accessibility_service_summary">
+        AI-driven UI automation for INTERNDRA commands
+    </string>
+
+    <!-- ── Notification listener ─────────────────────────────────────── -->
+    <string name="notification_listener_label">INTERNDRA Automation Triggers</string>
+    <string name="notification_listener_description">
+        Monitors incoming notifications to trigger automations you have
+        set up (e.g., "when I get a WhatsApp message, reply with X").\n\n
+        INTERNDRA logs only the app name and notification title —
+        never the notification body or message content.
+    </string>
+
+    <!-- ── Privacy mode labels ───────────────────────────────────────── -->
+    <string name="privacy_mode_local">🔒 Local Only</string>
+    <string name="privacy_mode_hybrid">⚡ Hybrid</string>
+    <string name="privacy_mode_cloud">☁️ Cloud Enhanced</string>
+    <string name="privacy_mode_local_desc">All processing stays on-device. Zero cloud calls.</string>
+    <string name="privacy_mode_hybrid_desc">Local AI first. Asks your permission before using cloud.</string>
+    <string name="privacy_mode_cloud_desc">Always uses cloud AI. Requires OpenRouter API key.</string>
+
+    <!-- ── Emergency lock ─────────────────────────────────────────────── -->
+    <string name="emergency_lock_label">Emergency Privacy Lock</string>
+    <string name="emergency_lock_active">🔒 LOCKED — Local Only</string>
+    <string name="emergency_lock_activate">Activate Emergency Lock</string>
+    <string name="emergency_lock_deactivate">Deactivate Lock</string>
+    <string name="emergency_lock_description">
+        Instantly disables all cloud AI, web search, and outgoing network
+        requests. All processing reverts to on-device only.
+    </string>
+
+    <!-- ── Chat UI ────────────────────────────────────────────────────── -->
+    <string name="chat_hint">Ask anything…</string>
+    <string name="chat_disclaimer">INTERNDRA AI can make mistakes. Verify critical output.</string>
+    <string name="chat_empty_title">INTERNDRA</string>
+    <string name="chat_empty_subtitle">Private AI Operating System</string>
+
+    <!-- ── Terminal ───────────────────────────────────────────────────── -->
+    <string name="terminal_title">Terminal Logs</string>
+    <string name="terminal_empty">No logs yet. Send a command to see activity.</string>
+    <string name="terminal_clear">Clear Logs</string>
+
+    <!-- ── Memory dashboard ───────────────────────────────────────────── -->
+    <string name="memory_title">Memory Dashboard</string>
+    <string name="memory_search_hint">Search memories…</string>
+    <string name="memory_empty">No memories yet.\nSuccessful commands are remembered automatically.</string>
+    <string name="memory_pinned_empty">No pinned memories yet.</string>
+    <string name="memory_clear_all">Clear All Memory</string>
+    <string name="memory_importance">Importance</string>
+    <string name="memory_pin">Pin</string>
+    <string name="memory_unpin">Unpin</string>
+    <string name="memory_archive">Archive</string>
+    <string name="memory_delete">Delete</string>
+
+    <!-- ── Security dashboard ─────────────────────────────────────────── -->
+    <string name="security_title">Security &amp; Privacy</string>
+    <string name="security_privacy_state">Current Privacy State</string>
+    <string name="security_audit">Privacy Audit</string>
+    <string name="security_network">Network Transparency</string>
+    <string name="security_network_empty">No outgoing requests recorded.</string>
+    <string name="security_network_clear">Clear</string>
+
+    <!-- ── Workspaces ─────────────────────────────────────────────────── -->
+    <string name="workspaces_title">Workspaces</string>
+    <string name="workspace_new">New Workspace</string>
+    <string name="workspace_create">Create</string>
+    <string name="workspace_rename">Rename</string>
+    <string name="workspace_delete">Delete</string>
+    <string name="workspace_pin">Pin</string>
+    <string name="workspace_unpin">Unpin</string>
+    <string name="workspace_empty">No workspaces yet.\nCreate one to separate your contexts.</string>
+    <string name="workspace_name_hint">Name</string>
+    <string name="workspace_general">General</string>
+    <string name="workspace_active">Active</string>
+
+    <!-- ── Settings ───────────────────────────────────────────────────── -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_privacy_mode">Privacy Mode</string>
+    <string name="settings_cloud_model">Cloud AI Model</string>
+    <string name="settings_api_key">OpenRouter API Key</string>
+    <string name="settings_api_key_hint">API Key</string>
+    <string name="settings_api_key_desc">
+        Required for Cloud and Hybrid mode. Stored locally in encrypted DataStore.
+        Never sent anywhere except OpenRouter when you issue a command.
+    </string>
+    <string name="settings_api_key_save">Save Key</string>
+    <string name="settings_api_key_saved">API key saved</string>
+    <string name="settings_local_model">Local AI Model</string>
+    <string name="settings_local_download">Download Model (~1.9 GB)</string>
+    <string name="settings_local_download_small">Download Small Model (~400 MB)</string>
+    <string name="settings_local_delete">Delete Local Model</string>
+    <string name="settings_local_ready">✅ Model downloaded and ready</string>
+    <string name="settings_local_missing">No local model found.</string>
+    <string name="settings_system">System</string>
+    <string name="settings_open_accessibility">Open Accessibility Settings</string>
+    <string name="settings_export_logs">Export Logs to File</string>
+    <string name="settings_clear_memory">Clear Memory &amp; Context</string>
+    <string name="settings_clear_all">Clear All Messages &amp; Logs</string>
+    <string name="settings_about">About INTERNDRA</string>
+    <string name="settings_version">Version 2.1.0 — Privacy-First AI OS</string>
+    <string name="settings_model_info">Local model: Qwen2.5-3B-Instruct Q4_K_M via llama.cpp</string>
+    <string name="settings_cloud_info">Cloud: OpenRouter (only when you allow it)</string>
+
+    <!-- ── Model download ─────────────────────────────────────────────── -->
+    <string name="download_cancel">Cancel Download</string>
+    <string name="download_channel_name">Model Download</string>
+    <string name="download_channel_desc">Notifications for INTERNDRA model download progress</string>
+    <string name="download_notification_title">Downloading AI Model</string>
+    <string name="download_notification_text">Qwen2.5-3B-Instruct Q4_K_M</string>
+
+    <!-- ── Cloud consent ──────────────────────────────────────────────── -->
+    <string name="cloud_consent_title">Cloud AI Request</string>
+    <string name="cloud_consent_allow">Allow Once</string>
+    <string name="cloud_consent_deny">Stay Local</string>
+
+    <!-- ── Safety ────────────────────────────────────────────────────────── -->
+    <string name="safety_blocked_prefix">⛔ Command blocked by Safety Engine</string>
+    <string name="confirmation_title">Action Required</string>
+    <string name="confirmation_accept">Confirm</string>
+    <string name="confirmation_cancel">Cancel</string>
+
+    <!-- ── Common actions ─────────────────────────────────────────────── -->
+    <string name="action_send">Send</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_close">Close</string>
+    <string name="action_menu">Menu</string>
+    <string name="action_back">Back</string>
+    <string name="action_attach">Attach file</string>
+    <string name="action_voice">Voice input</string>
+    <string name="action_scroll_bottom">Scroll to bottom</string>
+    <string name="action_confirm">Confirm</string>
+    <string name="action_dismiss">Dismiss</string>
+    <string name="action_ok">OK</string>
+    <string name="action_done">Done</string>
+
+    <!-- ── Errors ─────────────────────────────────────────────────────── -->
+    <string name="error_api_key_required">Cloud mode requires an OpenRouter API key — set it in Settings.</string>
+    <string name="error_emergency_lock">Emergency lock is active. Deactivate to change settings.</string>
+    <string name="error_accessibility_not_available">Accessibility Settings not available on this device.</string>
+    <string name="error_voice_not_supported">Voice input is not supported on this device.</string>
+    <string name="error_export_failed">Export failed: %1$s</string>
+    <string name="error_generic">Something went wrong: %1$s</string>
+
+    <!-- ── Status ─────────────────────────────────────────────────────── -->
+    <string name="status_local_ready">On-device AI ready</string>
+    <string name="status_local_missing">Local AI not loaded</string>
+    <string name="status_processing">Processing…</string>
+    <string name="status_routing_local">🔒 Routing to local AI</string>
+    <string name="status_routing_cloud">☁️ Routing to cloud AI</string>
+    <string name="status_routing_fallback">⚡ Cloud fallback</string>
+    <string name="status_blocked">BLOCKED</string>
+    <string name="status_active">Active</string>
+    <string name="status_inactive">Inactive</string>
+</resources>

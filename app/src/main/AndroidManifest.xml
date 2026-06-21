@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  INTERNDRA – Privacy-First AI OS
+  AndroidManifest.xml  v2.2.0
+
+  PERMISSION AUDIT (privacy-first):
+  ✅  INTERNET                    — Cloud AI + web search (only when user allows)
+  ✅  ACCESS_NETWORK_STATE        — Connectivity check before any outgoing call
+  ✅  CALL_PHONE                  — User-initiated phone calls via AI command
+  ✅  READ_CONTACTS               — Contact lookup for call/SMS commands
+  ✅  SEND_SMS                    — User-initiated SMS via AI command
+  ✅  RECORD_AUDIO                — Voice input (on-device speech-to-text)
+  ✅  BIND_ACCESSIBILITY_SERVICE  — UI automation feature (opt-in by user)
+  ✅  BIND_NOTIFICATION_LISTENER  — Trigger-on-notification automation (opt-in)
+  ✅  READ_EXTERNAL_STORAGE       — Load GGUF model from /sdcard (API ≤ 32 only)
+  ✅  READ_MEDIA_IMAGES           — Android 13+ image access for file workflows
+  ✅  WRITE_EXTERNAL_STORAGE      — Write screenshots (API ≤ 28 only)
+  ✅  POST_NOTIFICATIONS          — WorkManager progress notifications (API 33+)
+  ✅  FOREGROUND_SERVICE          — Long-running model download notification
+  ✅  WAKE_LOCK                   — Prevent sleep during model download / execution
+  ✅  VIBRATE                     — Haptic feedback on command execution
+
+  ❌  READ_PHONE_STATE            — Not requested. Not needed.
+  ❌  ACCESS_FINE_LOCATION        — Not requested. No location features.
+  ❌  CAMERA                      — Not requested. No camera features.
+  ❌  READ_CALL_LOG               — Not requested. Not needed.
+  ❌  MANAGE_EXTERNAL_STORAGE     — Not requested. Uses app-private storage instead.
+  ❌  PROCESS_OUTGOING_CALLS      — Not requested. Not needed.
+  ❌  RECEIVE_SMS                 — Not requested. Not needed.
+  ❌  READ_SMS                    — Not requested. Not needed.
+  ❌  READ_MEDIA_VIDEO/AUDIO      — Removed (Phase 12): no code path reads video/audio.
+  ❌  FOREGROUND_SERVICE_DATA_SYNC — Removed (Phase 12): no service uses foregroundServiceType=dataSync.
+  ❌  com.termux.permission.RUN_COMMAND — Removed (Phase 12): Termux bridge not wired up.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- ── Network ───────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- ── Phone & messaging (user-initiated commands only) ─────────────── -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+
+    <!-- ── Voice input ───────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- ── Background / scheduling ──────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- ── Notifications (required for WorkManager on API 33+) ──────────── -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- ── Storage (model file + screenshots) ───────────────────────────── -->
+    <!-- Android ≤ 12 (API 32) -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- Android ≤ 9 (API 28) — write for screencap output -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <!-- Android 13+ (API 33) granular media permissions -->
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_IMAGES"
+        tools:targetApi="33" />
+
+    <!-- ── Privileged services (user must enable in Android Settings) ────── -->
+    <uses-permission
+        android:name="android.permission.BIND_ACCESSIBILITY_SERVICE"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission
+        android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- ── Hardware feature declarations ─────────────────────────────────── -->
+    <!-- telephony is optional — app works without a SIM -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <!-- microphone is optional — voice input degrades gracefully -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
+    <!-- ── Application ───────────────────────────────────────────────────── -->
+    <application
+        android:name=".InterndraApplication"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:hardwareAccelerated="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:largeHeap="true"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Interndra"
+        tools:targetApi="33">
+
+        <!-- ── Main Activity ──────────────────────────────────────────── -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|locale|layoutDirection|fontScale|density|uiMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- ── Notification Listener Service ─────────────────────────── -->
+        <!--
+          Listens for notifications to trigger automation rules.
+          PRIVACY: never logs notification content (body/text) — only app
+          package name and title. See InterndraNotificationListener.kt.
+        -->
+        <service
+            android:name=".services.InterndraNotificationListener"
+            android:label="@string/notification_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- ── Accessibility Service ──────────────────────────────────── -->
+        <!--
+          Provides UI automation (tap, scroll, fill forms).
+          Must be enabled by user in: Settings → Accessibility → INTERNDRA.
+          PRIVACY: does not read on-screen text for logging.
+        -->
+        <service
+            android:name=".service.AgentAccessibilityService"
+            android:label="@string/accessibility_service_label"
+            android:description="@string/accessibility_service_description"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- ── WorkManager initializer (auto-init is fine; explicit listed for clarity) -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup" />
+        </provider>
+
+        <!-- ── FileProvider for sharing exported log files ────────────── -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_provider_paths" />
+        </provider>
+
+    </application>
+</manifest>

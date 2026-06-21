@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Data Extraction Rules (Android 12+ / API 31+)
+  Controls what the system can extract for cloud backup.
+
+  Policy: EXCLUDE everything — INTERNDRA is a local-first private OS.
+  User data (chat history, memory, workspaces) stays on-device only.
+  The user can manually export logs via Settings → Export Logs.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>
