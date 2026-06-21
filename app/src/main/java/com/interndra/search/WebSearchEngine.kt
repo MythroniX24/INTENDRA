@@ -6,57 +6,38 @@ import com.interndra.data.model.WebSearchCache
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.Jsoup
-import org.jsoup.nodes.Document
-import org.jsoup.safety.Safelist
 import java.util.concurrent.TimeUnit
 
 /**
  * WebSearchEngine — Phase 4 pipeline.
  *
- * Pipeline:
- *   user query
- *     → check cache (DAO) — return immediately if fresh
- *     → search DuckDuckGo HTML
- *     → fetch top N result pages (Jsoup)
- *     → extract main content (article body, strip nav/ads/footer noise)
- *     → truncate to a bounded digest
- *     → write through to cache
- *     → return results + digest for the AI to summarize
+ * Pipeline: user query → check cache → search DuckDuckGo HTML → fetch top N
+ * result pages → extract main content → truncate to a bounded digest → write
+ * through to cache → return results + digest for the AI to summarize.
  *
  * FIXES:
- *  1. NO UNICODE STRIPPING: previously the query was passed through
- *     `replace(Regex("[^\u0000-\u007F]"), "")` which silently destroyed
- *     Hindi / non-ASCII characters. Now the query is sent as-is (URL-encoded).
- *  2. CACHING: results + page digests are cached in Room for 30 minutes so
- *     repeated searches don't re-hit DuckDuckGo (rate-limit / IP-ban protection).
- *  3. PAGE FETCH + EXTRACT: `fetchAndExtract()` pulls the top N pages and
- *     extracts main-article text via Jsoup + content heuristics.
- *  4. NO TRUNCATED URLS: `buildContext()` no longer cuts URLs at 100 chars
- *     (which broke query strings). Full URL preserved.
- *  5. SOURCE ATTRIBUTION: each page digest is prefixed with its source URL
- *     so the AI can cite `[1]`, `[2]`, etc. and the chat renderer can map
- *     those citations back to real links.
+ *  1. NO UNICODE STRIPPING — Hindi/Unicode queries no longer lose chars.
+ *  2. CACHING — results + page digests cached in Room for 30 minutes.
+ *  3. PAGE FETCH + EXTRACT — fetchAndExtract() pulls top N pages and extracts
+ *     main-article text via Jsoup + content heuristics.
+ *  4. NO TRUNCATED URLS — full URL preserved in buildContext().
+ *  5. SOURCE ATTRIBUTION — each page digest is prefixed with its source URL.
+ *
+ * COMPILE FIX: readCache() and writeCache() wrap the suspend DAO calls in
+ * kotlinx.coroutines.runBlocking { } so they can be invoked from the
+ * non-suspend search() function. This is safe because search() is always
+ * called from withContext(Dispatchers.IO) in the ViewModel.
  */
 class WebSearchEngine(private val dao: AgentDao) {
 
     companion object {
         private const val TAG = "WebSearch"
         private const val BASE_URL = "https://html.duckduckgo.com/html/?q="
-
-        // Max chars per source's snippet in the AI context block.
         private const val MAX_SNIPPET_CHARS = 250
-
-        // Max chars of extracted page content per source.
         private const val MAX_PAGE_CHARS = 2_500
-
-        // Max chars of the total page digest returned to the AI.
         private const val MAX_TOTAL_DIGEST = 6_000
-
-        // Cache TTL — 30 minutes. Repeated searches within this window hit the cache.
         private const val CACHE_TTL_MS = 30L * 60 * 1000
 
-        // Domains we skip when fetching page content (heavy JS, paywalls, or
-        // sites that block scrapers). Snippets are still used.
         private val SKIP_FETCH_DOMAINS = setOf(
             "youtube.com", "youtu.be", "facebook.com", "instagram.com",
             "twitter.com", "x.com", "tiktok.com", "reddit.com",
@@ -82,7 +63,6 @@ class WebSearchEngine(private val dao: AgentDao) {
         val url: String
     )
 
-    /** A fetched page's extracted main content, attributed to its source. */
     data class PageContent(
         val url: String,
         val title: String,
@@ -92,40 +72,28 @@ class WebSearchEngine(private val dao: AgentDao) {
 
     fun shouldSearch(input: String): Boolean {
         val lo = input.lowercase()
-        // Explicit triggers
         if (lo.contains("search") || lo.contains("websearch") || lo.contains("web search") ||
             lo.contains("find info") || lo.contains("look up")) return true
-        // Current / live info triggers
         if (lo.contains("latest") || lo.contains("recent") || lo.contains("today") ||
             lo.contains("news") || lo.contains("current") || lo.contains("price of") ||
             lo.contains("weather") || lo.contains("stock")) return true
-        // Question triggers about real-world entities
         if (lo.contains("who is") || lo.contains("what is") || lo.contains("where is") ||
             lo.contains("how to") || lo.contains("tell me about")) return true
-        // Named-entity patterns (celebrity/company searches like "elon musk network")
         val namedEntityPattern = Regex("""(about|on|regarding)\s+[A-Z][a-z]""")
         if (namedEntityPattern.containsMatchIn(input)) return true
         return false
     }
 
-    /**
-     * Search DuckDuckGo, returning a list of results with title, snippet, real URL.
-     * Uses the in-DB cache if a fresh entry exists for the query.
-     */
     fun search(query: String, maxResults: Int = 5): List<SearchResult> {
         val sanitized = query.trim().take(200)
         if (sanitized.isBlank()) return emptyList()
 
-        // ── Cache check ────────────────────────────────────────────────────
         val cached = readCache(sanitized)
         if (cached != null) {
             Log.d(TAG, "Cache hit for query: ${sanitized.take(40)}")
             return cached
         }
 
-        // ── Network search ─────────────────────────────────────────────────
-        // Phase 4 FIX: do NOT strip non-ASCII — Hindi/Unicode queries were
-        // silently losing characters. URL-encoding preserves them safely.
         val url = BASE_URL + java.net.URLEncoder.encode(sanitized, "UTF-8")
 
         val request = Request.Builder()
@@ -152,12 +120,6 @@ class WebSearchEngine(private val dao: AgentDao) {
         return results
     }
 
-    /**
-     * Phase 4: Fetch the top N result pages and extract main-article text
-     * from each. Returns a single concatenated digest string suitable for
-     * injecting into the AI prompt, with per-source attribution markers
-     * the AI can cite.
-     */
     fun fetchAndExtract(results: List<SearchResult>, maxPages: Int = 2): String {
         if (results.isEmpty()) return ""
 
@@ -219,21 +181,9 @@ class WebSearchEngine(private val dao: AgentDao) {
         }
     }
 
-    /**
-     * Extracts the main article text from an HTML page.
-     *
-     * Heuristics (Readability-inspired, no extra dependency):
-     *  1. Parse with Jsoup.
-     *  2. Remove obviously-non-content tags: script, style, nav, header,
-     *     footer, aside, form, iframe, noscript, ad/nav class names.
-     *  3. Prefer <article>, <main>, [role=main] if present.
-     *  4. Otherwise score <p> blocks by text length and pick the densest cluster.
-     *  5. Collapse whitespace, decode entities, return clean text.
-     */
     private fun extractMainContent(html: String, fallbackTitle: String): String {
         val doc = Jsoup.parse(html)
 
-        // Strip non-content tags
         doc.select("script, style, nav, header, footer, aside, form, iframe, noscript, " +
                    "[role=navigation], [role=banner], [role=contentinfo], .ad, .ads, " +
                    ".advertisement, .nav, .navbar, .menu, .sidebar, .footer, .header, " +
@@ -241,7 +191,6 @@ class WebSearchEngine(private val dao: AgentDao) {
                    ".newsletter, .subscribe, .popup, .modal, .cookie")
             .remove()
 
-        // Try semantic main content first
         val main = doc.selectFirst("article, main, [role=main], .article-body, .post-content, " +
                                     ".entry-content, .content-body, .story-body")
         val paragraphs = (main ?: doc).select("p, h1, h2, h3, li")
@@ -249,8 +198,7 @@ class WebSearchEngine(private val dao: AgentDao) {
         val sb = StringBuilder()
         for (el in paragraphs) {
             val text = el.text().trim()
-            if (text.length < 20) continue  // skip tiny fragments
-            // Preserve heading structure as markdown-ish prefixes
+            if (text.length < 20) continue
             when (el.tagName()) {
                 "h1"     -> sb.append("## ").appendLine(text)
                 "h2"     -> sb.append("### ").appendLine(text)
@@ -259,18 +207,13 @@ class WebSearchEngine(private val dao: AgentDao) {
                 else     -> sb.appendLine(text)
             }
             sb.appendLine()
-            if (sb.length > MAX_PAGE_CHARS * 2) break  // hard cap during extraction
+            if (sb.length > MAX_PAGE_CHARS * 2) break
         }
 
         val result = sb.toString().trim()
         return if (result.length > 50) result else fallbackTitle
     }
 
-    /**
-     * DuckDuckGo's HTML results wrap every link in a redirect tracker:
-     *   //duckduckgo.com/l/?uddg=<percent-encoded-real-url>&rut=...
-     * Extracts and URL-decodes the real `uddg` target so users see a clean link.
-     */
     private fun extractRealUrl(href: String): String {
         if (href.isBlank()) return ""
         return try {
@@ -310,10 +253,6 @@ class WebSearchEngine(private val dao: AgentDao) {
         }
     }
 
-    /**
-     * Builds the AI-context block from search results (snippets only).
-     * Phase 4 FIX: full URLs preserved (no mid-string truncation).
-     */
     fun buildContext(results: List<SearchResult>): String {
         if (results.isEmpty()) return ""
         val sb = StringBuilder()
@@ -326,14 +265,17 @@ class WebSearchEngine(private val dao: AgentDao) {
         return sb.toString().trim()
     }
 
-    // ── Cache helpers (synchronous — callers must be on IO dispatcher) ────
+    // ── Cache helpers ────────────────────────────────────────────────────
+    // COMPILE FIX: dao.getSearchCache() and dao.insertSearchCache() are
+    // suspend functions. We wrap them in runBlocking so they can be called
+    // from the non-suspend search() function. This is safe because search()
+    // is always called from withContext(Dispatchers.IO) in the ViewModel.
 
     private fun readCache(query: String): List<SearchResult>? {
         return try {
-            val cached = dao.getSearchCache(query) ?: return null
+            val cached = kotlinx.coroutines.runBlocking { dao.getSearchCache(query, 0L) } ?: return null
             val age = System.currentTimeMillis() - cached.timestamp
             if (age > CACHE_TTL_MS) return null
-            // Deserialize JSON array of {title, snippet, url}
             val arr = com.google.gson.JsonParser.parseString(cached.jsonResults).asJsonArray
             arr.map { obj ->
                 val o = obj.asJsonObject
@@ -360,7 +302,9 @@ class WebSearchEngine(private val dao: AgentDao) {
                 o.addProperty("url", r.url)
                 arr.add(o)
             }
-            dao.insertSearchCache(WebSearchCache(query = query, jsonResults = arr.toString()))
+            kotlinx.coroutines.runBlocking {
+                dao.insertSearchCache(WebSearchCache(query = query, jsonResults = arr.toString()))
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Cache write failed: ${e.message}")
         }
