@@ -723,24 +723,16 @@ class TerminalAgent(
         // Python syntax error
         if (lower.contains("syntaxerror") || lower.contains("syntax error")) {
             return RecoveryAction(
-                description = "Python syntax error detected — check the command for typos",
+                description = "Check Python command syntax",
                 commands = emptyList(),
                 confidence = 0.3f,
-                explanation = "Python syntax error. Check for missing quotes, parentheses, or indentation."
+                explanation = "Python syntax error detected. Check for: missing quotes on strings, " +
+                        "unclosed brackets/parentheses, incorrect indentation, or missing colons after if/for/def."
             )
-        }            // Python syntax error (no auto-fix but provide explanation)
-            if (lower.contains("syntaxerror") || lower.contains("syntax error")) {
-                return RecoveryAction(
-                    description = "Check Python command syntax",
-                    commands = emptyList(),
-                    confidence = 0.3f,
-                    explanation = "Python syntax error detected. Check for: missing quotes on strings, " +
-                            "unclosed brackets/parentheses, incorrect indentation, or missing colons after if/for/def."
-                )
-            }
+        }
 
-            // No match found
-            return null
+        // No match found — return null so caller knows we can't recover
+        return null
     }
 
     // ── Caches ──────────────────────────────────────────────────────────
