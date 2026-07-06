@@ -13,6 +13,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import com.interndra.agent.TerminalAgent
 import com.interndra.ai.*
 import com.interndra.ai.workflow.WorkflowEngine
 import com.interndra.ai.workflow.WorkflowPlanner
@@ -31,6 +32,7 @@ import com.interndra.service.AgentAccessibilityService
 import com.interndra.service.SmartShell
 import com.interndra.services.AutomationEngine
 import com.interndra.services.AutomationWorker
+import com.interndra.service.TermuxBridge
 import com.interndra.services.InterndraNotificationListener
 import com.interndra.util.Constants
 import kotlinx.coroutines.flow.*
@@ -84,8 +86,8 @@ data class HybridUiState(
     val geminiApiKey: String                = "",
     val selectedGeminiModel: String         = Constants.DEFAULT_GEMINI_MODEL,
     val jailbreakEnabled: Boolean           = false,
-    val jailbreakLevel: JailbreakLevel      = JailbreakLevel.OFF,
-    val obfuscationTechnique: ObfuscationTechnique = ObfuscationTechnique.NONE
+    val jailbreakLevel: JailbreakLevel      = JailbreakLevel.OFF,    val obfuscationTechnique: ObfuscationTechnique      = ObfuscationTechnique.NONE
+    val pluginCount: Int                                = 0
 )
 
 data class ConfirmationRequest(
@@ -172,6 +174,49 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         .map { runCatching { ObfuscationTechnique.valueOf(it[OBFUSCATION_TECH_PREF] ?: ObfuscationTechnique.NONE.name) }.getOrDefault(ObfuscationTechnique.NONE) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, ObfuscationTechnique.NONE)
 
+    // ── Termux status ────────────────────────────────────────────────────
+    private val termuxBridge = TermuxBridge(app)
+    private val _termuxInstalled = MutableStateFlow(termuxBridge.isTermuxInstalled())
+    val termuxInstalled: StateFlow<Boolean> = _termuxInstalled.asStateFlow()
+    private val _termuxExternalAppsEnabled = MutableStateFlow(false)
+    val termuxExternalAppsEnabled: StateFlow<Boolean> = _termuxExternalAppsEnabled.asStateFlow()
+
+    // ── Terminal Agent ───────────────────────────────────────────────────
+    val terminalAgent = TerminalAgent(app, termuxBridge)
+    private val _terminalSessions = MutableStateFlow(terminalAgent.getSessionNames())
+    val terminalSessions: StateFlow<List<String>> = _terminalSessions.asStateFlow()
+    private val _activeTerminalSession = MutableStateFlow("default")
+    val activeTerminalSession: StateFlow<String> = _activeTerminalSession.asStateFlow()
+
+    fun createTerminalSession(name: String, workdir: String = "/data/data/com.termux/files/home") {
+        terminalAgent.createSession(name, workdir)
+        _terminalSessions.value = terminalAgent.getSessionNames()
+    }
+
+    fun renameTerminalSession(oldName: String, newName: String) {
+        // Prevent naming conflicts
+        if (newName != oldName && terminalAgent.getSessionNames().contains(newName)) return
+        terminalAgent.renameSession(oldName, newName)
+        _terminalSessions.value = terminalAgent.getSessionNames()
+        if (_activeTerminalSession.value == oldName) {
+            _activeTerminalSession.value = newName
+        }
+    }
+
+    fun removeTerminalSession(name: String) {
+        val remaining = _terminalSessions.value.size
+        if (remaining <= 1) return // prevent removing the last session
+        terminalAgent.removeSession(name)
+        _terminalSessions.value = terminalAgent.getSessionNames()
+        if (_activeTerminalSession.value == name) {
+            _activeTerminalSession.value = "default"
+        }
+    }
+
+    fun setActiveTerminalSession(name: String) {
+        _activeTerminalSession.value = name
+    }
+
     val privacyMode: StateFlow<PrivacyMode> = app.dataStore.data
         .map { runCatching { PrivacyMode.valueOf(it[PRIVACY_MODE_PREF] ?: PrivacyMode.HYBRID.name) }.getOrDefault(PrivacyMode.HYBRID) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, PrivacyMode.HYBRID)
@@ -254,7 +299,15 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             automationEngine.updateRuleList(activeTriggers)
         }
 
-        pluginManager.registerBuiltInPlugins()
+        viewModelScope.launch {
+            pluginManager.registerBuiltInPlugins()
+            _uiState.update { it.copy(pluginCount = pluginManager.count()) }
+        }
+
+        // Refresh Termux external apps status
+        viewModelScope.launch {
+            _termuxExternalAppsEnabled.value = termuxBridge.isExternalAppsEnabled()
+        }
     }
 
     override fun onInit(status: Int) {
@@ -936,5 +989,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         super.onCleared()
         tts?.shutdown()
         localEngine.unload()
+        termuxBridge.unregisterReceiver()
     }
 }

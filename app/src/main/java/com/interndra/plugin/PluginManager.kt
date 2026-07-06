@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
+// All plugin implementations are in the same package — no imports needed.
+// Plugins are instantiated in registerBuiltInPlugins() below.
+
 /**
  * PluginManager — lightweight plugin registry for INTERNDRA.
  *
@@ -95,9 +98,19 @@ class PluginManager(private val context: Context) {
         registry.values.firstOrNull { command in it.getSupportedCommands() }
 
     // ── Built-in plugins ──────────────────────────────────────────────────
-    fun registerBuiltInPlugins() {
-        // Web search plugin (wraps existing WebSearchEngine)
-        Log.d(TAG, "Built-in plugins registered")
+    suspend fun registerBuiltInPlugins() {
+        val pluginsToRegister = listOf(
+            TermuxPlugin(context),
+            GitPlugin(context),
+            PackageManagerPlugin(context),
+            NetworkPlugin(context)
+        )
+        var count = 0
+        for (plugin in pluginsToRegister) {
+            val ok = register(plugin)
+            if (ok) count++
+        }
+        Log.i(TAG, "Registered $count/${pluginsToRegister.size} built-in plugins")
     }
 
     // ── State ─────────────────────────────────────────────────────────────

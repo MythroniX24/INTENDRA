@@ -77,6 +77,11 @@
         android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- ── Termux IPC ───────────────────────────────────────────────────── -->
+    <!-- Allows INTERNDRA to execute commands in Termux's Linux environment  -->
+    <!-- for package management (pkg, pip, npm), git, Python, etc.           -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
     <!-- ── Hardware feature declarations ─────────────────────────────────── -->
     <!-- telephony is optional — app works without a SIM -->
     <uses-feature android:name="android.hardware.telephony" android:required="false" />

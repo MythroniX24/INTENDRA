@@ -5,9 +5,11 @@ import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import androidx.core.content.FileProvider
+import com.interndra.agent.TerminalAgent
 import com.interndra.data.local.AgentRepository
 import com.interndra.data.model.*
 import com.interndra.service.SmartShell
+import com.interndra.service.TermuxBridge
 import java.io.File
 
 /**
@@ -40,7 +42,9 @@ class HybridExecutionEngine(
     private val context: Context,
     private val repo: AgentRepository,
     private val shell: SmartShell,
-    private val safety: SafetyEngine
+    private val safety: SafetyEngine,
+    private val termuxBridge: TermuxBridge = TermuxBridge(context),
+    private val terminalAgent: TerminalAgent? = null
 ) {
     companion object {
         private const val TAG = "HybridExecEngine"
@@ -83,7 +87,9 @@ class HybridExecutionEngine(
 
             // Execute based on command type
             val result: ExecutionResult = when (cmd.type) {
-                CommandType.ADB_SHELL, CommandType.TERMUX -> executeShell(index, cmd)
+                CommandType.ADB_SHELL -> executeShell(index, cmd)
+
+                CommandType.TERMUX -> executeInTermux(index, cmd)
 
                 CommandType.ANDROID_INTENT -> executeIntent(index, cmd)
 
@@ -117,6 +123,53 @@ class HybridExecutionEngine(
         } catch (e: Exception) {
             Log.e(TAG, "Shell error on step $index: ${e.message}")
             ExecutionResult(stepIndex = index, success = false, output = "", error = e.message ?: "Shell error")
+        }
+
+    /**
+     * Execute a command in Termux's full Linux environment.
+     * Uses TerminalAgent for persistent sessions if available.
+     * Enables: pkg install, pip, npm, git, python, apt, etc.
+     */
+    private suspend fun executeInTermux(index: Int, cmd: ShellCommand): ExecutionResult =
+        try {
+            if (!termuxBridge.isTermuxInstalled()) {
+                return ExecutionResult(
+                    stepIndex = index,
+                    success = false,
+                    output = "",
+                    error = "Termux is not installed. Install Termux from F-Droid or GitHub to run this command.\n" +
+                            "Download: https://f-droid.org/packages/com.termux/"
+                )
+            }
+
+            val agent = terminalAgent
+            if (agent != null) {
+                // Use TerminalAgent for session-aware execution with auto-recovery
+                val sessionName = "exec_$index"
+                val result = agent.executeWithRecovery(sessionName, cmd.command)
+                if (result.isSuccess) {
+                    val output = if (result.stdout.isNotBlank()) result.stdout else "(completed)"
+                    val recoveryNote = if (result.wasRecovered)
+                        "\n\n⚡ Auto-recovered: ${result.recoveryActions.firstOrNull() ?: "applied fix"}" else ""
+                    ExecutionResult(stepIndex = index, success = true, output = output + recoveryNote)
+                } else {
+                    ExecutionResult(stepIndex = index, success = false,
+                        output = result.stdout, error = result.stderr)
+                }
+            } else {
+                // Direct Termux execution (no session management)
+                val result = termuxBridge.executeShell(cmd.command)
+                if (result.isSuccess) {
+                    val output = if (result.stdout.isNotBlank()) result.stdout else "(completed)"
+                    ExecutionResult(stepIndex = index, success = true, output = output)
+                } else {
+                    val errMsg = if (result.stderr.isNotBlank()) result.stderr else "Exit code: ${result.exitCode}"
+                    ExecutionResult(stepIndex = index, success = false, output = result.stdout, error = errMsg)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Termux error on step $index: ${e.message}")
+            ExecutionResult(stepIndex = index, success = false, output = "", error = "Termux error: ${e.message}")
         }
 
     private fun executeIntent(index: Int, cmd: ShellCommand): ExecutionResult {
