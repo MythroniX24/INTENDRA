@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider paths — INTERNDRA
+  Defines which directories the FileProvider may share via content:// URIs.
+
+  Phase 5/6 expansion: shared-storage roots (Download, Documents, Pictures,
+  DCIM, Music, Movies, INTERNDRA) are now listed so the workflow engine can
+  open and share user files via ACTION_VIEW / ACTION_SEND. Each <external-path>
+  maps a friendly name to a real shared-storage subdir; FileProvider will only
+  serve files under these declared roots.
+-->
+<paths>
+    <!--
+      App-private external files (getExternalFilesDir) — log exports land here.
+      Path: Android/data/com.interndra/files/exports/
+      Not accessible to other apps without a FileProvider URI grant.
+    -->
+    <external-files-path
+        name="exports"
+        path="exports/" />
+
+    <!--
+      App-private internal files — screenshots captured by ADB shell commands
+      are sometimes saved inside the app's internal storage.
+    -->
+    <files-path
+        name="internal_files"
+        path="." />
+
+    <!-- App-private cache (used for transient workflow artifacts) -->
+    <cache-path
+        name="cache"
+        path="." />
+
+    <!-- ── Shared storage roots (Phase 5/6 — file workflows) ─────────── -->
+    <external-path
+        name="shared_download"
+        path="Download/" />
+
+    <external-path
+        name="shared_documents"
+        path="Documents/" />
+
+    <external-path
+        name="shared_pictures"
+        path="Pictures/" />
+
+    <external-path
+        name="shared_dcim"
+        path="DCIM/" />
+
+    <external-path
+        name="shared_music"
+        path="Music/" />
+
+    <external-path
+        name="shared_movies"
+        path="Movies/" />
+
+    <external-path
+        name="shared_interndra"
+        path="INTERNDRA/" />
+</paths>
