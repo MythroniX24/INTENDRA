@@ -348,9 +348,7 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
 }
 
 @Composable private fun ClickableText(text: AnnotatedString, color: Color, fontSize: androidx.compose.ui.unit.TextUnit, lineHeight: androidx.compose.ui.unit.TextUnit = 22.sp, fontWeight: FontWeight?=null, fontStyle: FontStyle? = null, textDecoration: TextDecoration?=null, textAlign: TextAlign?=null, modifier: Modifier=Modifier, onLinkClick: ((String)->Unit)?=null) {
-    val style = TextStyle(color=color,fontSize=fontSize,lineHeight=lineHeight,fontWeight=fontWeight,fontStyle=fontStyle,textDecoration=textDecoration,textAlign=textAlign)
-    val styled = buildAnnotatedString { withStyle(style.toSpanStyle()){append(text)} }
-    Text(text=styled, style=style, modifier=modifier.clickable { text.getStringAnnotations("URL",0,text.length).firstOrNull()?.let { onLinkClick?.invoke(it.item) } })
+    Text(text=text, color=color, fontSize=fontSize, lineHeight=lineHeight, fontWeight=fontWeight, fontStyle=fontStyle, textDecoration=textDecoration, textAlign=textAlign, modifier=modifier.clickable { text.getStringAnnotations("URL",0,text.length).firstOrNull()?.let { onLinkClick?.invoke(it.item) } })
 }
 
 // ── Block renderers ────────────────────────────────────────────────────────
@@ -397,7 +395,9 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
             val lc=getLangColor(b.language)
             Row(verticalAlignment=Alignment.CenterVertically){ Box(Modifier.size(8.dp).clip(CircleShape).background(lc)); Spacer(Modifier.width(8.dp)); Text(b.language.ifBlank{"code"},color=lc,fontSize=12.sp,fontFamily=FontFamily.Monospace,fontWeight=FontWeight.SemiBold)
                 if (b.code.lines().size>1) { Spacer(Modifier.width(8.dp)); Text("${b.code.lines().size} lines",color=TerminalWhite.copy(0.4f),fontSize=10.sp,fontFamily=FontFamily.Monospace) } }
-            Row(modifier=Modifier.clickable{clip.setText(AnnotatedString(b.code));copied=true},verticalAlignment=Alignment.CenterVertically){ Icon(Icons.Default.ContentCopy,null,tint=if(copied)Success else TerminalWhite.copy(0.6f),modifier=Modifier.size(15.dp)); Spacer(Modifier.width(4.dp)); Text(if(copied)"Copied!"else"Copy",color=if(copied)Success else TerminalWhite.copy(0.6f),fontSize=12.sp,fontFamily=FontFamily.Monospace) } }
+            val copyIconColor = if (copied) Success else TerminalWhite.copy(0.6f)
+            val copyLabel = if (copied) "Copied!" else "Copy"
+            Row(modifier=Modifier.clickable{clip.setText(AnnotatedString(b.code));copied=true},verticalAlignment=Alignment.CenterVertically){ Icon(Icons.Default.ContentCopy,null,tint=copyIconColor,modifier=Modifier.size(15.dp)); Spacer(Modifier.width(4.dp)); Text(copyLabel,color=copyIconColor,fontSize=12.sp,fontFamily=FontFamily.Monospace) } }
         val cl=b.code.split("\n")
         if (b.showLines && cl.size<=200) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
@@ -410,7 +410,9 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
     val clip=LocalClipboardManager.current; var copied by remember{mutableStateOf(false)}
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0xFF1A1B1E)).border(1.dp,SurfaceLight,RoundedCornerShape(10.dp))) {
         Row(Modifier.fillMaxWidth().background(Color(0xFF2A2B30)).padding(horizontal=12.dp,vertical=6.dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically){ Text("diff ${b.language}",color=VaultPurple,fontSize=12.sp,fontFamily=FontFamily.Monospace)
-            Row(Modifier.clickable{clip.setText(AnnotatedString(b.lines.joinToString("\n"){it.text}));copied=true},verticalAlignment=Alignment.CenterVertically){ Icon(Icons.Default.ContentCopy,null,tint=if(copied)Success else TerminalWhite.copy(0.6f),modifier=Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)); Text(if(copied)"Copied"else"Copy",color=if(copied)Success else TerminalWhite.copy(0.6f),fontSize=11.sp) } }
+            val copyIconColor = if (copied) Success else TerminalWhite.copy(0.6f)
+            val copyLabel = if (copied) "Copied" else "Copy"
+            Row(Modifier.clickable{clip.setText(AnnotatedString(b.lines.joinToString("\n"){it.text}));copied=true},verticalAlignment=Alignment.CenterVertically){ Icon(Icons.Default.ContentCopy,null,tint=copyIconColor,modifier=Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)); Text(copyLabel,color=copyIconColor,fontSize=11.sp) } }
         Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical=4.dp)) { b.lines.forEach{l-> val(bg,tc,pre)=when(l.type){DiffType.ADDED-> Triple(Success.copy(0.12f),Success,"+");DiffType.REMOVED-> Triple(Danger.copy(0.12f),Danger,"-");DiffType.HEADER-> Triple(VaultPurple.copy(0.1f),VaultPurple,"@@");DiffType.CONTEXT-> Triple(Color.Transparent,TerminalWhite.copy(0.7f)," ") }; Text("$pre ${l.text}",color=tc,fontSize=13.sp,fontFamily=FontFamily.Monospace,lineHeight=18.sp,modifier=Modifier.fillMaxWidth().background(bg).padding(horizontal=12.dp,vertical=0.dp)) } } }
 }
 
