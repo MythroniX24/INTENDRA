@@ -23,6 +23,9 @@ interface AgentDao {
     @Query("SELECT * FROM chat_messages ORDER BY id DESC LIMIT :limit")
     suspend fun getRecentMessages(limit: Int): List<ChatMessage>
 
+    @Query("DELETE FROM chat_messages WHERE id = :messageId")
+    suspend fun deleteMessage(messageId: Long)
+
     @Query("DELETE FROM chat_messages WHERE workspaceId = :workspaceId")
     suspend fun clearMessages(workspaceId: Long = 0)
 

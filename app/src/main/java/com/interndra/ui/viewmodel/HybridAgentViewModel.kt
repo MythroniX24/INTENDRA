@@ -818,6 +818,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     fun getLocalModelInfo() = localEngine.getModelInfo()
 
     // ── Chat management ───────────────────────────────────────────────────
+    fun deleteMessage(msg: ChatMessage) = viewModelScope.launch {
+        repo.deleteMessage(msg.id)
+    }
     fun clearMessages() = viewModelScope.launch { repo.clearMessages() }
     fun clearAll()      = viewModelScope.launch { repo.clearMessages(); repo.clearLogs() }
     fun dismissError()  = _uiState.update { it.copy(error = null) }

@@ -67,6 +67,8 @@ class AgentRepository(private val db: AgentDatabase) {
     suspend fun updateAiMessage(id: Long, text: String) =
         dao.updateMessage(id, text)
 
+    suspend fun deleteMessage(id: Long) = dao.deleteMessage(id)
+
     suspend fun clearMessages() = dao.clearMessages(currentWorkspaceId)
 
     // ── Terminal logs ───────────────────────────────────────────────────────

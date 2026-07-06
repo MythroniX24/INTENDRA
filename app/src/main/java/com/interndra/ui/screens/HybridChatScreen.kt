@@ -49,6 +49,7 @@ import com.interndra.data.model.*
 import com.interndra.ui.components.RichMarkdownText
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
+import com.interndra.ui.viewmodel.HybridUiState
 import com.interndra.util.Constants
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -205,8 +206,8 @@ fun HybridChatScreen(
                             clip.setText(AnnotatedString(text))
                             Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
                         },
-                        onDelete = { msg -> /* would need VM method */ },
-                        onRegenerate = { /* future */ }
+                        onDelete = { msg -> vm.deleteMessage(msg) },
+                        onRegenerate = { vm.sendCommand("regenerate last response") }
                     )
                 }
             }
