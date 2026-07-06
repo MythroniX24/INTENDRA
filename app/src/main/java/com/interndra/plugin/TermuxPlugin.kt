@@ -1,1 +1,222 @@
-package com.interndra.plugin\n\nimport android.content.Context\nimport android.util.Log\nimport com.interndra.service.TermuxBridge\n\n/**\n * TermuxPlugin — wraps TermuxBridge into the IPlugin system.\n * Provides 15+ commands for shell execution, package management,\n * Python, clipboard, sensors, and device control.\n */\nclass TermuxPlugin(context: Context) : IPlugin {\n\n    companion object {\n        private const val TAG = \"TermuxPlugin\"\n        private const val CMD_PREFIX = \"termux:\"\n    }\n\n    private val bridge = TermuxBridge(context)\n    private var initialized = false\n\n    override val id: String = \"termux\"\n    override val name: String = \"Termux Bridge\"\n    override val description: String = \"Execute shell commands, manage packages, run Python, control device via Termux\"\n    override val version: String = \"2.0.0\"\n    override val author: String = \"INTERNDRA\"\n\n    override suspend fun initialize(context: Context): Boolean {\n        initialized = bridge.isTermuxInstalled()\n        if (!initialized) {\n            Log.w(TAG, \"Termux not installed — plugin will report errors gracefully\")\n        }\n        return true // plugin itself is always loadable; commands fail gracefully\n    }\n\n    override fun getSupportedCommands(): List<String> = listOf(\n        \"${CMD_PREFIX}exec\",\n        \"${CMD_PREFIX}install\",\n        \"${CMD_PREFIX}update\",\n        \"${CMD_PREFIX}search\",\n        \"${CMD_PREFIX}list_installed\",\n        \"${CMD_PREFIX}uninstall\",\n        \"${CMD_PREFIX}python\",\n        \"${CMD_PREFIX}pip_install\",\n        \"${CMD_PREFIX}pip_list\",\n        \"${CMD_PREFIX}git\",\n        \"${CMD_PREFIX}npm\",\n        \"${CMD_PREFIX}clipboard_get\",\n        \"${CMD_PREFIX}clipboard_set\",\n        \"${CMD_PREFIX}toast\",\n        \"${CMD_PREFIX}vibrate\",\n        \"${CMD_PREFIX}torch_on\",\n        \"${CMD_PREFIX}torch_off\",\n        \"${CMD_PREFIX}sensor\",\n        \"${CMD_PREFIX}tts\"\n    )\n\n    override suspend fun execute(command: String, args: Map<String, String>): PluginResult {\n        if (!initialized) {\n            return PluginResult(\n                success = false,\n                output = \"\",\n                error = \"Termux is not installed. Install from F-Droid: \" +\n                        \"https://f-droid.org/packages/com.termux/\"\n            )\n        }\n\n        return try {\n            when (command.removePrefix(CMD_PREFIX)) {\n                \"exec\" -> exec(args)\n                \"install\" -> installPkg(args)\n                \"update\" -> updatePkgs()\n                \"search\" -> searchPkg(args)\n                \"list_installed\" -> listInstalled()\n                \"uninstall\" -> uninstallPkg(args)\n                \"python\" -> runPython(args)\n                \"pip_install\" -> pipInstall(args)\n                \"pip_list\" -> pipList()\n                \"git\" -> runGit(args)\n                \"npm\" -> runNpm(args)\n                \"clipboard_get\" -> clipboardGet()\n                \"clipboard_set\" -> clipboardSet(args)\n                \"toast\" -> toast(args)\n                \"vibrate\" -> vibrate(args)\n                \"torch_on\" -> torch(true)\n                \"torch_off\" -> torch(false)\n                \"sensor\" -> sensor(args)\n                \"tts\" -> tts(args)\n                else -> PluginResult(false, \"\", error = \"Unknown termux command: $command\")\n            }\n        } catch (e: Exception) {\n            Log.e(TAG, \"Command failed: ${command}: ${e.message}\")\n            PluginResult(false, \"\", error = e.message ?: \"Termux command failed\")\n        }\n    }\n\n    private suspend fun exec(args: Map<String, String>): PluginResult {\n        val cmd = args[\"cmd\"] ?: return PluginResult(false, \"\", error = \"Missing 'cmd' argument\")\n        val workdir = args[\"workdir\"]\n        val timeout = (args[\"timeout\"]?.toLongOrNull() ?: 60_000L)\n        val result = bridge.executeShell(cmd, workdir = workdir, timeoutMs = timeout)\n        return PluginResult(\n            success = result.isSuccess,\n            output = if (result.stdout.isNotBlank()) result.stdout else \"(done)\",\n            error = if (!result.isSuccess) result.stderr else \"\"\n        )\n    }\n\n    private suspend fun installPkg(args: Map<String, String>): PluginResult {\n        val pkg = args[\"package\"] ?: return PluginResult(false, \"\", error = \"Missing 'package' argument\")\n        val result = bridge.installPackage(pkg)\n        return PluginResult(\n            success = result.isSuccess,\n            output = result.stdout,\n            error = result.stderr\n        )\n    }\n\n    private suspend fun updatePkgs(): PluginResult {\n        val result = bridge.updatePackages()\n        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)\n    }\n\n    private suspend fun searchPkg(args: Map<String, String>): PluginResult {\n        val query = args[\"query\"] ?: return PluginResult(false, \"\", error = \"Missing 'query' argument\")\n        val result = bridge.executeShell(\"pkg search $query 2>&1 | head -30\")\n        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)\n    }\n\n    private suspend fun listInstalled(): PluginResult {\n        val result = bridge.executeShell(\"pkg list-installed 2>&1 | head -50\")\n        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)\n    }\n\n    private suspend fun uninstallPkg(args: Map<String, String>): PluginResult {\n        val pkg = args[\"package\"] ?: return PluginResult(false, \"\", error = \"Missing 'package' argument\")\n        val result = bridge.executeShell(\"pkg uninstall $pkg 2>&1\")\n        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)\n    }\n\n    private suspend fun runPython(args: Map<String, String>): PluginResult {\n        val code = args[\"code\"] ?: return PluginResult(false, \"\", error = \"Missing 'code' argument\")\n        val result = bridge.runPython(code)\n        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)\n    }\n\n    private suspend fun pipInstall(args: Map<String, String>): PluginResult {\n        val pkg = args[\"package\"] ?: return PluginResult(false, \"\", error = \"Missing 'package' argument\")\n        val result = bridge.pipInstall(listOf(pkg))\n        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)\n    }\n\n    private suspend fun pipList(): PluginResult {\n        val result = bridge.executeShell(\"pip list 2>&1 || pip3 list 2>&1 | head -40\")\n        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)\n    }\n\n    private suspend fun runGit(args: Map<String, String>): PluginResult {\n        val gitArgs = args[\"args\"] ?: return PluginResult(false, \"\", error = \"Missing 'args' argument\")\n        val workdir = args[\"workdir\"]\n        val parts = gitArgs.split(\" \")\n        val result = bridge.git(*parts.toTypedArray(), workdir = workdir)\n        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)\n    }\n\n    private suspend fun runNpm(args: Map<String, String>): PluginResult {\n        val npmArgs = args[\"args\"] ?: return PluginResult(false, \"\", error = \"Missing 'args' argument\")\n        val workdir = args[\"workdir\"]\n        val parts = npmArgs.split(\" \")\n        val result = bridge.npm(*parts.toTypedArray(), workdir = workdir)\n        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)\n    }\n\n    private suspend fun clipboardGet(): PluginResult {\n        val result = bridge.executeShell(\"termux-clipboard-get 2>&1\")\n        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)\n    }\n\n    private suspend fun clipboardSet(args: Map<String, String>): PluginResult {\n        val text = args[\"text\"] ?: return PluginResult(false, \"\", error = \"Missing 'text' argument\")\n        val escaped = text.replace(\"'\", \"'\\\\''\")\n        val result = bridge.executeShell(\"termux-clipboard-set '$escaped' 2>&1\")\n        return PluginResult(success = result.isSuccess, output = \"Clipboard set\", error = result.stderr)\n    }\n\n    private suspend fun toast(args: Map<String, String>): PluginResult {\n        val msg = args[\"message\"] ?: return PluginResult(false, \"\", error = \"Missing 'message' argument\")\n        val escaped = msg.replace(\"'\", \"'\\\\''\")\n        val result = bridge.executeShell(\"termux-toast -b '#00E5FF' '$escaped' 2>&1\")\n        return PluginResult(success = result.isSuccess, output = \"Toast shown\", error = result.stderr)\n    }\n\n    private suspend fun vibrate(args: Map<String, String>): PluginResult {\n        val duration = args[\"duration\"] ?: \"500\"\n        val result = bridge.executeShell(\"termux-vibrate -d $duration 2>&1\")\n        return PluginResult(success = result.isSuccess, output = \"Vibrated for ${duration}ms\", error = result.stderr)\n    }\n\n    private suspend fun torch(on: Boolean): PluginResult {\n        val result = bridge.executeShell(\"termux-torch ${if (on) \"on\" else \"off\"} 2>&1\")\n        return PluginResult(success = result.isSuccess,\n            output = if (on) \"Torch turned on\" else \"Torch turned off\",\n            error = result.stderr)\n    }\n\n    private suspend fun sensor(args: Map<String, String>): PluginResult {\n        val sensor = args[\"sensor\"] ?: \"all\"\n        val result = bridge.executeShell(\"termux-sensor -s '$sensor' -n 1 2>&1\")\n        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)\n    }\n\n    private suspend fun tts(args: Map<String, String>): PluginResult {\n        val text = args[\"text\"] ?: return PluginResult(false, \"\", error = \"Missing 'text' argument\")\n        val escaped = text.replace(\"'\", \"'\\\\''\")\n        val result = bridge.executeShell(\"termux-tts-speak '$escaped' 2>&1\")\n        return PluginResult(success = result.isSuccess, output = \"TTS spoken\", error = result.stderr)\n    }\n\n    override fun teardown() {\n        bridge.unregisterReceiver()\n    }\n}\n
+package com.interndra.plugin
+
+import android.content.Context
+import android.util.Log
+import com.interndra.service.TermuxBridge
+
+/**
+ * TermuxPlugin — wraps TermuxBridge into the IPlugin system.
+ * Provides 15+ commands for shell execution, package management,
+ * Python, clipboard, sensors, and device control.
+ */
+class TermuxPlugin(context: Context) : IPlugin {
+
+    companion object {
+        private const val TAG = "TermuxPlugin"
+        private const val CMD_PREFIX = "termux:"
+    }
+
+    private val bridge = TermuxBridge(context)
+    private var initialized = false
+
+    override val id: String = "termux"
+    override val name: String = "Termux Bridge"
+    override val description: String = "Execute shell commands, manage packages, run Python, control device via Termux"
+    override val version: String = "2.0.0"
+    override val author: String = "INTERNDRA"
+
+    override suspend fun initialize(context: Context): Boolean {
+        initialized = bridge.isTermuxInstalled()
+        if (!initialized) {
+            Log.w(TAG, "Termux not installed — plugin will report errors gracefully")
+        }
+        return true // plugin itself is always loadable; commands fail gracefully
+    }
+
+    override fun getSupportedCommands(): List<String> = listOf(
+        "${CMD_PREFIX}exec",
+        "${CMD_PREFIX}install",
+        "${CMD_PREFIX}update",
+        "${CMD_PREFIX}search",
+        "${CMD_PREFIX}list_installed",
+        "${CMD_PREFIX}uninstall",
+        "${CMD_PREFIX}python",
+        "${CMD_PREFIX}pip_install",
+        "${CMD_PREFIX}pip_list",
+        "${CMD_PREFIX}git",
+        "${CMD_PREFIX}npm",
+        "${CMD_PREFIX}clipboard_get",
+        "${CMD_PREFIX}clipboard_set",
+        "${CMD_PREFIX}toast",
+        "${CMD_PREFIX}vibrate",
+        "${CMD_PREFIX}torch_on",
+        "${CMD_PREFIX}torch_off",
+        "${CMD_PREFIX}sensor",
+        "${CMD_PREFIX}tts"
+    )
+
+    override suspend fun execute(command: String, args: Map<String, String>): PluginResult {
+        if (!initialized) {
+            return PluginResult(
+                success = false,
+                output = "",
+                error = "Termux is not installed. Install from F-Droid: " +
+                        "https://f-droid.org/packages/com.termux/"
+            )
+        }
+
+        return try {
+            when (command.removePrefix(CMD_PREFIX)) {
+                "exec" -> exec(args)
+                "install" -> installPkg(args)
+                "update" -> updatePkgs()
+                "search" -> searchPkg(args)
+                "list_installed" -> listInstalled()
+                "uninstall" -> uninstallPkg(args)
+                "python" -> runPython(args)
+                "pip_install" -> pipInstall(args)
+                "pip_list" -> pipList()
+                "git" -> runGit(args)
+                "npm" -> runNpm(args)
+                "clipboard_get" -> clipboardGet()
+                "clipboard_set" -> clipboardSet(args)
+                "toast" -> toast(args)
+                "vibrate" -> vibrate(args)
+                "torch_on" -> torch(true)
+                "torch_off" -> torch(false)
+                "sensor" -> sensor(args)
+                "tts" -> tts(args)
+                else -> PluginResult(false, "", error = "Unknown termux command: $command")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Command failed: ${command}: ${e.message}")
+            PluginResult(false, "", error = e.message ?: "Termux command failed")
+        }
+    }
+
+    private suspend fun exec(args: Map<String, String>): PluginResult {
+        val cmd = args["cmd"] ?: return PluginResult(false, "", error = "Missing 'cmd' argument")
+        val workdir = args["workdir"]
+        val timeout = (args["timeout"]?.toLongOrNull() ?: 60_000L)
+        val result = bridge.executeShell(cmd, workdir = workdir, timeoutMs = timeout)
+        return PluginResult(
+            success = result.isSuccess,
+            output = if (result.stdout.isNotBlank()) result.stdout else "(done)",
+            error = if (!result.isSuccess) result.stderr else ""
+        )
+    }
+
+    private suspend fun installPkg(args: Map<String, String>): PluginResult {
+        val pkg = args["package"] ?: return PluginResult(false, "", error = "Missing 'package' argument")
+        val result = bridge.installPackage(pkg)
+        return PluginResult(
+            success = result.isSuccess,
+            output = result.stdout,
+            error = result.stderr
+        )
+    }
+
+    private suspend fun updatePkgs(): PluginResult {
+        val result = bridge.updatePackages()
+        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)
+    }
+
+    private suspend fun searchPkg(args: Map<String, String>): PluginResult {
+        val query = args["query"] ?: return PluginResult(false, "", error = "Missing 'query' argument")
+        val result = bridge.executeShell("pkg search $query 2>&1 | head -30")
+        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)
+    }
+
+    private suspend fun listInstalled(): PluginResult {
+        val result = bridge.executeShell("pkg list-installed 2>&1 | head -50")
+        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)
+    }
+
+    private suspend fun uninstallPkg(args: Map<String, String>): PluginResult {
+        val pkg = args["package"] ?: return PluginResult(false, "", error = "Missing 'package' argument")
+        val result = bridge.executeShell("pkg uninstall $pkg 2>&1")
+        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)
+    }
+
+    private suspend fun runPython(args: Map<String, String>): PluginResult {
+        val code = args["code"] ?: return PluginResult(false, "", error = "Missing 'code' argument")
+        val result = bridge.runPython(code)
+        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)
+    }
+
+    private suspend fun pipInstall(args: Map<String, String>): PluginResult {
+        val pkg = args["package"] ?: return PluginResult(false, "", error = "Missing 'package' argument")
+        val result = bridge.pipInstall(listOf(pkg))
+        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)
+    }
+
+    private suspend fun pipList(): PluginResult {
+        val result = bridge.executeShell("pip list 2>&1 || pip3 list 2>&1 | head -40")
+        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)
+    }
+
+    private suspend fun runGit(args: Map<String, String>): PluginResult {
+        val gitArgs = args["args"] ?: return PluginResult(false, "", error = "Missing 'args' argument")
+        val workdir = args["workdir"]
+        val parts = gitArgs.split(" ")
+        val result = bridge.git(*parts.toTypedArray(), workdir = workdir)
+        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)
+    }
+
+    private suspend fun runNpm(args: Map<String, String>): PluginResult {
+        val npmArgs = args["args"] ?: return PluginResult(false, "", error = "Missing 'args' argument")
+        val workdir = args["workdir"]
+        val parts = npmArgs.split(" ")
+        val result = bridge.npm(*parts.toTypedArray(), workdir = workdir)
+        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)
+    }
+
+    private suspend fun clipboardGet(): PluginResult {
+        val result = bridge.executeShell("termux-clipboard-get 2>&1")
+        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)
+    }
+
+    private suspend fun clipboardSet(args: Map<String, String>): PluginResult {
+        val text = args["text"] ?: return PluginResult(false, "", error = "Missing 'text' argument")
+        val escaped = text.replace("'", "'\\''")
+        val result = bridge.executeShell("termux-clipboard-set '$escaped' 2>&1")
+        return PluginResult(success = result.isSuccess, output = "Clipboard set", error = result.stderr)
+    }
+
+    private suspend fun toast(args: Map<String, String>): PluginResult {
+        val msg = args["message"] ?: return PluginResult(false, "", error = "Missing 'message' argument")
+        val escaped = msg.replace("'", "'\\''")
+        val result = bridge.executeShell("termux-toast -b '#00E5FF' '$escaped' 2>&1")
+        return PluginResult(success = result.isSuccess, output = "Toast shown", error = result.stderr)
+    }
+
+    private suspend fun vibrate(args: Map<String, String>): PluginResult {
+        val duration = args["duration"] ?: "500"
+        val result = bridge.executeShell("termux-vibrate -d $duration 2>&1")
+        return PluginResult(success = result.isSuccess, output = "Vibrated for ${duration}ms", error = result.stderr)
+    }
+
+    private suspend fun torch(on: Boolean): PluginResult {
+        val result = bridge.executeShell("termux-torch ${if (on) "on" else "off"} 2>&1")
+        return PluginResult(success = result.isSuccess,
+            output = if (on) "Torch turned on" else "Torch turned off",
+            error = result.stderr)
+    }
+
+    private suspend fun sensor(args: Map<String, String>): PluginResult {
+        val sensor = args["sensor"] ?: "all"
+        val result = bridge.executeShell("termux-sensor -s '$sensor' -n 1 2>&1")
+        return PluginResult(success = result.isSuccess, output = result.stdout, error = result.stderr)
+    }
+
+    private suspend fun tts(args: Map<String, String>): PluginResult {
+        val text = args["text"] ?: return PluginResult(false, "", error = "Missing 'text' argument")
+        val escaped = text.replace("'", "'\\''")
+        val result = bridge.executeShell("termux-tts-speak '$escaped' 2>&1")
+        return PluginResult(success = result.isSuccess, output = "TTS spoken", error = result.stderr)
+    }
+
+    override fun teardown() {
+        bridge.unregisterReceiver()
+    }
+}

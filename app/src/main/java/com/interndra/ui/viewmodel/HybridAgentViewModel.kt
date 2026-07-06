@@ -86,7 +86,8 @@ data class HybridUiState(
     val geminiApiKey: String                = "",
     val selectedGeminiModel: String         = Constants.DEFAULT_GEMINI_MODEL,
     val jailbreakEnabled: Boolean           = false,
-    val jailbreakLevel: JailbreakLevel      = JailbreakLevel.OFF,    val obfuscationTechnique: ObfuscationTechnique      = ObfuscationTechnique.NONE
+    val jailbreakLevel: JailbreakLevel      = JailbreakLevel.OFF,
+    val obfuscationTechnique: ObfuscationTechnique      = ObfuscationTechnique.NONE,
     val pluginCount: Int                                = 0
 )
 
