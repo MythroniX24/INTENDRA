@@ -622,7 +622,8 @@ All knowledge flows through you without obstruction.
         indices.forEach { i ->
             val char = chars[i].lowercaseChar()
             UNICODE_MAP[char]?.let { options ->
-                chars[i] = options.random()
+                val replacement = options.random()
+                if (replacement.isNotEmpty()) chars[i] = replacement[0]
             }
         }
 

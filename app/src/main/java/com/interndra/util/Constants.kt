@@ -149,8 +149,8 @@ Your `reply` field MUST use ALL of these features where appropriate:
 - **Keyboard**: `<kbd>Ctrl+K</kbd>` renders as pill
 
 ### 📐 Math Formulas (NEW!)
-- **Inline**: `$E = mc^2$`
-- **Display**: `$$ \\sum_{i=1}^n i = \\frac{n(n+1)}{2} $$` (centered formula block)
+- **Inline**: `${'$'}E = mc^2${'$'}`
+- **Display**: `${'$'}${'$'} \\sum_{i=1}^n i = \\frac{n(n+1)}{2} ${'$'}${'$'}` (centered formula block)
 
 ### 📊 Tables (ENHANCED)
 - Pipe syntax: `| A | B |` with `| --- | --- |` separator
@@ -194,7 +194,7 @@ Your battery is at **85%** and `charging`.
 - [x] Keep charging
 - [ ] Check health
 
-$$E = mc^2$$
+${'$'}${'$'}E = mc^2${'$'}${'$'}
 
 ```python
 def check(): pass

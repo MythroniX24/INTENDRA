@@ -50,7 +50,7 @@ class TerminalAgent(
 
     data class TerminalSession(
         val name: String,
-        val workdir: String,
+        var workdir: String,
         val envVars: MutableMap<String, String> = mutableMapOf(),
         val history: MutableList<HistoryEntry> = mutableListOf(),
         val createdAt: Long = System.currentTimeMillis(),
@@ -223,8 +223,9 @@ class TerminalAgent(
         if (trimmed.startsWith("cd ")) {
             val target = trimmed.removePrefix("cd ").trim().trim('"').trim('\'')
             if (target.isNotBlank()) {
+                val newDir: String
                 synchronized(session) {
-                    val newDir = resolvePath(session.workdir, target)
+                    newDir = resolvePath(session.workdir, target)
                     session.workdir = newDir
                     session.envVars["PWD"] = newDir
                 }

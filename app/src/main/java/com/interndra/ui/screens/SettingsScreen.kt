@@ -278,6 +278,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                                         JailbreakLevel.LIGHT -> TerminalGreen
                                         JailbreakLevel.MEDIUM -> TerminalYellow
                                         JailbreakLevel.EXTREME -> TerminalRed
+                                        else -> TerminalRed
                                     })
                                 )
                                 Column(Modifier.weight(1f)) {
@@ -294,7 +295,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                                 containerColor = ChatBg,
                                 contentColor = TerminalWhite.copy(0.7f)
                             ),
-                            border = BorderStroke(1.dp, SurfaceLight),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceLight),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(Modifier.padding(12.dp)) {

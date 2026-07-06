@@ -79,6 +79,7 @@ fun HybridChatScreen(
     val scope      = rememberCoroutineScope()
     val keyboard   = LocalSoftwareKeyboardController.current
     val context    = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
 
     // ── Streaming state: which message is currently streaming and its revealed text ──
     var streamingMsgId by remember { mutableStateOf<Long?>(null) }
@@ -202,8 +203,7 @@ fun HybridChatScreen(
                         streamingMsgId = streamingMsgId,
                         streamedText = streamedText,
                         onCopy = { text ->
-                            val clip = LocalClipboardManager.current
-                            clip.setText(AnnotatedString(text))
+                            clipboardManager.setText(AnnotatedString(text))
                             Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
                         },
                         onDelete = { msg -> vm.deleteMessage(msg) },

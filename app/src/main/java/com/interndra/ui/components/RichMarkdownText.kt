@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -346,9 +347,10 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
     }; return InlineResult(a)
 }
 
-@Composable private fun ClickableText(text: AnnotatedString, color: Color, fontSize: androidx.compose.ui.unit.TextUnit, lineHeight: androidx.compose.ui.unit.TextUnit = 22.sp, fontWeight: FontWeight?=null, textDecoration: TextDecoration?=null, textAlign: TextAlign?=null, modifier: Modifier=Modifier, onLinkClick: ((String)->Unit)?=null) {
-    val styled = buildAnnotatedString { withStyle(SpanStyle(color=color,fontSize=fontSize,lineHeight=lineHeight,fontWeight=fontWeight,textDecoration=textDecoration)){append(text)} }
-    Text(text=styled,fontSize=fontSize,lineHeight=lineHeight,textAlign=textAlign,modifier=modifier.clickable { text.getStringAnnotations("URL",0,text.length).firstOrNull()?.let { onLinkClick?.invoke(it.item) } })
+@Composable private fun ClickableText(text: AnnotatedString, color: Color, fontSize: androidx.compose.ui.unit.TextUnit, lineHeight: androidx.compose.ui.unit.TextUnit = 22.sp, fontWeight: FontWeight?=null, fontStyle: FontStyle? = null, textDecoration: TextDecoration?=null, textAlign: TextAlign?=null, modifier: Modifier=Modifier, onLinkClick: ((String)->Unit)?=null) {
+    val style = TextStyle(color=color,fontSize=fontSize,lineHeight=lineHeight,fontWeight=fontWeight,fontStyle=fontStyle,textDecoration=textDecoration,textAlign=textAlign)
+    val styled = buildAnnotatedString { withStyle(style.toSpanStyle()){append(text)} }
+    Text(text=styled, style=style, modifier=modifier.clickable { text.getStringAnnotations("URL",0,text.length).firstOrNull()?.let { onLinkClick?.invoke(it.item) } })
 }
 
 // ── Block renderers ────────────────────────────────────────────────────────

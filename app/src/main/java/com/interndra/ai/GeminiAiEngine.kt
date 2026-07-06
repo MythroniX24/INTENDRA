@@ -53,7 +53,7 @@ class GeminiAiEngine(
         }
 
         // Build Gemini contents array
-        val contents = buildList {
+        val contents = mutableListOf<Map<String, Any>>().apply {
             // System instruction is passed separately in Gemini API
             // Chat history
             chatHistory.takeLast(16).forEach { (role, content) ->

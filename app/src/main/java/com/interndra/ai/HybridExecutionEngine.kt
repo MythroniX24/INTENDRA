@@ -130,8 +130,8 @@ class HybridExecutionEngine(
      * Uses TerminalAgent for persistent sessions if available.
      * Enables: pkg install, pip, npm, git, python, apt, etc.
      */
-    private suspend fun executeInTermux(index: Int, cmd: ShellCommand): ExecutionResult =
-        try {
+    private suspend fun executeInTermux(index: Int, cmd: ShellCommand): ExecutionResult {
+        return try {
             if (!termuxBridge.isTermuxInstalled()) {
                 return ExecutionResult(
                     stepIndex = index,
@@ -169,8 +169,9 @@ class HybridExecutionEngine(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Termux error on step $index: ${e.message}")
-            ExecutionResult(stepIndex = index, success = false, output = "", error = "Termux error: ${e.message}")
+            return ExecutionResult(stepIndex = index, success = false, output = "", error = "Termux error: ${e.message}")
         }
+    }
 
     private fun executeIntent(index: Int, cmd: ShellCommand): ExecutionResult {
         val cmdStr = cmd.command.trim()
