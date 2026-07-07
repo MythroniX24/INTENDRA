@@ -46,7 +46,7 @@ class SafetyEngine {
         // Mass deletion / wipe — covers /, /sdcard, /storage, /system, /data,
         // ~, *, alternate paths, and any rm -rf targeting a top-level dir.
         Regex("""\brm\s+(-[a-z]*r[a-z]*f[a-z]*|--recursive\s+--force)\s+/(sdcard|storage|system|data|cache|proc|dev|sbin|etc|root|var|tmp|\*|\s*$|\s*/\s*$)""") to "rm -rf against a system path",
-        Regex("""\brm\s+(-[a-z]*r[a-z]*f[a-z]*|--recursive\s+--force)\s+(~|\$\{'$'}HOME|\*|/+(?:\s|\$))""") to "rm -rf against home or root",
+        Regex("""\brm\s+(-[a-z]*r[a-z]*f[a-z]*|--recursive\s+--force)\s+(~|\${'$'}HOME|\*|/+(?:\s|\$))""") to "rm -rf against home or root",
         Regex("""\brmdir\s+/(\s|$)""") to "rmdir of root",
         Regex("""\bmkfs\b""") to "filesystem format (mkfs)",
         Regex("""\bdd\s+if\s*=\s*/dev/(zero|urandom|random)""") to "dd from /dev/zero or /dev/urandom",
