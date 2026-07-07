@@ -143,37 +143,50 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     val topConcepts: StateFlow<List<String>> = _topConcepts.asStateFlow()
 
     // ── Persistent preferences ────────────────────────────────────────────
-    val apiKey: StateFlow<String> = app.dataStore.data
-        .map { it[API_KEY_PREF] ?: "" }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    // UPGRADE: All stateIn() flows use `lazy {}` so that if DataStore or
+    // Database access fails during ViewModel construction, the constructor
+    // still completes and the error is logged on first access instead of
+    // crashing the entire app.
+    val apiKey: StateFlow<String> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[API_KEY_PREF] ?: "" }, "")
+    }
 
-    val geminiApiKey: StateFlow<String> = app.dataStore.data
-        .map { it[GEMINI_KEY_PREF] ?: "" }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val geminiApiKey: StateFlow<String> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[GEMINI_KEY_PREF] ?: "" }, "")
+    }
 
-    val aiProvider: StateFlow<Constants.AiProvider> = app.dataStore.data
-        .map { runCatching { Constants.AiProvider.valueOf(it[PROVIDER_PREF] ?: Constants.AiProvider.OPENROUTER.name) }.getOrDefault(Constants.AiProvider.OPENROUTER) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, Constants.AiProvider.OPENROUTER)
+    val aiProvider: StateFlow<Constants.AiProvider> by lazy {
+        safeStateFlow(app.dataStore.data.map {
+            runCatching { Constants.AiProvider.valueOf(it[PROVIDER_PREF] ?: Constants.AiProvider.OPENROUTER.name) }
+                .getOrDefault(Constants.AiProvider.OPENROUTER)
+        }, Constants.AiProvider.OPENROUTER)
+    }
 
-    val selectedModel: StateFlow<String> = app.dataStore.data
-        .map { it[MODEL_PREF] ?: Constants.DEFAULT_MODEL }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, Constants.DEFAULT_MODEL)
+    val selectedModel: StateFlow<String> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[MODEL_PREF] ?: Constants.DEFAULT_MODEL }, Constants.DEFAULT_MODEL)
+    }
 
-    val selectedGeminiModel: StateFlow<String> = app.dataStore.data
-        .map { it[GEMINI_MODEL_PREF] ?: Constants.DEFAULT_GEMINI_MODEL }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, Constants.DEFAULT_GEMINI_MODEL)
+    val selectedGeminiModel: StateFlow<String> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[GEMINI_MODEL_PREF] ?: Constants.DEFAULT_GEMINI_MODEL }, Constants.DEFAULT_GEMINI_MODEL)
+    }
 
-    val jailbreakEnabled: StateFlow<Boolean> = app.dataStore.data
-        .map { it[JAILBREAK_ENABLED_PREF] ?: false }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val jailbreakEnabled: StateFlow<Boolean> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[JAILBREAK_ENABLED_PREF] ?: false }, false)
+    }
 
-    val jailbreakLevel: StateFlow<JailbreakLevel> = app.dataStore.data
-        .map { runCatching { JailbreakLevel.valueOf(it[JAILBREAK_LEVEL_PREF] ?: JailbreakLevel.OFF.name) }.getOrDefault(JailbreakLevel.OFF) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, JailbreakLevel.OFF)
+    val jailbreakLevel: StateFlow<JailbreakLevel> by lazy {
+        safeStateFlow(app.dataStore.data.map {
+            runCatching { JailbreakLevel.valueOf(it[JAILBREAK_LEVEL_PREF] ?: JailbreakLevel.OFF.name) }
+                .getOrDefault(JailbreakLevel.OFF)
+        }, JailbreakLevel.OFF)
+    }
 
-    val obfuscationTechnique: StateFlow<ObfuscationTechnique> = app.dataStore.data
-        .map { runCatching { ObfuscationTechnique.valueOf(it[OBFUSCATION_TECH_PREF] ?: ObfuscationTechnique.NONE.name) }.getOrDefault(ObfuscationTechnique.NONE) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, ObfuscationTechnique.NONE)
+    val obfuscationTechnique: StateFlow<ObfuscationTechnique> by lazy {
+        safeStateFlow(app.dataStore.data.map {
+            runCatching { ObfuscationTechnique.valueOf(it[OBFUSCATION_TECH_PREF] ?: ObfuscationTechnique.NONE.name) }
+                .getOrDefault(ObfuscationTechnique.NONE)
+        }, ObfuscationTechnique.NONE)
+    }
 
     // ── Termux status ────────────────────────────────────────────────────
     private val termuxBridge = TermuxBridge(app)
@@ -218,46 +231,71 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         _activeTerminalSession.value = name
     }
 
-    val privacyMode: StateFlow<PrivacyMode> = app.dataStore.data
-        .map { runCatching { PrivacyMode.valueOf(it[PRIVACY_MODE_PREF] ?: PrivacyMode.HYBRID.name) }.getOrDefault(PrivacyMode.HYBRID) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, PrivacyMode.HYBRID)
+    val privacyMode: StateFlow<PrivacyMode> by lazy {
+        safeStateFlow(app.dataStore.data.map {
+            runCatching { PrivacyMode.valueOf(it[PRIVACY_MODE_PREF] ?: PrivacyMode.HYBRID.name) }
+                .getOrDefault(PrivacyMode.HYBRID)
+        }, PrivacyMode.HYBRID)
+    }
 
-    val activeWorkspaceId: StateFlow<Long> = app.dataStore.data
-        .map { it[WORKSPACE_ID_PREF]?.toLongOrNull() ?: 0L }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+    val activeWorkspaceId: StateFlow<Long> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[WORKSPACE_ID_PREF]?.toLongOrNull() ?: 0L }, 0L)
+    }
 
     // ── DB-backed flows ───────────────────────────────────────────────────
-    val messages: StateFlow<List<ChatMessage>> = activeWorkspaceId.flatMapLatest { wsId ->
-        repo.getMessages(wsId)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val messages: StateFlow<List<ChatMessage>> by lazy {
+        safeStateFlow(
+            activeWorkspaceId.flatMapLatest { wsId -> repo.getMessages(wsId) },
+            emptyList()
+        )
+    }
 
-    val terminalLogs: StateFlow<List<TerminalLog>> =
-        repo.getRecentLogs(200).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val terminalLogs: StateFlow<List<TerminalLog>> by lazy {
+        safeStateFlow(repo.getRecentLogs(200), emptyList())
+    }
 
-    val allMemories: StateFlow<List<MemoryEntry>> =
-        repo.getAllMemories().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val allMemories: StateFlow<List<MemoryEntry>> by lazy {
+        safeStateFlow(repo.getAllMemories(), emptyList())
+    }
 
-    val pinnedMemories: StateFlow<List<MemoryEntry>> =
-        repo.getPinnedMemories().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val pinnedMemories: StateFlow<List<MemoryEntry>> by lazy {
+        safeStateFlow(repo.getPinnedMemories(), emptyList())
+    }
 
-    val workspaces: StateFlow<List<Workspace>> =
-        repo.getAllWorkspaces().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val workspaces: StateFlow<List<Workspace>> by lazy {
+        safeStateFlow(repo.getAllWorkspaces(), emptyList())
+    }
 
-    val networkEvents: StateFlow<List<NetworkEvent>> =
-        repo.getNetworkEvents().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val networkEvents: StateFlow<List<NetworkEvent>> by lazy {
+        safeStateFlow(repo.getNetworkEvents(), emptyList())
+    }
 
     // ── New DB flows ──────────────────────────────────────────────────────
-    val knowledgeEntries: StateFlow<List<KnowledgeEntry>> =
-        db.dao().getAllKnowledgeEntries().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val knowledgeEntries: StateFlow<List<KnowledgeEntry>> by lazy {
+        safeStateFlow(db.dao().getAllKnowledgeEntries(), emptyList())
+    }
 
-    val timelineEntries: StateFlow<List<TimelineEntry>> =
-        db.dao().getRecentTimelineEntries(500).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val timelineEntries: StateFlow<List<TimelineEntry>> by lazy {
+        safeStateFlow(db.dao().getRecentTimelineEntries(500), emptyList())
+    }
 
-    val automationRules: StateFlow<List<AutomationRule>> =
-        db.dao().getAllAutomationRules().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val automationRules: StateFlow<List<AutomationRule>> by lazy {
+        safeStateFlow(db.dao().getAllAutomationRules(), emptyList())
+    }
 
-    val plugins: StateFlow<List<PluginEntry>> =
-        db.dao().getAllPlugins().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val plugins: StateFlow<List<PluginEntry>> by lazy {
+        safeStateFlow(db.dao().getAllPlugins(), emptyList())
+    }
+
+    /** Safe wrapper: if stateIn() throws during ViewModel construction, fall back to a plain MutableStateFlow. */
+    private fun <T> safeStateFlow(flow: Flow<T>, defaultValue: T): StateFlow<T> {
+        return try {
+            flow.stateIn(viewModelScope, SharingStarted.Eagerly, defaultValue)
+        } catch (e: Exception) {
+            Log.e(TAG, "StateFlow init failed: ${e.message}")
+            MutableStateFlow(defaultValue).asStateFlow()
+        }
+    }
 
     // ── Init ──────────────────────────────────────────────────────────────
     // UPGRADE: Entire init block is wrapped in try-catch so that a crash in
@@ -425,9 +463,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     }
 
     /** Eagerly read the persisted emergency-lock flag so the UI is correct on cold start. */
-    private val emergencyLockPersisted: StateFlow<Boolean> = app.dataStore.data
-        .map { it[EMERGENCY_LOCK_PREF] ?: false }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    private val emergencyLockPersisted: StateFlow<Boolean> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[EMERGENCY_LOCK_PREF] ?: false }, false)
+    }
 
     // ── Main command handler ──────────────────────────────────────────────
     fun sendCommand(input: String) {
@@ -918,11 +956,20 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         // a11y + model-ready + emergency-lock; privacyMode StateFlow self-corrects.
         // Phase 9 FIX: pass app context to isEnabled() so it does a real system
         // query instead of falling back to the stale _cachedEnabled flag.
-        _uiState.update { it.copy(
-            a11yEnabled         = AgentAccessibilityService.isEnabled(app),
-            localModelReady     = localEngine.isModelDownloaded(),
-            emergencyLockActive = emergencyLockPersisted.value
-        )}
+        // UPGRADE: Wrap everything in try-catch so a failure in any component
+        // snapshot (a11y, model, DataStore) doesn't crash the app.
+        try {
+            val a11y  = AgentAccessibilityService.isEnabled(app)
+            val ready = localEngine.isModelDownloaded()
+            val lock  = try { emergencyLockPersisted.value } catch (_: Exception) { false }
+            _uiState.update { it.copy(
+                a11yEnabled         = a11y,
+                localModelReady     = ready,
+                emergencyLockActive = lock
+            )}
+        } catch (e: Exception) {
+            Log.e(TAG, "refreshStatus failed: ${e.message}")
+        }
     }
 
     // ── Export logs ───────────────────────────────────────────────────────
