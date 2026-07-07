@@ -260,54 +260,87 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         db.dao().getAllPlugins().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     // ── Init ──────────────────────────────────────────────────────────────
+    // UPGRADE: Entire init block is wrapped in try-catch so that a crash in
+    // ANY component (TTS, Room, DataStore, JNI, plugins, etc.) does NOT take
+    // down the app. The error is logged and set on uiState so the user sees
+    // a graceful degraded state instead of a crash dialog.
     init {
-        tts = TextToSpeech(app, this)
+        try {
+            tts = TextToSpeech(app, this)
+        } catch (e: Exception) {
+            Log.e(TAG, "TTS init failed: ${e.message}")
+        }
         refreshStatus()
 
         viewModelScope.launch {
-            val ready    = localEngine.isModelDownloaded()
-            val memCount = repo.memoryCount()
-            val knCount  = db.dao().knowledgeCount()
-            val tlCount  = db.dao().timelineCount()
-            _uiState.update { it.copy(
-                localModelReady = ready,
-                memoryCount     = memCount,
-                knowledgeCount  = knCount,
-                timelineCount   = tlCount
-            )}
-            if (ready) localEngine.loadModel()
-        }
-
-        viewModelScope.launch {
-            activeWorkspaceId.collect { wsId ->
-                repo.setWorkspace(wsId)
-                _uiState.update { it.copy(activeWorkspaceId = wsId) }
+            try {
+                val ready    = localEngine.isModelDownloaded()
+                val memCount = repo.memoryCount()
+                val knCount  = db.dao().knowledgeCount()
+                val tlCount  = db.dao().timelineCount()
+                _uiState.update { it.copy(
+                    localModelReady = ready,
+                    memoryCount     = memCount,
+                    knowledgeCount  = knCount,
+                    timelineCount   = tlCount
+                )}
+                if (ready) localEngine.loadModel()
+            } catch (e: Exception) {
+                Log.e(TAG, "Init: model/DB load failed: ${e.message}")
+                _uiState.update { it.copy(error = "Init: ${e.message}") }
             }
         }
 
         viewModelScope.launch {
-            knowledgeEntries.collect { entries ->
-                if (entries.isNotEmpty()) {
-                    knowledgeGraph.rebuild(entries)
-                    _topConcepts.value = knowledgeGraph.topConcepts(20).map { it.label }
-                    _uiState.update { it.copy(knowledgeCount = entries.size) }
+            try {
+                activeWorkspaceId.collect { wsId ->
+                    repo.setWorkspace(wsId)
+                    _uiState.update { it.copy(activeWorkspaceId = wsId) }
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Init: workspace collection failed: ${e.message}")
             }
         }
 
         viewModelScope.launch {
-            val activeTriggers = db.dao().getActiveTriggerRules()
-            automationEngine.updateRuleList(activeTriggers)
+            try {
+                knowledgeEntries.collect { entries ->
+                    if (entries.isNotEmpty()) {
+                        knowledgeGraph.rebuild(entries)
+                        _topConcepts.value = knowledgeGraph.topConcepts(20).map { it.label }
+                        _uiState.update { it.copy(knowledgeCount = entries.size) }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Init: knowledge graph failed: ${e.message}")
+            }
         }
 
         viewModelScope.launch {
-            pluginManager.registerBuiltInPlugins()
-            _uiState.update { it.copy(pluginCount = pluginManager.count()) }
+            try {
+                val activeTriggers = db.dao().getActiveTriggerRules()
+                automationEngine.updateRuleList(activeTriggers)
+            } catch (e: Exception) {
+                Log.e(TAG, "Init: automation rules failed: ${e.message}")
+            }
+        }
+
+        viewModelScope.launch {
+            try {
+                pluginManager.registerBuiltInPlugins()
+                _uiState.update { it.copy(pluginCount = pluginManager.count()) }
+            } catch (e: Exception) {
+                Log.e(TAG, "Init: plugin registration failed: ${e.message}")
+            }
         }
 
         // Refresh Termux external apps status
         viewModelScope.launch {
-            _termuxExternalAppsEnabled.value = termuxBridge.isExternalAppsEnabled()
+            try {
+                _termuxExternalAppsEnabled.value = termuxBridge.isExternalAppsEnabled()
+            } catch (e: Exception) {
+                Log.e(TAG, "Init: Termux check failed: ${e.message}")
+            }
         }
     }
 
