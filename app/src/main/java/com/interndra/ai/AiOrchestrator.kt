@@ -145,15 +145,27 @@ class AiOrchestrator(
                             jailbreakActive = jailbreakActive,
                             jailbreakLevel = jailbreakLevel
                         )
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Gemini error: ${e.message} — falling back to OpenRouter")
+                    } catch (geminiErr: Exception) {
+                        val rawMsg = geminiErr.message ?: "Unknown Gemini error"
+                        val geminiMsg = rawMsg
+                            .replace("\\", "\\\\")
+                            .replace("\"", "\\\"")
+                            .replace("\n", "\\n")
+                            .take(300)
+                        Log.e(TAG, "Gemini error: $geminiMsg — falling back to OpenRouter")
+                        // Try OpenRouter fallback, but if it also fails, return Gemini error
                         try {
                             cloudEngine.parseIntent(userInput, memory, chatHistory,
                                 jailbreakActive = jailbreakActive,
                                 jailbreakLevel = jailbreakLevel
                             ).copy(source = AiSource.FALLBACK)
                         } catch (e2: Exception) {
-                            runLocal(userInput, memory).copy(source = AiSource.FALLBACK)
+                            // Both Gemini AND OpenRouter failed — show Gemini error to user
+                            runLocal(userInput, memory).copy(
+                                source = AiSource.FALLBACK,
+                                modelUsed = "gemini-error",
+                                intentJson = """{"action":"chat","reply":"⚠️ **Gemini API Error:** $geminiMsg\n\n**Troubleshooting:**\n- Check your Gemini API key in Settings\n- Make sure you have internet\n- Try a different Gemini model in Settings\n- The selected model may be unavailable — try Gemini 3.5 Flash","commands":[]}"""
+                            )
                         }
                     }
                 }

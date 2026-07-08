@@ -506,10 +506,27 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            repo.addUserMessage(trimmed)
-            val placeholderId = repo.addAiPlaceholder()
-            val session       = repo.newSession()
-            val startMs       = System.currentTimeMillis()
+
+            // FIX: ALL Room DB operations moved INSIDE try-catch.
+            // Previously addUserMessage, addAiPlaceholder, newSession were
+            // BEFORE the try-catch — any DB failure (corrupted data, missing
+            // migration, null DAO) would crash the app.
+            var placeholderId = -1L
+            var session = ""
+            val startMs = System.currentTimeMillis()
+
+            try {
+                repo.addUserMessage(trimmed)
+                placeholderId = repo.addAiPlaceholder()
+                session       = repo.newSession()
+            } catch (dbErr: Exception) {
+                Log.e(TAG, "DB init failed: ${dbErr.message}")
+                _uiState.update { it.copy(
+                    isLoading = false,
+                    error = "Database error: ${dbErr.message}. Try clearing app data."
+                )}
+                return@launch
+            }
 
             // ── Phase 5/6/7: try the workflow planner FIRST ─────────────────
             // If the user's request maps cleanly to a known workflow (WhatsApp
@@ -588,7 +605,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Workflow planner failed, falling back to AI: ${e.message}")
-                repo.log(session, LogType.INFO, "⚠️ Workflow planner unavailable, using AI")
+                // CRASH FIX: repo.log() wrapped in try-catch — if DB is
+                // corrupted, logging must not crash the app.
+                try { repo.log(session, LogType.INFO, "⚠️ Workflow planner unavailable, using AI") } catch (_: Exception) {}
             }
 
             try {
@@ -725,11 +744,13 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 )
 
             } catch (e: Exception) {
-                // Phase 2 FIX: e.message can be null — never show "null" to the user.
+                // CRASH FIX: All Room operations protected by inner try-catch.
+                // If placeholder or session is invalid, the update/log calls
+                // would crash the app before the error reaches the user.
                 val msg = e.message ?: e::class.simpleName ?: "Unknown error"
                 val err = "Error: $msg"
-                repo.updateAiMessage(placeholderId, err)
-                repo.log(session, LogType.STATUS_FAIL, err)
+                try { repo.updateAiMessage(placeholderId, err) } catch (_: Exception) {}
+                try { repo.log(session, LogType.STATUS_FAIL, err) } catch (_: Exception) {}
                 _uiState.update { it.copy(error = msg) }
             } finally {
                 _uiState.update { it.copy(isLoading = false) }

@@ -9,7 +9,7 @@ object Constants {
     const val GEMINI_DOMAIN       = "generativelanguage.googleapis.com"
     const val HTTP_TIMEOUT_SEC    = 60L
     const val DEFAULT_MODEL       = "openrouter/auto"
-    const val DEFAULT_GEMINI_MODEL = "gemini/gemini-2.5-flash-preview-05-20"
+    const val DEFAULT_GEMINI_MODEL = "gemini/gemini-3.5-flash"
 
     // ── Provider enum ─────────────────────────────────────────────────────
     enum class AiProvider(val label: String, val emoji: String) {
@@ -33,9 +33,10 @@ object Constants {
 
     // ── Gemini Models ────────────────────────────────────────────────────
     val GEMINI_MODELS = linkedMapOf(
-        "Gemini 2.5 Flash — Fast & Smart ⚡ (Recommended)" to "gemini/gemini-2.5-flash-preview-05-20",
-        "Gemini 2.5 Pro — Most Powerful 💪"               to "gemini/gemini-2.5-pro-exp-03-25",
-        "Gemini 2.0 Flash — Stable 🏆"                    to "gemini/gemini-2.0-flash-001",
+        "Gemini 3.5 Flash — Fast & Smart ⚡ (Recommended)" to "gemini/gemini-3.5-flash",
+        "Gemini 3.1 Pro — Most Powerful 💪"               to "gemini/gemini-3.1-pro",
+        "Gemini 3 Flash — Complex Tasks 🧠"               to "gemini/gemini-3-flash",
+        "Gemini 3.1 Flash-Lite — Fast & Cheap 💰"         to "gemini/gemini-3.1-flash-lite",
         "Gemini 1.5 Pro — Legacy 🔵"                      to "gemini/gemini-1.5-pro",
         "Gemini 1.5 Flash — Legacy ⚡"                    to "gemini/gemini-1.5-flash"
     )
