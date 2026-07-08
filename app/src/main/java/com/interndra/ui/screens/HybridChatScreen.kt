@@ -141,8 +141,8 @@ fun HybridChatScreen(
 
     Column(Modifier.fillMaxSize().background(Color(0xFF0F0F0F)).imePadding()) {
 
-        // ── Top bar ───────────────────────────────────────────────────────
-        AnimatedTopBar(onOpenDrawer, onNavigateToTerminal, uiState.activeWorkspaceName)
+        // ── Simple top bar ─────────────────────────────────────────────
+        SimpleTopBar(onOpenDrawer)
 
         // ── Emergency lock banner ─────────────────────────────────────────
         AnimatedVisibility(visible = uiState.emergencyLockActive) {
@@ -185,9 +185,6 @@ fun HybridChatScreen(
                 onAccept = { vm.confirmAction() }, onDeny = { vm.denyAction() })
         }
 
-        // ── Status row ────────────────────────────────────────────────────
-        StatusRow(mode, provider, uiState, jailbreakEnabled, jailbreakLevel)
-
         // ── Messages ──────────────────────────────────────────────────────
         LazyColumn(
             state               = listState,
@@ -196,7 +193,7 @@ fun HybridChatScreen(
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             if (messages.isEmpty()) {
-                item { EnhancedWelcomeScreen(vm) { text -> inputText = text } }
+                item { SimpleWelcomeScreen { text -> inputText = text } }
             } else {
                 // Render grouped messages
                 itemsIndexed(groupedMessages, key = { idx, _ -> "group_${idx}_${messages.size}" }) { _, (role, msgs) ->
@@ -216,8 +213,8 @@ fun HybridChatScreen(
             }
         }
 
-        // ── Enhanced Input Bar ────────────────────────────────────────────
-        EnhancedHybridInputBar(
+        // ── Simple Input Bar ──────────────────────────────────────────────
+        SimpleInputBar(
             text         = inputText,
             isLoading    = uiState.isLoading,
             onTextChange = { inputText = it },
@@ -230,115 +227,21 @@ fun HybridChatScreen(
                         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
                     }
                 }
-            },
-            attachedFiles = emptyList(), // file handling via launcher
-            onAttachFile = { /* file picker */ }
+            }
         )
     }
 }
 
-// ── Animated Top Bar ────────────────────────────────────────────────────────
+// ── Simple Top Bar ────────────────────────────────────────────────────────
 @Composable
-private fun AnimatedTopBar(
-    onOpenDrawer: () -> Unit,
-    onNavigateToTerminal: () -> Unit,
-    workspaceName: String
+private fun SimpleTopBar(
+    onOpenDrawer: () -> Unit
 ) {
-    var showTitle by remember { mutableStateOf(true) }
     Surface(color = Color(0xFF0F0F0F), tonalElevation = 0.dp) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)) {
             IconButton(onClick = onOpenDrawer, modifier = Modifier.align(Alignment.CenterStart)) {
                 Icon(Icons.Default.Menu, "Menu", tint = Color.White)
             }
-
-            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("INTERNDRA", color = Color.White, fontSize = 22.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontFamily = FontFamily.SansSerif, letterSpacing = (-0.5).sp)
-
-                if (workspaceName != "General") {
-                    Text(workspaceName, color = Accent.copy(alpha = 0.8f),
-                        fontSize = 11.sp, letterSpacing = 0.5.sp)
-                }
-            }
-
-            Row(Modifier.align(Alignment.CenterEnd)) {
-                IconButton(onClick = onNavigateToTerminal) {
-                    Icon(Icons.Default.Terminal, "Terminal", tint = Color.White)
-                }
-            }
-        }
-    }
-}
-
-// ── Status Row ──────────────────────────────────────────────────────────────
-@Composable
-private fun StatusRow(
-    mode: PrivacyMode,
-    provider: Constants.AiProvider,
-    uiState: HybridUiState,
-    jailbreakEnabled: Boolean,
-    jailbreakLevel: JailbreakLevel
-) {
-    Row(
-        Modifier
-            .padding(horizontal = 12.dp, vertical = 4.dp)
-            .fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        PrivacyChip(mode)
-
-        // Provider badge
-        val provColor = when (provider) {
-            Constants.AiProvider.OPENROUTER -> TerminalBlue
-            Constants.AiProvider.GEMINI -> TerminalGreen
-        }
-        Surface(shape = RoundedCornerShape(50), color = provColor.copy(alpha = 0.15f)) {
-            Text("${provider.emoji} ${provider.label.split(" ").first()}",
-                color = provColor, fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp))
-        }
-
-        if (uiState.localModelReady)
-            StatusChip("Local AI ✓", true, TerminalGreen)
-        else
-            StatusChip("Local AI ✗", false, TerminalRed)
-
-        // Jailbreak status
-        if (jailbreakEnabled) {
-            val jbColor = when (jailbreakLevel) {
-                JailbreakLevel.LIGHT -> TerminalGreen
-                JailbreakLevel.MEDIUM -> TerminalYellow
-                JailbreakLevel.EXTREME -> TerminalRed
-                else -> Accent
-            }
-            Surface(shape = RoundedCornerShape(50), color = jbColor.copy(alpha = 0.15f)) {
-                Text("🧠 ${jailbreakLevel.label.first()}", color = jbColor, fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp))
-            }
-        } else {
-            Surface(shape = RoundedCornerShape(50), color = SurfaceLight.copy(alpha = 0.1f)) {
-                Text("🧠 Off", color = TerminalWhite.copy(0.4f), fontSize = 10.sp,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
-            }
-        }
-
-        uiState.lastAiSource?.let { src ->
-            StatusChip(
-                when (src) {
-                    AiSource.LOCAL    -> "🔒 On-device"
-                    AiSource.CLOUD    -> "☁️ Cloud"
-                    AiSource.FALLBACK -> "⚡ Fallback"
-                },
-                active = true,
-                activeColor = when (src) {
-                    AiSource.LOCAL    -> TerminalGreen
-                    AiSource.CLOUD    -> TerminalBlue
-                    AiSource.FALLBACK -> TerminalYellow
-                }
-            )
         }
     }
 }
@@ -431,7 +334,7 @@ private fun MessageGroup(
                             )
                     ) {
                         if (msg.isLoading) {
-                            EnhancedLoadingDots()
+                            SimpleLoadingDots()
                         } else if (isUser) {
                             Text(msg.content, color = TerminalWhite, fontSize = 15.sp, lineHeight = 22.sp)
                         } else {
@@ -450,13 +353,12 @@ private fun MessageGroup(
                         }
                     }
 
-                    // Message actions (only for last message in group)
+                    // Simple message actions (only for last message in group)
                     if (isLast && !msg.isLoading) {
-                        MessageActions(
+                        SimpleMessageActions(
                             role = msg.role,
                             content = msg.content,
                             onCopy = onCopy,
-                            onDelete = { onDelete(msg) },
                             onRegenerate = onRegenerate
                         )
                     }
@@ -466,90 +368,53 @@ private fun MessageGroup(
     }
 }
 
-// ── Message Actions ─────────────────────────────────────────────────────────
+// ── Simple Message Actions ────────────────────────────────────────────────
 @Composable
-private fun MessageActions(
+private fun SimpleMessageActions(
     role: MessageRole,
     content: String,
     onCopy: (String) -> Unit,
-    onDelete: () -> Unit,
     onRegenerate: () -> Unit
 ) {
-    var liked by remember { mutableStateOf<Boolean?>(null) }
-
     Row(
         modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        SmallActionButton(Icons.Default.ContentCopy, "Copy", { onCopy(content) })
         if (role == MessageRole.AI) {
-            // Copy button
-            ActionIcon(Icons.Default.ContentCopy, "Copy", { onCopy(content) })
-            // Thumbs up
-            ActionIcon(
-                if (liked == true) Icons.Default.ThumbUp else Icons.Default.ThumbUpOffAlt,
-                "Like",
-                { liked = if (liked == true) null else true },
-                tint = if (liked == true) Accent else TerminalWhite.copy(0.4f)
-            )
-            // Thumbs down
-            ActionIcon(
-                if (liked == false) Icons.Default.ThumbDown else Icons.Default.ThumbDownOffAlt,
-                "Dislike",
-                { liked = if (liked == false) null else false },
-                tint = if (liked == false) Danger else TerminalWhite.copy(0.4f)
-            )
-            // Regenerate
-            ActionIcon(Icons.Default.Refresh, "Regenerate", onRegenerate)
-        } else {
-            // User message: edit & delete
-            ActionIcon(Icons.Default.Edit, "Edit", { /* future: edit mode */ })
-            ActionIcon(Icons.Default.Delete, "Delete", onDelete)
+            SmallActionButton(Icons.Default.Refresh, "Regenerate", onRegenerate)
         }
     }
 }
 
 @Composable
-private fun ActionIcon(
+private fun SmallActionButton(
     icon: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
-    tint: Color = TerminalWhite.copy(0.4f),
-    size: androidx.compose.ui.unit.Dp = 14.dp
+    description: String,
+    onClick: () -> Unit
 ) {
     IconButton(
         onClick = onClick,
-        modifier = Modifier.size(28.dp)
+        modifier = Modifier.size(24.dp)
     ) {
-        Icon(icon, contentDescription, tint = tint, modifier = Modifier.size(size))
+        Icon(icon, description, tint = TerminalWhite.copy(0.3f), modifier = Modifier.size(14.dp))
     }
 }
 
-// ── Enhanced Loading Dots with text ─────────────────────────────────────────
+// ── Simple Loading Dots ────────────────────────────────────────────────────
 @Composable
-private fun EnhancedLoadingDots() {
-    val inf = rememberInfiniteTransition(label = "loading")
-    val alpha by inf.animateFloat(0.3f, 1f,
-        infiniteRepeatable(tween(800, easing = LinearEasing), RepeatMode.Reverse), label = "alpha")
-    val scale by inf.animateFloat(0.8f, 1.0f,
-        infiniteRepeatable(tween(800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "scale")
-
-    Column(modifier = Modifier.padding(4.dp)) {
-        Row(
-            modifier = Modifier.height(28.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            Text("thinking", color = TerminalWhite.copy(0.5f), fontSize = 12.sp,
-                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
-            repeat(3) { i ->
-                val dotColor = if (i == 1) Color(0xFFB388FF) else Color(0xFF00E5FF)
-                Box(
-                    Modifier
-                        .size(8.dp)
-                        .scale(scale)
-                        .background(dotColor.copy(alpha = alpha), CircleShape)
-                )
-            }
+private fun SimpleLoadingDots() {
+    Row(
+        modifier = Modifier.height(24.dp).padding(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        repeat(3) {
+            Box(
+                Modifier
+                    .size(6.dp)
+                    .background(TerminalWhite.copy(0.4f), CircleShape)
+            )
         }
     }
 }
@@ -624,141 +489,30 @@ private fun ConfirmationBanner(
     }
 }
 
-// ── Privacy Chip ───────────────────────────────────────────────────────────
+// ── Simplified Input Bar ────────────────────────────────────────────
 @Composable
-private fun PrivacyChip(mode: PrivacyMode) {
-    val color = when (mode) {
-        PrivacyMode.LOCAL_ONLY     -> TerminalGreen
-        PrivacyMode.HYBRID         -> TerminalYellow
-        PrivacyMode.CLOUD_ENHANCED -> TerminalBlue
-    }
-    Surface(shape = RoundedCornerShape(50), color = color.copy(alpha = 0.15f)) {
-        Text("${mode.emoji} ${mode.label}", color = color, fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp))
-    }
-}
-
-// ── Status Chip ────────────────────────────────────────────────────────────
-@Composable
-private fun StatusChip(label: String, active: Boolean, activeColor: Color = TerminalGreen) {
-    Surface(shape = RoundedCornerShape(50),
-        color = if (active) activeColor.copy(0.15f) else TerminalRed.copy(0.10f)) {
-        Text("● $label", color = if (active) activeColor else TerminalRed,
-            fontSize = 10.sp, fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
-    }
-}
-
-// ── ENHANCED Input Bar with markdown toolbar ───────────────────────────────
-@Composable
-private fun EnhancedHybridInputBar(
+private fun SimpleInputBar(
     text: String,
     isLoading: Boolean,
     onTextChange: (String) -> Unit,
-    onSend: () -> Unit,
-    attachedFiles: List<String>,
-    onAttachFile: () -> Unit
+    onSend: () -> Unit
 ) {
-    val context = LocalContext.current
-    var showMarkdownTools by remember { mutableStateOf(false) }
-
-    // File picker launcher — hoisted to top of composable
-    val filePickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let {
-            val fileName = getFileName(context, it)
-            val fileInfo = "[File: $fileName]"
-            onTextChange(text + "\n$fileInfo ")
-            Toast.makeText(context, "Attached: $fileName", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    val speechLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                ?.firstOrNull()?.let { onTextChange(text + it) }
-        }
-    }
-
     Column(
         Modifier
             .fillMaxWidth()
             .background(Color(0xFF0F0F0F))
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        // ── Markdown toolbar (collapsible) ────────────────────────────────
-        AnimatedVisibility(visible = showMarkdownTools) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                listOf(
-                    "**" to "Bold", "*" to "Italic", "`" to "Code",
-                    "[link](url)" to "Link", "- " to "List", "```" to "Code block"
-                ).forEach { (sym, label) ->
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = SurfaceLight.copy(0.2f),
-                        modifier = Modifier.clickable {
-                            onTextChange(text + sym)
-                        }
-                    ) {
-                        Text(
-                            label,
-                            color = TerminalWhite.copy(0.7f),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // ── Main input surface ────────────────────────────────────────────
         Surface(
             modifier  = Modifier.fillMaxWidth(),
             shape     = RoundedCornerShape(24.dp),
-            color     = Color(0xFF0F0F0F),
+            color     = Color(0xFF1A1B1E),
             border    = BorderStroke(1.dp, Color(0xFF2A2A2A))
         ) {
             Row(
-                Modifier
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Attach file button
-                IconButton(
-                    onClick = { filePickerLauncher.launch("*/*") },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Default.AttachFile,
-                        "Attach file",
-                        tint = Color.White.copy(0.7f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                // Markdown toggle
-                IconButton(
-                    onClick = { showMarkdownTools = !showMarkdownTools },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        if (showMarkdownTools) Icons.Default.Code else Icons.Default.CodeOff,
-                        "Markdown",
-                        tint = if (showMarkdownTools) Accent else Color.White.copy(0.6f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
                 // Text field
                 TextField(
                     value         = text,
@@ -766,7 +520,7 @@ private fun EnhancedHybridInputBar(
                     modifier      = Modifier.weight(1f),
                     placeholder   = {
                         Text(
-                            if (attachedFiles.isNotEmpty()) "[${attachedFiles.size} file(s)] Ask..." else "Ask anything...",
+                            "Ask anything...",
                             fontSize = 15.sp, color = Color(0xFF666666)
                         )
                     },
@@ -786,290 +540,85 @@ private fun EnhancedHybridInputBar(
                     })
                 )
 
-                // Character count (when typing)
-                if (text.length > 100) {
-                    Text(
-                        "${text.length}",
-                        color = if (text.length > 400) TerminalRed.copy(0.7f) else TerminalWhite.copy(0.3f),
-                        fontSize = 10.sp,
-                        modifier = Modifier.padding(end = 4.dp)
-                    )
-                }
-
-                // Send / Voice button
-                val hasContent = text.isNotBlank() || attachedFiles.isNotEmpty()
-                if (hasContent) {
-                    IconButton(
-                        onClick = {
-                            if (attachedFiles.isNotEmpty()) {
-                                val filePrefix = "[Attached: ${attachedFiles.joinToString(", ")}]\n"
-                                onTextChange(filePrefix + text)
-                            }
-                            onSend()
-                        },
-                        enabled  = !isLoading,
-                        modifier = Modifier.size(44.dp)
-                    ) {
-                        if (isLoading)
-                            CircularProgressIndicator(
-                                Modifier.size(20.dp),
-                                color = Accent,
-                                strokeWidth = 2.dp
-                            )
-                        else
-                            Icon(
-                                Icons.AutoMirrored.Filled.Send,
-                                "Send",
-                                tint = Accent
-                            )
-                    }
-                } else {
-                    IconButton(
-                        onClick = {
-                            try {
-                                speechLauncher.launch(
-                                    Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                            RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                                    }
-                                )
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Voice input not supported",
-                                    Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        modifier = Modifier.size(44.dp)
-                    ) {
+                // Send button
+                IconButton(
+                    onClick = onSend,
+                    enabled  = text.isNotBlank() && !isLoading,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            Modifier.size(18.dp),
+                            color = Accent,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
                         Icon(
-                            Icons.Outlined.MicNone, "Voice",
-                            tint = Color.White.copy(0.8f),
-                            modifier = Modifier.size(22.dp)
+                            Icons.AutoMirrored.Filled.Send,
+                            "Send",
+                            tint = if (text.isNotBlank()) Accent else TerminalWhite.copy(0.3f)
                         )
                     }
                 }
             }
         }
-
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "INTERNDRA AI CAN MAKE MISTAKES. VERIFY CRITICAL OUTPUT.",
-            color = Color(0xFF444444), fontSize = 9.sp,
-            letterSpacing = 0.8.sp, fontFamily = FontFamily.Monospace,
-            modifier = Modifier.align(Alignment.CenterHorizontally),
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(4.dp))
     }
 }
 
-// ── ENHANCED Welcome Screen with categorized suggestions ───────────────────
+// ── Simple Welcome Screen ───────────────────────────────────────────────────
 @Composable
-private fun EnhancedWelcomeScreen(vm: HybridAgentViewModel, onTextChange: (String) -> Unit) {
-    val uiState by vm.uiState.collectAsState()
-    var selectedCategory by remember { mutableStateOf(0) }
-
-    val categories = listOf(
-        "All" to Icons.Default.AllInclusive,
-        "System" to Icons.Default.PhoneAndroid,
-        "Web" to Icons.Default.Public,
-        "Files" to Icons.Default.Folder,
-        "Apps" to Icons.Default.Apps
+private fun SimpleWelcomeScreen(onTextChange: (String) -> Unit) {
+    val suggestions = listOf(
+        "📊 Check battery & storage",
+        "🔍 Search the web",
+        "📂 List files in Downloads",
+        "🚀 Open WhatsApp",
+        "📶 Show Wi-Fi info",
+        "💵 USD to INR rate"
     )
-
-    val suggestionsByCategory = mapOf(
-        "System" to listOf(
-            "📊 Battery & storage status",
-            "🔋 What's running in background?",
-            "📶 Show my Wi-Fi info",
-            "📱 Device info & specs",
-            "🔦 Turn on flashlight",
-            "🔊 Set volume to 50%"
-        ),
-        "Web" to listOf(
-            "🔍 Search the web for latest AI news",
-            "🌤 What's the weather today?",
-            "📰 Top headlines this week",
-            "💵 Current USD to INR rate",
-            "🎬 Latest movie releases"
-        ),
-        "Files" to listOf(
-            "📂 List files in Downloads",
-            "📸 Find recent screenshots",
-            "🗑 Clear junk files larger than 100MB",
-            "📥 Show my downloads sorted by size",
-            "📁 Check internal storage usage"
-        ),
-        "Apps" to listOf(
-            "🚀 Open WhatsApp",
-            "📧 Open Gmail",
-            "🎵 Play music on Spotify",
-            "📺 Open YouTube",
-            "⚙️ Open Settings"
-        )
-    )
-
-    val currentSuggestions = remember(selectedCategory) {
-        if (selectedCategory == 0) {
-            suggestionsByCategory.values.flatten()
-        } else {
-            suggestionsByCategory[categories[selectedCategory].first] ?: emptyList()
-        }
-    }
 
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .padding(top = 24.dp),
+            .padding(horizontal = 24.dp)
+            .padding(top = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // ── Animated glow logo ────────────────────────────────────────────
-        val inf = rememberInfiniteTransition(label = "glow")
-        val glowAlpha by inf.animateFloat(0.05f, 0.25f,
-            infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Reverse), label = "glow")
+        Spacer(Modifier.height(32.dp))
 
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(100.dp)) {
-            Box(Modifier.size(80.dp).background(Color(0xFF00E5FF).copy(alpha = glowAlpha), CircleShape))
-            Box(Modifier.size(55.dp).background(Color(0xFF00E5FF).copy(alpha = 0.08f), CircleShape))
-            Icon(Icons.Default.AutoAwesome, null, tint = Accent, modifier = Modifier.size(38.dp))
-        }
+        Icon(Icons.Default.AutoAwesome, null, tint = Accent, modifier = Modifier.size(40.dp))
+        Spacer(Modifier.height(12.dp))
+        Text("INTERNDRA", color = TerminalWhite, fontSize = 24.sp,
+            fontWeight = FontWeight.Bold)
+        Text("Private AI Assistant", color = TerminalWhite.copy(0.4f), fontSize = 13.sp)
 
-        Spacer(Modifier.height(16.dp))
-        Text("INTERNDRA", color = TerminalWhite, fontSize = 26.sp,
-            fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp)
-        Text("Private AI Operating System", color = TerminalWhite.copy(0.5f), fontSize = 13.sp)
+        Spacer(Modifier.height(32.dp))
 
-        Spacer(Modifier.height(6.dp))
-
-        // Processing indicator
-        val modeColor = when (uiState.privacyMode) {
-            PrivacyMode.LOCAL_ONLY     -> TerminalGreen
-            PrivacyMode.HYBRID         -> TerminalYellow
-            PrivacyMode.CLOUD_ENHANCED -> TerminalBlue
-        }
-        Surface(shape = RoundedCornerShape(50), color = modeColor.copy(0.12f)) {
-            Text("${uiState.privacyMode.emoji} ${uiState.privacyMode.label} Processing",
-                color = modeColor, fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp))
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        // ── Category pills ────────────────────────────────────────────────
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            categories.forEachIndexed { idx, (name, icon) ->
-                val selected = idx == selectedCategory
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = if (selected) Accent.copy(0.2f) else SurfaceLight.copy(0.1f),
-                    border = BorderStroke(
-                        1.dp,
-                        if (selected) Accent.copy(0.5f) else SurfaceLight.copy(0.2f)
-                    ),
-                    modifier = Modifier.clickable { selectedCategory = idx }
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            icon,
-                            null,
-                            tint = if (selected) Accent else TerminalWhite.copy(0.5f),
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            name,
-                            color = if (selected) Accent else TerminalWhite.copy(0.6f),
-                            fontSize = 12.sp,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        Text(
-            "QUICK ACTIONS",
-            color = TerminalWhite.copy(0.35f),
-            fontSize = 10.sp,
-            letterSpacing = 2.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-
-        // ── Suggestions grid ──────────────────────────────────────────────
-        currentSuggestions.chunked(2).forEach { row ->
+        suggestions.chunked(2).forEach { row ->
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 3.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 row.forEach { suggestion ->
                     OutlinedButton(
-                        onClick = { onTextChange(suggestion.dropWhile { it != ' ' }.drop(1)) },
-                        border  = BorderStroke(1.dp, SurfaceLight.copy(0.5f)),
+                        onClick = { onTextChange(suggestion.substringAfter(" ").trim()) },
+                        border  = BorderStroke(1.dp, SurfaceLight.copy(0.3f)),
                         shape   = RoundedCornerShape(12.dp),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(
                             suggestion,
-                            color = TerminalWhite.copy(0.8f),
-                            fontSize = 11.sp,
+                            color = TerminalWhite.copy(0.6f),
+                            fontSize = 12.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
-                // Fill empty slot if odd count
                 if (row.size < 2) Spacer(Modifier.weight(1f))
             }
         }
-
-        // ── Usage stats (shown if available) ──────────────────────────────
-        if (uiState.memoryCount > 0 || uiState.knowledgeCount > 0) {
-            Spacer(Modifier.height(16.dp))
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (uiState.memoryCount > 0) {
-                    Surface(shape = RoundedCornerShape(50), color = VaultPurple.copy(0.12f)) {
-                        Text(
-                            "🧠 ${uiState.memoryCount} memories",
-                            color = VaultPurple.copy(0.7f), fontSize = 11.sp,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-                Spacer(Modifier.width(8.dp))
-                if (uiState.knowledgeCount > 0) {
-                    Surface(shape = RoundedCornerShape(50), color = VaultCyan.copy(0.12f)) {
-                        Text(
-                            "📚 ${uiState.knowledgeCount} entries",
-                            color = VaultCyan.copy(0.7f), fontSize = 11.sp,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-                Spacer(Modifier.width(8.dp))
-                Surface(shape = RoundedCornerShape(50), color = Accent.copy(0.12f)) {
-                    Text(
-                        "⚡ ${uiState.lastLatencyMs}ms",
-                        color = Accent.copy(0.7f), fontSize = 11.sp,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(24.dp))
     }
 }
 

@@ -513,8 +513,21 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         val key  = apiKey.value
         val geminiKey = geminiApiKey.value
 
+        // FIX: When provider is configured with a valid API key, auto-promote
+        // HYBRID mode to CLOUD_ENHANCED so the AI actually routes to cloud.
+        // Without this, HYBRID mode sends short/simple queries to LOCAL,
+        // where the rule-based fallback returns "Unable to process this request"
+        // instead of using Gemini/OpenRouter.
+        // LOCAL_ONLY is always respected — never override user's privacy choice.
+        val effectiveMode = when {
+            mode == PrivacyMode.LOCAL_ONLY -> PrivacyMode.LOCAL_ONLY
+            provider == Constants.AiProvider.GEMINI && geminiKey.isNotBlank() -> PrivacyMode.CLOUD_ENHANCED
+            provider == Constants.AiProvider.OPENROUTER && key.isNotBlank() -> PrivacyMode.CLOUD_ENHANCED
+            else -> mode
+        }
+
         // FIX: Check the correct API key based on selected provider
-        if (mode == PrivacyMode.CLOUD_ENHANCED) {
+        if (effectiveMode == PrivacyMode.CLOUD_ENHANCED) {
             when (provider) {
                 Constants.AiProvider.GEMINI -> {
                     if (geminiKey.isBlank()) {
@@ -686,14 +699,14 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 }
 
                 // ── Route + parse ─────────────────────────────────────────
-                repo.log(session, LogType.INFO, "🧠 Routing: ${mode.emoji} ${mode.label}")
+                repo.log(session, LogType.INFO, "🧠 Routing: ${effectiveMode.emoji} ${effectiveMode.label} (privacyMode: ${mode.name})")
 
                 val memoryContext = repo.buildMemoryContext()
                 val chatHistory  = repo.getChatHistory(limit = 16)
                 val orchResult = orchestrator.process(
                     userInput   = augmentedInput,
                     memory      = memoryContext,
-                    privacyMode = mode,
+                    privacyMode = effectiveMode,
                     chatHistory = chatHistory,
                     onCloudConsentNeeded = { resumeCallback ->
                         _uiState.update { s ->
