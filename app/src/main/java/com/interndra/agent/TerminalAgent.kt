@@ -3,32 +3,36 @@ package com.interndra.agent
 import android.content.Context
 import android.util.Log
 import com.interndra.service.TermuxBridge
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * TerminalAgent — persistent shell session manager with auto-completion
- * and error recovery for INTERNDRA's AI terminal.
+ * TerminalAgent — persistent shell session manager with real-time streaming,
+ * auto-completion, error recovery, and automatic workdir tracking.
  *
- * ## Architecture
+ * ## Streaming Architecture
  * ```
- * TerminalAgent
- *   ├── SessionManager    — multiple named sessions with PWD/env/history
- *   ├── CompletionEngine  — git/pkg/pip/npm/path smart completions
- *   └── RecoveryEngine    — error pattern detection + auto-fix commands
+ * User Input → TerminalAgent.execute()
+ *                 ↓
+ *           TermuxBridge.executeShell()
+ *                 ↓
+ *         onOutput callback (realtime)
+ *                 ↓
+ *         MutableSharedFlow<String>
+ *                 ↓
+ *         TerminalScreen composable
  * ```
  *
- * ## Usage
- * ```kotlin
- * val agent = TerminalAgent(context, termuxBridge)
- * agent.createSession("project-a", "/data/data/com.termux/files/home/project")
- * val result = agent.execute("project-a", "npm install")
- * val suggestions = agent.suggestCompletions("git com")
- * val recovery = agent.suggestRecovery("git: command not found")
- * ```
+ * ## Session Persistence
+ * Sessions are automatically saved to disk and restored on app restart.
  */
 class TerminalAgent(
     private val context: Context,
@@ -40,19 +44,26 @@ class TerminalAgent(
         // Recovery timeouts (milliseconds)
         private const val RECOVERY_TIMEOUT_MS = 15_000L
         private const val DEF_INSTALL_TIMEOUT_MS = 120_000L
+        private const val AUTO_SAVE_DELAY_MS = 5_000L
 
         // Default Termux home
-        private val TERMUX_HOME = "/data/data/com.termux/files/home"
-        private val TERMUX_USR_BIN = "/data/data/com.termux/files/usr/bin"
+        val TERMUX_HOME = "/data/data/com.termux/files/home"
+        val TERMUX_USR_BIN = "/data/data/com.termux/files/usr/bin"
     }
 
     // ── Session ────────────────────────────────────────────────────────────
 
     data class TerminalSession(
         val name: String,
-        var workdir: String,
-        val envVars: MutableMap<String, String> = mutableMapOf(),
+        var workdir: String = TERMUX_HOME,
+        val envVars: MutableMap<String, String> = mutableMapOf(
+            "HOME" to TERMUX_HOME,
+            "PATH" to "$TERMUX_USR_BIN:/usr/bin:/bin",
+            "PWD" to TERMUX_HOME,
+            "TERM" to "xterm-256color"
+        ),
         val history: MutableList<HistoryEntry> = mutableListOf(),
+        val outputLines: MutableList<String> = mutableListOf(),
         val createdAt: Long = System.currentTimeMillis(),
         var lastActiveAt: Long = System.currentTimeMillis()
     )
@@ -98,6 +109,17 @@ class TerminalAgent(
         val explanation: String
     )
 
+    // ── Streaming ─────────────────────────────────────────────────────────
+    private val _outputFlow = MutableSharedFlow<StreamEvent>(replay = 0, extraBufferCapacity = 256)
+    val outputFlow: SharedFlow<StreamEvent> = _outputFlow.asSharedFlow()
+
+    sealed class StreamEvent {
+        data class Output(val sessionName: String, val text: String) : StreamEvent()
+        data class CommandStart(val sessionName: String, val command: String) : StreamEvent()
+        data class CommandEnd(val sessionName: String, val exitCode: Int) : StreamEvent()
+        data class Error(val sessionName: String, val message: String) : StreamEvent()
+    }
+
     // ── State ────────────────────────────────────────────────────────────
 
     private val sessions = ConcurrentHashMap<String, TerminalSession>()
@@ -105,6 +127,9 @@ class TerminalAgent(
 
     // Known git branch cache (refreshed per session)
     private val gitBranchCache = mutableMapOf<String, List<String>>()
+
+    // Auto-save job
+    private var autoSaveJob: Job? = null
 
     // ── Session Management ────────────────────────────────────────────────
 
@@ -116,14 +141,11 @@ class TerminalAgent(
         return sessions.getOrPut(name) {
             TerminalSession(
                 name = name,
-                workdir = workdir,
-                envVars = mutableMapOf(
-                    "HOME" to TERMUX_HOME,
-                    "PATH" to "$TERMUX_USR_BIN:/usr/bin:/bin",
-                    "PWD" to workdir,
-                    "TERM" to "xterm-256color"
-                )
-            ).also { Log.d(TAG, "Created session '$name' at $workdir") }
+                workdir = workdir
+            ).also {
+                _outputFlow.tryEmit(StreamEvent.Output(name, "\u001b[32m✓ Session '$name' created\u001b[0m\n"))
+                Log.d(TAG, "Created session '$name' at $workdir")
+            }
         }
     }
 
@@ -149,11 +171,18 @@ class TerminalAgent(
     fun getSessionNames(): List<String> = sessions.keys.toList()
 
     /**
+     * Get output lines for a session (for UI display).
+     */
+    fun getOutputLines(sessionName: String): List<String> =
+        sessions[sessionName]?.outputLines?.toList() ?: emptyList()
+
+    /**
      * Remove a session.
      */
     fun removeSession(name: String) {
         sessions.remove(name)
         Log.d(TAG, "Removed session '$name'")
+        scheduleAutoSave()
     }
 
     /**
@@ -162,6 +191,7 @@ class TerminalAgent(
     fun renameSession(oldName: String, newName: String): Boolean {
         val session = sessions.remove(oldName) ?: return false
         sessions[newName] = session.copy(name = newName)
+        scheduleAutoSave()
         return true
     }
 
@@ -173,7 +203,6 @@ class TerminalAgent(
 
     /**
      * Change the working directory for a session (in-memory tracking).
-     * Returns the new resolved path.
      */
     fun changeWorkdir(sessionName: String, target: String): String {
         val session = sessions[sessionName] ?: return target
@@ -182,6 +211,10 @@ class TerminalAgent(
             session.workdir = resolved
             session.envVars["PWD"] = resolved
             session.lastActiveAt = System.currentTimeMillis()
+            // Emit an informational line in the terminal output
+            val output = "\u001b[36m${session.name} ~ $resolved\u001b[0m\n"
+            session.outputLines.add(output)
+            _outputFlow.tryEmit(StreamEvent.Output(sessionName, output))
         }
         return session.workdir
     }
@@ -199,16 +232,17 @@ class TerminalAgent(
         sessions[sessionName]?.let { session ->
             synchronized(session) {
                 session.history.clear()
+                session.outputLines.clear()
             }
+            _outputFlow.tryEmit(StreamEvent.Output(sessionName, "\u001b[33m⌛ History cleared\u001b[0m\n"))
         }
     }
 
-    // ── Command Execution ─────────────────────────────────────────────────
+    // ── Command Execution with Streaming ─────────────────────────────────
 
     /**
-     * Execute a command in the context of a terminal session.
-     * Handles `cd` natively (updates session PWD without running shell command).
-     * Supports command chaining (&&, ||) and session-aware path resolution.
+     * Execute a command with REAL-TIME streaming output.
+     * Each line of output is emitted via outputFlow as it arrives.
      */
     suspend fun execute(
         sessionName: String,
@@ -219,7 +253,13 @@ class TerminalAgent(
         val session = getOrCreateSession(sessionName)
         val trimmed = command.trim()
 
-        // Handle `cd` natively — update session state without shell call
+        // Emit command start
+        val prompt = "\u001b[32m$\u001b[0m $trimmed\n"
+        session.outputLines.add(prompt)
+        _outputFlow.emit(StreamEvent.CommandStart(sessionName, trimmed))
+        _outputFlow.emit(StreamEvent.Output(sessionName, prompt))
+
+        // Handle `cd` natively
         if (trimmed.startsWith("cd ")) {
             val target = trimmed.removePrefix("cd ").trim().trim('"').trim('\'')
             if (target.isNotBlank()) {
@@ -229,24 +269,35 @@ class TerminalAgent(
                     session.workdir = newDir
                     session.envVars["PWD"] = newDir
                 }
-                Log.d(TAG, "[$sessionName] cd → $newDir")
+                _outputFlow.emit(StreamEvent.Output(sessionName, "\u001b[36m${newDir}\u001b[0m\n"))
+                _outputFlow.emit(StreamEvent.CommandEnd(sessionName, 0))
                 return@withContext SessionResult(
                     stdout = "",
                     stderr = "",
                     exitCode = 0,
                     isSuccess = true,
                     sessionName = sessionName,
-                    workdir = session.workdir, // after synchronized update
+                    workdir = session.workdir,
                     durationMs = System.currentTimeMillis() - startMs
                 )
             }
         }
 
-        // Run command with workdir awareness
+        // Run command with streaming output
         val workdir = session.workdir
-        val result = termuxBridge.executeShell(command, workdir = workdir, timeoutMs = timeoutMs)
 
-        // Track the session state (thread-safe)
+        // Use TermuxBridge with a streaming callback
+        val result = termuxBridge.executeShell(
+            shellCommand = trimmed,
+            workdir = workdir,
+            timeoutMs = timeoutMs,
+            onOutput = { line ->
+                session.outputLines.add(line)
+                _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
+            }
+        )
+
+        // Track the session state
         val duration = System.currentTimeMillis() - startMs
         synchronized(session) {
             session.lastActiveAt = System.currentTimeMillis()
@@ -262,7 +313,20 @@ class TerminalAgent(
             while (session.history.size > 200) {
                 session.history.removeAt(0)
             }
+            // Trim output lines to last 1000
+            while (session.outputLines.size > 1000) {
+                session.outputLines.removeAt(0)
+            }
         }
+
+        // Emit exit status
+        val exitColor = if (result.isSuccess) "32" else "31"
+        val exitMsg = "\u001b[${exitColor}m❯ Exit ${result.exitCode} (${duration}ms)\u001b[0m\n"
+        session.outputLines.add(exitMsg)
+        _outputFlow.emit(StreamEvent.Output(sessionName, exitMsg))
+        _outputFlow.emit(StreamEvent.CommandEnd(sessionName, result.exitCode))
+
+        scheduleAutoSave()
 
         SessionResult(
             stdout = result.stdout,
@@ -277,8 +341,6 @@ class TerminalAgent(
 
     /**
      * Execute a command with automatic error recovery.
-     * If the command fails, the recovery engine suggests a fix,
-     * applies it, and retries the original command.
      */
     suspend fun executeWithRecovery(
         sessionName: String,
@@ -296,13 +358,16 @@ class TerminalAgent(
         val recovery = suggestRecovery(command, errorText)
 
         if (recovery == null) {
+            _outputFlow.emit(StreamEvent.Output(sessionName,
+                "\u001b[33m⚠ No automated recovery available\u001b[0m\n"))
             return@withContext firstResult.copy(
                 stderr = firstResult.stderr + "\n(No automated recovery available)"
             )
         }
 
-        // Recovery with hint but no auto-fix commands — provide explanation
         if (recovery.commands.isEmpty()) {
+            _outputFlow.emit(StreamEvent.Output(sessionName,
+                "\u001b[33m💡 ${recovery.explanation}\u001b[0m\n"))
             return@withContext firstResult.copy(
                 stderr = firstResult.stderr + "\n\n💡 ${recovery.explanation}",
                 wasRecovered = false,
@@ -310,6 +375,8 @@ class TerminalAgent(
             )
         }
 
+        _outputFlow.emit(StreamEvent.Output(sessionName,
+            "\u001b[33m⚡ Attempting recovery: ${recovery.description}\u001b[0m\n"))
         Log.d(TAG, "[$sessionName] Attempting recovery: ${recovery.description}")
 
         // Apply recovery commands
@@ -326,6 +393,8 @@ class TerminalAgent(
         }
 
         if (!allRecoveryOk) {
+            _outputFlow.emit(StreamEvent.Output(sessionName,
+                "\u001b[31m⚠ Recovery attempted but incomplete: ${recovery.explanation}\u001b[0m\n"))
             return@withContext firstResult.copy(
                 stderr = firstResult.stderr + "\n⚠ Recovery attempted but incomplete: ${recovery.explanation}",
                 wasRecovered = false,
@@ -334,6 +403,8 @@ class TerminalAgent(
         }
 
         // Retry the original command
+        _outputFlow.emit(StreamEvent.Output(sessionName,
+            "\u001b[33m↻ Recovery applied, retrying...\u001b[0m\n"))
         Log.d(TAG, "[$sessionName] Recovery applied, retrying command...")
         val retryResult = execute(sessionName, command, timeoutMs)
 
@@ -344,7 +415,6 @@ class TerminalAgent(
                 recoveryActions = recoveryResults
             )
         } else {
-            // Recovery was attempted but original command still fails — include recovery info
             retryResult.copy(
                 stderr = retryResult.stderr + "\n\n⚠ Auto-recovery attempted but command still failed:\n${recovery.explanation}",
                 wasRecovered = false,
@@ -355,9 +425,6 @@ class TerminalAgent(
 
     // ── Auto-Completion ──────────────────────────────────────────────────
 
-    /**
-     * Suggest command completions for a partial input in a session context.
-     */
     suspend fun suggestCompletions(
         partial: String,
         sessionName: String = defaultSessionName,
@@ -391,42 +458,30 @@ class TerminalAgent(
         val afterGit = input.removePrefix("git").trim()
         if (afterGit.isBlank()) {
             return gitCommands.map { cmd ->
-                CompletionSuggestion(
-                    text = cmd, displayText = "git $cmd",
-                    category = "git", score = 0.9f
-                )
+                CompletionSuggestion(text = cmd, displayText = "git $cmd",
+                    category = "git", score = 0.9f)
             }
         }
-
         val parts = afterGit.split(" ")
         val subCmd = parts.first()
-
-        // Complete git subcommands
         if (parts.size == 1) {
             val matches = gitCommands.filter { it.startsWith(subCmd) }
             return matches.map { cmd ->
-                CompletionSuggestion(
-                    text = cmd.removePrefix(subCmd), displayText = "git $cmd",
-                    category = "git", score = 0.85f
-                )
+                CompletionSuggestion(text = cmd.removePrefix(subCmd), displayText = "git $cmd",
+                    category = "git", score = 0.85f)
             }
         }
-
-        // Complete git branch names for checkout/merge
         val isBranchCmd = subCmd in listOf("checkout", "switch", "merge", "branch", "rebase")
         if (isBranchCmd && parts.size == 2) {
             val partialBranch = parts.last()
             val branches = gitBranchCache.values.flatten()
             val matches = branches.filter { it.startsWith(partialBranch) }
             return matches.map { branch ->
-                CompletionSuggestion(
-                    text = branch.removePrefix(partialBranch),
+                CompletionSuggestion(text = branch.removePrefix(partialBranch),
                     displayText = "git $subCmd $branch",
-                    category = "git-branch", score = 0.7f
-                )
+                    category = "git-branch", score = 0.7f)
             }
         }
-
         return emptyList()
     }
 
@@ -438,20 +493,15 @@ class TerminalAgent(
         val afterPkg = input.removePrefix("pkg").trim()
         if (afterPkg.isBlank()) {
             return pkgCommands.map { cmd ->
-                CompletionSuggestion(
-                    text = cmd, displayText = "pkg $cmd",
-                    category = "pkg", score = 0.9f
-                )
+                CompletionSuggestion(text = cmd, displayText = "pkg $cmd",
+                    category = "pkg", score = 0.9f)
             }
         }
         if (!afterPkg.contains(" ")) {
             val matches = pkgCommands.filter { it.startsWith(afterPkg) }
             return matches.map { cmd ->
-                CompletionSuggestion(
-                    text = cmd.removePrefix(afterPkg),
-                    displayText = "pkg $cmd",
-                    category = "pkg", score = 0.85f
-                )
+                CompletionSuggestion(text = cmd.removePrefix(afterPkg),
+                    displayText = "pkg $cmd", category = "pkg", score = 0.85f)
             }
         }
         return emptyList()
@@ -465,20 +515,15 @@ class TerminalAgent(
         val afterPip = input.removePrefix("pip").removePrefix("3").trim()
         if (afterPip.isBlank()) {
             return pipCommands.map { cmd ->
-                CompletionSuggestion(
-                    text = cmd, displayText = "pip $cmd",
-                    category = "pip", score = 0.9f
-                )
+                CompletionSuggestion(text = cmd, displayText = "pip $cmd",
+                    category = "pip", score = 0.9f)
             }
         }
         if (!afterPip.contains(" ")) {
             val matches = pipCommands.filter { it.startsWith(afterPip) }
             return matches.map { cmd ->
-                CompletionSuggestion(
-                    text = cmd.removePrefix(afterPip),
-                    displayText = "pip $cmd",
-                    category = "pip", score = 0.85f
-                )
+                CompletionSuggestion(text = cmd.removePrefix(afterPip),
+                    displayText = "pip $cmd", category = "pip", score = 0.85f)
             }
         }
         return emptyList()
@@ -492,33 +537,25 @@ class TerminalAgent(
         val afterNpm = input.removePrefix("npm").trim()
         if (afterNpm.isBlank()) {
             return npmCommands.map { cmd ->
-                CompletionSuggestion(
-                    text = cmd, displayText = "npm $cmd",
-                    category = "npm", score = 0.9f
-                )
+                CompletionSuggestion(text = cmd, displayText = "npm $cmd",
+                    category = "npm", score = 0.9f)
             }
         }
         if (!afterNpm.contains(" ")) {
             val matches = npmCommands.filter { it.startsWith(afterNpm) }
             return matches.map { cmd ->
-                CompletionSuggestion(
-                    text = cmd.removePrefix(afterNpm),
-                    displayText = "npm $cmd",
-                    category = "npm", score = 0.85f
-                )
+                CompletionSuggestion(text = cmd.removePrefix(afterNpm),
+                    displayText = "npm $cmd", category = "npm", score = 0.85f)
             }
         }
-        // Complete npm run scripts from package.json
         if (afterNpm.startsWith("run ")) {
             val partialScript = afterNpm.removePrefix("run ").trim()
             val scripts = npmScriptsCache
             val matches = scripts.filter { it.startsWith(partialScript) }
             return matches.map { script ->
-                CompletionSuggestion(
-                    text = script.removePrefix(partialScript),
+                CompletionSuggestion(text = script.removePrefix(partialScript),
                     displayText = "npm run $script",
-                    category = "npm-script", score = 0.75f
-                )
+                    category = "npm-script", score = 0.75f)
             }
         }
         return emptyList()
@@ -529,38 +566,23 @@ class TerminalAgent(
             val parts = input.split(" ")
             val pathPart = parts.lastOrNull() ?: return emptyList()
             val isDir = parts.firstOrNull() == "cd"
-
             val basePath = if (pathPart.startsWith("/")) pathPart
             else "$workdir/$pathPart"
-
             val parentDir = File(basePath).parentFile ?: File(basePath)
             val prefix = File(basePath).name
-
-            // Note: called from suggestCompletions which runs on Dispatchers.Default.
-            // File operations are fast for typical directories; explicit IO dispatcher
-            // would add overhead. Acceptable for completion use case.
             val files = parentDir.listFiles() ?: return emptyList()
-            val matches = files.filter { f ->
-                f.name.startsWith(prefix) &&
-                (isDir || !isDir) // always show files/dirs
-            }
-
+            val matches = files.filter { f -> f.name.startsWith(prefix) }
             return matches.map { f ->
                 val suffix = if (f.isDirectory) "/" else ""
-                CompletionSuggestion(
-                    text = f.name.removePrefix(prefix) + suffix,
+                CompletionSuggestion(text = f.name.removePrefix(prefix) + suffix,
                     displayText = f.name + suffix,
                     category = if (f.isDirectory) "directory" else "file",
-                    score = 0.8f
-                )
+                    score = 0.8f)
             }
-        } catch (e: Exception) {
-            return emptyList()
-        }
+        } catch (e: Exception) { return emptyList() }
     }
 
     private fun completeCommand(input: String): List<CompletionSuggestion> {
-        // Common Linux/Android shell commands
         val commonCommands = listOf(
             "ls", "cd", "cat", "echo", "pwd", "mkdir", "rm", "cp", "mv",
             "touch", "chmod", "grep", "find", "head", "tail", "sort",
@@ -577,24 +599,16 @@ class TerminalAgent(
             "termux-toast", "termux-vibrate", "termux-torch"
         )
         return commonCommands.filter { it.startsWith(input) }.map { cmd ->
-            CompletionSuggestion(
-                text = cmd.removePrefix(input),
-                displayText = cmd,
-                category = "command",
-                score = 0.7f
-            )
+            CompletionSuggestion(text = cmd.removePrefix(input),
+                displayText = cmd, category = "command", score = 0.7f)
         }
     }
 
     // ── Error Recovery ───────────────────────────────────────────────────
 
-    /**
-     * Analyze a failed command and suggest recovery actions.
-     */
     fun suggestRecovery(command: String, error: String): RecoveryAction? {
         val lower = error.lowercase()
 
-        // command not found → install package
         val cmdNotFoundMatch = Regex("""(\S+):\s*(?:command not found|not found|no such file)""", RegexOption.IGNORE_CASE).find(error)
         if (cmdNotFoundMatch != null) {
             val missingCmd = cmdNotFoundMatch.groupValues[1].lowercase()
@@ -624,8 +638,7 @@ class TerminalAgent(
             )
         }
 
-        // pip install failed → module not found
-        val pipModuleMatch = Regex("""(?:ModuleNotFoundError|ImportError|No module named)\s*['\"]?(\w[\w.-]*)['\"]?""").find(lower)
+        val pipModuleMatch = Regex("""(?:ModuleNotFoundError|ImportError|No module named)\s*['"]?(\w[\w.-]*)['"]?""").find(lower)
         if (pipModuleMatch != null) {
             val module = pipModuleMatch.groupValues[1]
             return RecoveryAction(
@@ -636,39 +649,26 @@ class TerminalAgent(
             )
         }
 
-        // npm ERR! missing script
         if (lower.contains("npm err") && lower.contains("missing script")) {
             val scriptMatch = Regex("""missing script:\s*(\S+)""", RegexOption.IGNORE_CASE).find(lower)
             val script = scriptMatch?.groupValues?.getOrNull(1) ?: "unknown"
             return RecoveryAction(
-                description = "npm script '$script' not found. Check package.json scripts.",
+                description = "npm script '$script' not found.",
                 commands = listOf("cat package.json 2>/dev/null | grep -A20 '\"scripts\"' || echo 'No package.json found'"),
                 confidence = 0.6f,
-                explanation = "The npm script '$script' doesn't exist in package.json. Checking available scripts..."
+                explanation = "The npm script '$script' doesn't exist in package.json."
             )
         }
 
-        // npm ERR! missing package.json
         if (lower.contains("npm err") && (lower.contains("package.json") || lower.contains("enoent"))) {
             return RecoveryAction(
-                description = "Initialize npm project with package.json",
+                description = "Initialize npm project",
                 commands = listOf("npm init -y 2>&1"),
                 confidence = 0.7f,
                 explanation = "No package.json found. Creating one with 'npm init -y'..."
             )
         }
 
-        // npm ERR! missing dependencies
-        if (lower.contains("npm err") && lower.contains("not found") && lower.contains("module")) {
-            return RecoveryAction(
-                description = "Install npm dependencies",
-                commands = listOf("npm install 2>&1"),
-                confidence = 0.75f,
-                explanation = "npm dependencies are missing. Running 'npm install'..."
-            )
-        }
-
-        // git: not a git repository
         if (lower.contains("not a git repository") || lower.contains("fatal: not a git")) {
             return RecoveryAction(
                 description = "Initialize git repository",
@@ -678,27 +678,15 @@ class TerminalAgent(
             )
         }
 
-        // git: remote not found
-        if (lower.contains("remote") && (lower.contains("not found") || lower.contains("does not appear"))) {
-            return RecoveryAction(
-                description = "Check git remote configuration",
-                commands = listOf("git remote -v 2>&1"),
-                confidence = 0.5f,
-                explanation = "Git remote is misconfigured. Checking remotes..."
-            )
-        }
-
-        // Permission denied
         if (lower.contains("permission denied") || lower.contains("not permitted")) {
             return RecoveryAction(
-                description = "Fix file permissions with chmod",
+                description = "Fix permissions",
                 commands = listOf("chmod +x ${command.split(" ").firstOrNull() ?: "script"}"),
                 confidence = 0.4f,
-                explanation = "Permission denied. This may require adjusting file permissions or using 'allow-external-apps=true' in Termux properties."
+                explanation = "Permission denied. This may require adjusting file permissions."
             )
         }
 
-        // Network unreachable / connection refused
         if (lower.contains("connection refused") || lower.contains("network is unreachable") ||
             lower.contains("could not connect") || lower.contains("timeout")) {
             return RecoveryAction(
@@ -709,29 +697,24 @@ class TerminalAgent(
             )
         }
 
-        // pkg update needed
-        if (lower.contains("has no installation candidate") || lower.contains("unable to locate package") ||
-            lower.contains("package.*not found")) {
+        if (lower.contains("has no installation candidate") || lower.contains("unable to locate package")) {
             return RecoveryAction(
-                description = "Update package lists with pkg update",
+                description = "Update package lists",
                 commands = listOf("pkg update 2>&1"),
                 confidence = 0.7f,
                 explanation = "Package lists may be outdated. Running 'pkg update'..."
             )
         }
 
-        // Python syntax error
         if (lower.contains("syntaxerror") || lower.contains("syntax error")) {
             return RecoveryAction(
-                description = "Check Python command syntax",
+                description = "Check Python syntax",
                 commands = emptyList(),
                 confidence = 0.3f,
-                explanation = "Python syntax error detected. Check for: missing quotes on strings, " +
-                        "unclosed brackets/parentheses, incorrect indentation, or missing colons after if/for/def."
+                explanation = "Python syntax error. Check for: missing quotes, unclosed brackets, incorrect indentation."
             )
         }
 
-        // No match found — return null so caller knows we can't recover
         return null
     }
 
@@ -739,14 +722,11 @@ class TerminalAgent(
 
     private val npmScriptsCache = mutableListOf<String>()
 
-    /**
-     * Refresh the npm scripts cache from a session's workdir.
-     */
     suspend fun refreshNpmScripts(sessionName: String) = withContext(Dispatchers.IO) {
         try {
             val session = sessions[sessionName] ?: return@withContext
             val result = termuxBridge.executeShell(
-                "cat package.json 2>/dev/null | grep -o '\"[a-z-]*\":' | tr -d '\":'",
+                shellCommand = "cat package.json 2>/dev/null | grep -o '\"[a-z-]*\":' | tr -d '\":'",
                 workdir = session.workdir,
                 timeoutMs = 5000
             )
@@ -759,16 +739,11 @@ class TerminalAgent(
         }
     }
 
-    // ── Git branch cache ────────────────────────────────────────────────
-
-    /**
-     * Refresh git branch names for a session's workdir.
-     */
     suspend fun refreshGitBranches(sessionName: String) = withContext(Dispatchers.IO) {
         try {
             val session = sessions[sessionName] ?: return@withContext
             val result = termuxBridge.executeShell(
-                "git branch -a 2>/dev/null | sed 's/^*//' | sed 's/^[[:space:]]*//' | sed 's/(HEAD.*)//' | tr -d ' '",
+                shellCommand = "git branch -a 2>/dev/null | sed 's/^*//' | sed 's/^[[:space:]]*//' | sed 's/(HEAD.*)//' | tr -d ' '",
                 workdir = session.workdir,
                 timeoutMs = 5000
             )
@@ -785,10 +760,6 @@ class TerminalAgent(
 
     // ── Path Resolution ────────────────────────────────────────────────
 
-    /**
-     * Resolve a target path relative to a current working directory.
-     * Handles: ., .., ~, absolute paths
-     */
     private fun resolvePath(currentDir: String, target: String): String {
         when {
             target == "." -> return currentDir
@@ -811,12 +782,16 @@ class TerminalAgent(
         }
     }
 
-    // ── Disk-backed session persistence ─────────────────────────────────
+    // ── Session Persistence ────────────────────────────────────────────
 
-    /**
-     * Save session state to a file for persistence across app restarts.
-     * This is optional — sessions are recreated on demand.
-     */
+    private fun scheduleAutoSave() {
+        autoSaveJob?.cancel()
+        autoSaveJob = CoroutineScope(Dispatchers.IO).launch {
+            delay(AUTO_SAVE_DELAY_MS)
+            saveSessionsToDisk()
+        }
+    }
+
     fun saveSessionsToDisk() {
         try {
             val file = File(context.filesDir, "terminal_sessions.json")
@@ -825,12 +800,34 @@ class TerminalAgent(
                     "name" to name,
                     "workdir" to session.workdir,
                     "envVars" to session.envVars.toMap(),
-                    "historyCount" to session.history.size
+                    "historyCount" to session.history.size,
+                    "outputLines" to session.outputLines.takeLast(200)
                 )
             }
             file.writeText(com.google.gson.Gson().toJson(data))
         } catch (e: Exception) {
             Log.w(TAG, "Failed to save sessions: ${e.message}")
+        }
+    }
+
+    fun loadSessionsFromDisk() {
+        try {
+            val file = File(context.filesDir, "terminal_sessions.json")
+            if (!file.exists()) return
+            val json = file.readText()
+            val gson = com.google.gson.Gson()
+            val type = object : com.google.gson.reflect.TypeToken<List<Map<String, Any>>>() {}.type
+            val data: List<Map<String, Any>> = gson.fromJson(json, type)
+            data.forEach { entry ->
+                val name = entry["name"] as? String ?: return@forEach
+                val workdir = entry["workdir"] as? String ?: TERMUX_HOME
+                if (!sessions.containsKey(name)) {
+                    sessions[name] = TerminalSession(name = name, workdir = workdir)
+                }
+            }
+            Log.d(TAG, "Loaded ${data.size} sessions from disk")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load sessions: ${e.message}")
         }
     }
 }

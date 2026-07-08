@@ -136,17 +136,107 @@ class TermuxBridge(private val context: Context) {
      * @param shellCommand Complete shell command string (e.g., "pkg install python && python --version")
      * @param workdir Optional working directory
      * @param timeoutMs Timeout in milliseconds
+     * @param onOutput Optional callback invoked for each line of output as it arrives (for streaming)
      */
     suspend fun executeShell(
         shellCommand: String,
         workdir: String? = null,
-        timeoutMs: Long = 180_000L
-    ): TermuxResult = executeRaw(
-        command = "/data/data/com.termux/files/usr/bin/sh",
-        arguments = listOf("-c", shellCommand),
-        workdir = workdir,
-        timeoutMs = timeoutMs
-    )
+        timeoutMs: Long = 180_000L,
+        onOutput: ((String) -> Unit)? = null
+    ): TermuxResult {
+        if (onOutput != null) {
+            // Streaming mode: use SmartShell's local execution with line-by-line callback
+            return executeShellLocal(shellCommand, workdir, timeoutMs, onOutput)
+        }
+        return executeRaw(
+            command = "/data/data/com.termux/files/usr/bin/sh",
+            arguments = listOf("-c", shellCommand),
+            workdir = workdir,
+            timeoutMs = timeoutMs
+        )
+    }
+
+    /**
+     * Execute shell command locally with real-time output streaming.
+     * Falls back to direct Runtime.exec() with line-by-line callback.
+     */
+    private suspend fun executeShellLocal(
+        shellCommand: String,
+        workdir: String? = null,
+        timeoutMs: Long = 180_000L,
+        onOutput: (String) -> Unit
+    ): TermuxResult = withContext(Dispatchers.IO) {
+        val startMs = System.currentTimeMillis()
+        try {
+            val pb = ProcessBuilder("/data/data/com.termux/files/usr/bin/sh", "-c", shellCommand)
+            if (workdir != null) {
+                pb.directory(java.io.File(workdir))
+            }
+            pb.environment()["HOME"] = "/data/data/com.termux/files/home"
+            pb.environment()["PATH"] = "/data/data/com.termux/files/usr/bin:/usr/bin:/bin"
+            pb.environment()["TERM"] = "xterm-256color"
+
+            val process = pb.start()
+            val stdoutLines = StringBuilder()
+            val stderrLines = StringBuilder()
+
+            // Read stdout in a separate thread with line callback
+            val stdoutThread = Thread {
+                try {
+                    process.inputStream.bufferedReader().use { reader ->
+                        reader.lines().forEach { line ->
+                            val lineWithNewline = "$line\n"
+                            stdoutLines.append(lineWithNewline)
+                            onOutput(lineWithNewline)
+                        }
+                    }
+                } catch (_: Exception) {}
+            }.apply { isDaemon = true; name = "termux-stream-stdout" }
+
+            // Read stderr in a separate thread
+            val stderrThread = Thread {
+                try {
+                    process.errorStream.bufferedReader().use { reader ->
+                        reader.lines().forEach { line ->
+                            val lineWithNewline = "$line\n"
+                            stderrLines.append(lineWithNewline)
+                            onOutput("\u001b[31m$lineWithNewline\u001b[0m")
+                        }
+                    }
+                } catch (_: Exception) {}
+            }.apply { isDaemon = true; name = "termux-stream-stderr" }
+
+            stdoutThread.start()
+            stderrThread.start()
+
+            // Wait for process with timeout
+            val completed = process.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+            if (!completed) {
+                process.destroyForcibly()
+                stdoutThread.join(1000)
+                stderrThread.join(1000)
+                Log.w(TAG, "Command timed out after ${timeoutMs}ms")
+                return@withContext TermuxResult(
+                    stdoutLines.toString().trim(),
+                    stderrLines.toString().trim() + "\n⏱ Command timed out after ${timeoutMs}ms",
+                    -1
+                )
+            }
+
+            stdoutThread.join(2000)
+            stderrThread.join(2000)
+
+            val stdout = stdoutLines.toString().trim()
+            val stderr = stderrLines.toString().trim()
+            val exitCode = process.exitValue()
+
+            Log.d(TAG, "Streaming exec done: ${System.currentTimeMillis() - startMs}ms, exit=$exitCode")
+            TermuxResult(stdout, stderr, exitCode)
+        } catch (e: Exception) {
+            Log.e(TAG, "Local exec error: ${e.message}")
+            TermuxResult("", "Error: ${e.message}", -1)
+        }
+    }
 
     /**
      * Install a package via pkg (Termux's package manager).

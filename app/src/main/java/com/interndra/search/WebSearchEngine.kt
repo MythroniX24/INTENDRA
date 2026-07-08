@@ -3,6 +3,8 @@ package com.interndra.search
 import android.util.Log
 import com.interndra.data.local.AgentDao
 import com.interndra.data.model.WebSearchCache
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.Jsoup
@@ -15,18 +17,10 @@ import java.util.concurrent.TimeUnit
  * result pages → extract main content → truncate to a bounded digest → write
  * through to cache → return results + digest for the AI to summarize.
  *
- * FIXES:
- *  1. NO UNICODE STRIPPING — Hindi/Unicode queries no longer lose chars.
- *  2. CACHING — results + page digests cached in Room for 30 minutes.
- *  3. PAGE FETCH + EXTRACT — fetchAndExtract() pulls top N pages and extracts
- *     main-article text via Jsoup + content heuristics.
- *  4. NO TRUNCATED URLS — full URL preserved in buildContext().
- *  5. SOURCE ATTRIBUTION — each page digest is prefixed with its source URL.
- *
- * COMPILE FIX: readCache() and writeCache() wrap the suspend DAO calls in
- * kotlinx.coroutines.runBlocking { } so they can be invoked from the
- * non-suspend search() function. This is safe because search() is always
- * called from withContext(Dispatchers.IO) in the ViewModel.
+ * FIX: Removed ALL runBlocking calls. search() and related functions now
+ * accept a coroutine scope parameter or use non-suspend cache internally.
+ * runBlocking was causing potential ANR on UI thread and violated coroutine
+ * best practices.
  */
 class WebSearchEngine(private val dao: AgentDao) {
 
@@ -84,14 +78,18 @@ class WebSearchEngine(private val dao: AgentDao) {
         return false
     }
 
-    fun search(query: String, maxResults: Int = 5): List<SearchResult> {
+    /**
+     * Suspend search function - no runBlocking, properly suspends.
+     * Call from coroutine context.
+     */
+    suspend fun search(query: String, maxResults: Int = 5): List<SearchResult> = withContext(Dispatchers.IO) {
         val sanitized = query.trim().take(200)
-        if (sanitized.isBlank()) return emptyList()
+        if (sanitized.isBlank()) return@withContext emptyList()
 
         val cached = readCache(sanitized)
         if (cached != null) {
             Log.d(TAG, "Cache hit for query: ${sanitized.take(40)}")
-            return cached
+            return@withContext cached
         }
 
         val url = BASE_URL + java.net.URLEncoder.encode(sanitized, "UTF-8")
@@ -107,9 +105,9 @@ class WebSearchEngine(private val dao: AgentDao) {
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
                 Log.w(TAG, "Search request failed: HTTP ${response.code}")
-                return emptyList()
+                return@withContext emptyList()
             }
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.body?.string() ?: return@withContext emptyList()
             parseResults(body, maxResults)
         } catch (e: Exception) {
             Log.e(TAG, "Search error for query '${sanitized.take(40)}': ${e.message}")
@@ -117,7 +115,7 @@ class WebSearchEngine(private val dao: AgentDao) {
         }
 
         writeCache(sanitized, results)
-        return results
+        results
     }
 
     fun fetchAndExtract(results: List<SearchResult>, maxPages: Int = 2): String {
@@ -266,14 +264,12 @@ class WebSearchEngine(private val dao: AgentDao) {
     }
 
     // ── Cache helpers ────────────────────────────────────────────────────
-    // COMPILE FIX: dao.getSearchCache() and dao.insertSearchCache() are
-    // suspend functions. We wrap them in runBlocking so they can be called
-    // from the non-suspend search() function. This is safe because search()
-    // is always called from withContext(Dispatchers.IO) in the ViewModel.
+    // FIX: Removed runBlocking. Cache functions are now suspend functions.
+    // Call from coroutine context only.
 
-    private fun readCache(query: String): List<SearchResult>? {
+    private suspend fun readCache(query: String): List<SearchResult>? {
         return try {
-            val cached = kotlinx.coroutines.runBlocking { dao.getSearchCache(query, 0L) } ?: return null
+            val cached = dao.getSearchCache(query, 0L) ?: return null
             val age = System.currentTimeMillis() - cached.timestamp
             if (age > CACHE_TTL_MS) return null
             val arr = com.google.gson.JsonParser.parseString(cached.jsonResults).asJsonArray
@@ -291,7 +287,7 @@ class WebSearchEngine(private val dao: AgentDao) {
         }
     }
 
-    private fun writeCache(query: String, results: List<SearchResult>) {
+    private suspend fun writeCache(query: String, results: List<SearchResult>) {
         if (results.isEmpty()) return
         try {
             val arr = com.google.gson.JsonArray()
@@ -302,9 +298,7 @@ class WebSearchEngine(private val dao: AgentDao) {
                 o.addProperty("url", r.url)
                 arr.add(o)
             }
-            kotlinx.coroutines.runBlocking {
-                dao.insertSearchCache(WebSearchCache(query = query, jsonResults = arr.toString()))
-            }
+            dao.insertSearchCache(WebSearchCache(query = query, jsonResults = arr.toString()))
         } catch (e: Exception) {
             Log.w(TAG, "Cache write failed: ${e.message}")
         }

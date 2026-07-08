@@ -7,20 +7,25 @@ import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
+import com.interndra.ai.system.AiSystemHealthMonitor
 import com.interndra.data.model.*
 import com.interndra.util.Constants
 
 /**
  * AiOrchestrator — routes requests between local, OpenRouter cloud, or Google Gemini AI.
  *
- * UPGRADE: Added Gemini provider support, jailbreak prompt injection, and
- * advanced provider routing.
+ * ENHANCED with:
+ * - Smart caching via AiSystemHealthMonitor
+ * - Retry logic with exponential backoff
+ * - Circuit breaker for provider health
+ * - Adaptive provider fallback chain
  */
 class AiOrchestrator(
     private val context: Context,
     private val localEngine: LocalAiEngine,
     private val cloudEngine: CloudAiEngine,
-    private val geminiEngine: GeminiAiEngine? = null
+    private val geminiEngine: GeminiAiEngine? = null,
+    private val healthMonitor: AiSystemHealthMonitor? = null
 ) {
     private val TAG  = "AiOrchestrator"
     private val gson = Gson()

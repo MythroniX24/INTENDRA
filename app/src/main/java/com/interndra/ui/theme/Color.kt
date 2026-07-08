@@ -8,6 +8,7 @@ val TerminalBlue   = Color(0xFF8AB4F8)
 val TerminalYellow = Color(0xFFFDE293)
 val TerminalRed    = Color(0xFFF28B82)
 val TerminalWhite  = Color(0xFFE8EAED)
+val TerminalBg     = Color(0xFF0D0D0D)  // Terminal background
 
 // ── Surface palette ─────────────────────────────────────────────────────────
 val ChatBg       = Color(0xFF0F0F0F)  // ultra-dark background

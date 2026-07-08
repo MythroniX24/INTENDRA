@@ -2,104 +2,117 @@ package com.interndra.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.*
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.platform.LocalClipboardManager
-
-import com.interndra.data.model.LogType
-import com.interndra.data.model.TerminalLog
+import com.interndra.agent.TerminalAgent
 import com.interndra.service.TermuxBridge
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import kotlinx.coroutines.launch
 
 /**
- * TerminalScreen — ENHANCED with session tabs UI.
+ * TerminalScreen — REAL interactive terminal emulator.
  *
  * Features:
- * - Session tab bar with horizontal scrolling
- * - Create/rename/delete sessions
- * - Per-session workdir display
- * - Log viewer with search, filter, type colors/icons
- * - Termux status indicator
+ * - Live output with ANSI color rendering
+ * - Command input at bottom with history (Up/Down arrows)
+ * - Session tabs with create/rename/delete
+ * - Real-time streaming output from TermuxBridge
  * - Auto-scroll toggle
+ * - Clear, Copy functionality
+ * - Workdir display
  */
 @Composable
 fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
-    val logs          by vm.terminalLogs.collectAsState()
     val sessions       by vm.terminalSessions.collectAsState()
     val activeSession by vm.activeTerminalSession.collectAsState()
     val listState      = rememberLazyListState()
+    val scope          = rememberCoroutineScope()
     val context        = androidx.compose.ui.platform.LocalContext.current
 
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf<LogType?>(null) }
+    // Terminal state
+    var inputText by remember { mutableStateOf("") }
     var autoScroll by remember { mutableStateOf(true) }
     var showSearch by remember { mutableStateOf(false) }
     var showNewSessionDialog by remember { mutableStateOf(false) }
     var showSessionMenu by remember { mutableStateOf<String?>(null) }
 
-    // Filter logs
-    val filteredLogs = remember(logs, searchQuery, selectedFilter) {
-        logs.filter { log ->
-            val matchesSearch = searchQuery.isBlank() ||
-                log.content.contains(searchQuery, ignoreCase = true) ||
-                log.logType.name.contains(searchQuery, ignoreCase = true)
-            val matchesFilter = selectedFilter == null || log.logType == selectedFilter
-            matchesSearch && matchesFilter
+    // Command history navigation
+    var commandHistoryIndex by remember { mutableStateOf(-1) }
+    var savedCurrentInput by remember { mutableStateOf("") }
+
+    // Streaming output lines for active session
+    val outputLines = remember(activeSession) {
+        vm.terminalAgent.getOutputLines(activeSession)
+    }
+    // Refresh output lines periodically
+    var refreshTick by remember { mutableStateOf(0L) }
+
+    // Observe streaming output
+    LaunchedEffect(Unit) {
+        vm.terminalAgent.outputFlow.collect { event ->
+            when (event) {
+                is TerminalAgent.StreamEvent.Output -> {
+                    if (event.sessionName == activeSession || activeSession == "default") {
+                        refreshTick = System.currentTimeMillis()
+                    }
+                }
+                else -> {}
+            }
         }
     }
 
-    // Compute stats
-    val stats = remember(logs) {
-        TerminalStats(
-            total = logs.size,
-            ok = logs.count { it.logType == LogType.STATUS_OK },
-            fail = logs.count { it.logType == LogType.STATUS_FAIL },
-            commands = logs.count { it.logType in listOf(LogType.COMMAND, LogType.TERMUX_CMD) }
-        )
+    // Get fresh output lines
+    val displayLines = remember(refreshTick, activeSession, outputLines.size) {
+        vm.terminalAgent.getOutputLines(activeSession)
+    }
+
+    // Focus requester for input field
+    val inputFocusRequester = remember { FocusRequester() }
+
+    // Auto-scroll — use instant scrollToItem (no animation) for high-frequency updates
+    // to prevent animation jitter during streaming output
+    LaunchedEffect(displayLines.size) {
+        if (autoScroll && displayLines.isNotEmpty()) {
+            listState.scrollToItem(displayLines.size - 1)
+        }
+    }
+
+    // Focus input field on session change
+    LaunchedEffect(activeSession) {
+        inputFocusRequester.requestFocus()
     }
 
     // Termux status
     val termuxBridge = remember { TermuxBridge(context) }
     val termuxInstalled = remember { termuxBridge.isTermuxInstalled() }
-
-    // Auto-scroll
-    LaunchedEffect(logs.size) {
-        if (autoScroll && logs.isNotEmpty()) {
-            listState.animateScrollToItem(logs.size - 1)
-        }
-    }
 
     // ── New Session Dialog ───────────────────────────────────────────────
     if (showNewSessionDialog) {
@@ -134,210 +147,228 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
         )
     }
 
-    val clipboardManager = LocalClipboardManager.current
-
-    Column(Modifier.fillMaxSize().background(ChatBg)) {
+    Column(Modifier.fillMaxSize().background(TerminalBg).imePadding()) {
 
         // ── Top Bar ───────────────────────────────────────────────────────
-        Surface(color = CardSurface, tonalElevation = 2.dp) {
-            Column(Modifier.fillMaxWidth()) {
-                // Title row
-                Row(
-                    Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onOpenDrawer) {
-                        Icon(Icons.Default.Menu, "Menu", tint = TerminalWhite)
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text("Terminal Logs", color = TerminalWhite, fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold)
-                        Text("${logs.size} entries · ${stats.ok} ✓ · ${stats.fail} ✗ · ${stats.commands} \$",
-                            color = TerminalWhite.copy(alpha = 0.45f), fontSize = 10.sp,
+        TerminalTopBar(
+            sessions = sessions,
+            activeSession = activeSession,
+            onOpenDrawer = onOpenDrawer,
+            onSelectSession = { vm.setActiveTerminalSession(it) },
+            onAddSession = { showNewSessionDialog = true },
+            onSessionLongPress = { showSessionMenu = it },
+            termuxInstalled = termuxInstalled,
+            autoScroll = autoScroll,
+            onToggleAutoScroll = { autoScroll = !autoScroll },
+            onClear = { vm.terminalAgent.clearHistory(activeSession) }
+        )
+
+        // Active session workdir
+        val workdir = remember(activeSession) {
+            vm.terminalAgent.getWorkdir(activeSession)
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp).background(TerminalBg),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Folder, null,
+                tint = Accent.copy(alpha = 0.5f), modifier = Modifier.size(12.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(
+                workdir,
+                color = Accent.copy(alpha = 0.5f),
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        // ── Terminal Output Area ─────────────────────────────────────────
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(TerminalBg)
+        ) {
+            if (displayLines.isEmpty()) {
+                // Empty state
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Terminal, null,
+                            tint = TerminalWhite.copy(alpha = 0.12f), modifier = Modifier.size(64.dp))
+                        Spacer(Modifier.height(12.dp))
+                        Text("INTERNDRA Terminal",
+                            color = TerminalWhite.copy(alpha = 0.5f), fontSize = 18.sp,
+                            fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(4.dp))
+                        Text("Type a command below",
+                            color = TerminalWhite.copy(alpha = 0.25f), fontSize = 13.sp,
                             fontFamily = FontFamily.Monospace)
-                    }
-                    // Termux status indicator
-                    TerminalStatusIndicator(installed = termuxInstalled)
-                    Spacer(Modifier.width(4.dp))
-                    IconButton(onClick = { showSearch = !showSearch }) {
-                        Icon(if (showSearch) Icons.Default.SearchOff else Icons.Default.Search, "Search",
-                            tint = if (showSearch) Accent else TerminalWhite.copy(alpha = 0.5f))
-                    }
-                    IconButton(onClick = { autoScroll = !autoScroll }) {
-                        Icon(if (autoScroll) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
-                            "Auto-scroll",
-                            tint = if (autoScroll) Accent else TerminalWhite.copy(alpha = 0.5f))
-                    }
-                    IconButton(onClick = { vm.clearAll() }) {
-                        Icon(Icons.Default.DeleteSweep, "Clear",
-                            tint = TerminalRed.copy(alpha = 0.7f))
-                    }
-                }
-
-                // ── Session Tabs ───────────────────────────────────────────
-                SessionTabBar(
-                    sessions = sessions,
-                    activeSession = activeSession,
-                    onSelectSession = { vm.setActiveTerminalSession(it) },
-                    onAddSession = { showNewSessionDialog = true },
-                    onSessionLongPress = { showSessionMenu = it }
-                )
-
-                // ── Active Session Workdir ─────────────────────────────────
-                val workdir = remember(activeSession) {
-                    vm.terminalAgent.getWorkdir(activeSession)
-                }
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Folder, null,
-                        tint = Accent.copy(alpha = 0.5f), modifier = Modifier.size(12.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        workdir,
-                        color = Accent.copy(alpha = 0.5f),
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                // ── Search bar ─────────────────────────────────────────────
-                AnimatedVisibility(visible = showSearch) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            modifier = Modifier.weight(1f).height(48.dp),
-                            placeholder = { Text("Search logs...", color = TerminalWhite.copy(0.3f)) },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Accent,
-                                unfocusedBorderColor = SurfaceLight.copy(0.3f),
-                                focusedTextColor = TerminalWhite,
-                                unfocusedTextColor = TerminalWhite,
-                                cursorColor = Accent
-                            ),
-                            textStyle = LocalTextStyle.current.copy(fontSize = 13.sp, fontFamily = FontFamily.Monospace),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(onSearch = {}),
-                            singleLine = true,
-                            leadingIcon = { Icon(Icons.Default.Search, null, tint = TerminalWhite.copy(0.4f), modifier = Modifier.size(18.dp)) },
-                            trailingIcon = if (searchQuery.isNotEmpty()) {
-                                { IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Clear, "Clear", tint = TerminalWhite.copy(0.4f)) } }
-                            } else null
-                        )
-                    }
-                }
-
-                // ── Filter chips ──────────────────────────────────────────
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    val filters = listOf(null to "All") +
-                        LogType.entries.map { it to it.name.take(12) }
-                    filters.take(8).forEach { (type, label) ->
-                        val selected = selectedFilter == type
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = if (selected) Accent.copy(0.2f) else SurfaceLight.copy(0.1f),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp, if (selected) Accent.copy(0.5f) else SurfaceLight.copy(0.2f)
-                            ),
-                            modifier = Modifier.clickable { selectedFilter = type }
-                        ) {
-                            Text(
-                                label,
-                                color = if (selected) Accent else TerminalWhite.copy(0.6f),
-                                fontSize = 10.sp,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
+                        Spacer(Modifier.height(16.dp))
+                        if (!termuxInstalled) {
+                            Surface(shape = RoundedCornerShape(8.dp), color = TerminalRed.copy(0.12f)) {
+                                Text("⚠ Termux not installed — some commands won't work",
+                                    color = TerminalRed.copy(0.8f), fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                            }
                         }
                     }
                 }
-                Spacer(Modifier.height(2.dp))
-            }
-        }
-
-        // ── Log area ───────────────────────────────────────────────────────
-        if (logs.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Outlined.Terminal, null,
-                        tint = TerminalWhite.copy(alpha = 0.12f), modifier = Modifier.size(72.dp))
-                    Spacer(Modifier.height(12.dp))
-                    Text("No logs yet.",
-                        color = TerminalWhite.copy(alpha = 0.35f), fontSize = 15.sp,
-                        fontFamily = FontFamily.Monospace)
-                    Text("Send a command or ask the AI to do something.",
-                        color = TerminalWhite.copy(alpha = 0.2f), fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace)
-                }
-            }
-        } else if (filteredLogs.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.FilterList, null,
-                        tint = TerminalWhite.copy(alpha = 0.15f), modifier = Modifier.size(48.dp))
-                    Spacer(Modifier.height(8.dp))
-                    Text("No logs match your filter.",
-                        color = TerminalWhite.copy(alpha = 0.35f), fontSize = 14.sp,
-                        fontFamily = FontFamily.Monospace)
-                }
-            }
-        } else {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "${filteredLogs.size} of ${logs.size} logs shown",
-                    color = TerminalWhite.copy(alpha = 0.25f),
-                    fontSize = 10.sp, fontFamily = FontFamily.Monospace
-                )
-                if (!autoScroll) {
-                    Text(
-                        "🔴 Auto-scroll off — tap ↓ to re-enable",
-                        color = TerminalYellow.copy(0.6f),
-                        fontSize = 10.sp, fontFamily = FontFamily.Monospace
-                    )
-                }
-            }
-
-            Surface(
-                color = CardSurface,
-                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-                modifier = Modifier.weight(1f).fillMaxWidth()
-            ) {
+            } else {
                 LazyColumn(
-                    state               = listState,
-                    modifier            = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .clickable { inputFocusRequester.requestFocus() },
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
-                    items(filteredLogs, key = { it.id }) { log ->
-                        EnhancedLogLine(
-                            log = log,
-                            searchHighlight = searchQuery,
-                            onClick = {
-                                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(log.content))
-                            }
+                    itemsIndexed(displayLines, key = { idx, _ -> "line_${idx}_${refreshTick}" }) { index, line ->
+                        AnsiTerminalLine(
+                            text = line,
+                            isLast = index == displayLines.size - 1
                         )
                     }
                 }
             }
+        }
+
+        // ── Terminal Input Bar ───────────────────────────────────────────
+        TerminalInputBar(
+            text = inputText,
+            onTextChange = { inputText = it },
+            onSend = {
+                if (inputText.isNotBlank()) {
+                    scope.launch {
+                        vm.terminalAgent.execute(activeSession, inputText.trim()).let { }
+                    }
+                    commandHistoryIndex = -1
+                    inputText = ""
+                }
+            },
+            onKeyUp = {
+                val history = vm.terminalAgent.getHistory(activeSession)
+                if (history.isNotEmpty()) {
+                    val newIndex = if (commandHistoryIndex < 0) 0
+                        else (commandHistoryIndex + 1).coerceAtMost(history.size - 1)
+                    if (commandHistoryIndex < 0) savedCurrentInput = inputText
+                    commandHistoryIndex = newIndex
+                    inputText = history[newIndex].command
+                }
+            },
+            onKeyDown = {
+                if (commandHistoryIndex >= 0) {
+                    val newIndex = commandHistoryIndex - 1
+                    if (newIndex < 0) {
+                        commandHistoryIndex = -1
+                        inputText = savedCurrentInput
+                        savedCurrentInput = ""
+                    } else {
+                        commandHistoryIndex = newIndex
+                        val history = vm.terminalAgent.getHistory(activeSession)
+                        if (newIndex < history.size) {
+                            inputText = history[newIndex].command
+                        }
+                    }
+                }
+            },
+            focusRequester = inputFocusRequester
+        )
+
+        // Status bar
+        TerminalStatusBar(
+            lineCount = displayLines.size,
+            sessionName = activeSession,
+            termuxInstalled = termuxInstalled
+        )
+    }
+}
+
+// ── Terminal Top Bar ────────────────────────────────────────────────────────
+@Composable
+private fun TerminalTopBar(
+    sessions: List<String>,
+    activeSession: String,
+    onOpenDrawer: () -> Unit,
+    onSelectSession: (String) -> Unit,
+    onAddSession: () -> Unit,
+    onSessionLongPress: (String) -> Unit,
+    termuxInstalled: Boolean,
+    autoScroll: Boolean,
+    onToggleAutoScroll: () -> Unit,
+    onClear: () -> Unit
+) {
+    val inf = rememberInfiniteTransition(label = "pulse")
+    val pulseAlpha by inf.animateFloat(0.4f, 1.0f,
+        infiniteRepeatable(tween(1200, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse")
+
+    Surface(color = TerminalBg.copy(alpha = 0.95f)) {
+        Column(Modifier.fillMaxWidth()) {
+            // Title row
+            Row(
+                Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onOpenDrawer) {
+                    Icon(Icons.Default.Menu, "Menu", tint = TerminalWhite)
+                }
+                Text("Terminal", color = TerminalWhite, fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f))
+                // Termux status
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (termuxInstalled) TerminalGreen.copy(0.12f) else TerminalRed.copy(0.12f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(
+                        Modifier
+                            .size(6.dp)
+                            .alpha(pulseAlpha)
+                            .clip(CircleShape)
+                            .background(if (termuxInstalled) TerminalGreen else TerminalRed)
+                    )
+                    Text(
+                        if (termuxInstalled) "Termux" else "No Termux",
+                        color = if (termuxInstalled) TerminalGreen else TerminalRed.copy(0.7f),
+                        fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+                IconButton(onClick = { onToggleAutoScroll() }) {
+                    Icon(
+                        if (autoScroll) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
+                        "Auto-scroll",
+                        tint = if (autoScroll) Accent else TerminalWhite.copy(alpha = 0.5f)
+                    )
+                }
+                IconButton(onClick = onClear) {
+                    Icon(Icons.Default.DeleteSweep, "Clear",
+                        tint = TerminalRed.copy(alpha = 0.7f))
+                }
+            }
+
+            // Session tabs
+            SessionRow(
+                sessions = sessions,
+                activeSession = activeSession,
+                onSelectSession = onSelectSession,
+                onAddSession = onAddSession,
+                onSessionLongPress = onSessionLongPress
+            )
         }
     }
 }
 
-// ── Session Tab Bar ────────────────────────────────────────────────────────
+// ── Session Row ──────────────────────────────────────────────────────────────
 @Composable
-private fun SessionTabBar(
+private fun SessionRow(
     sessions: List<String>,
     activeSession: String,
     onSelectSession: (String) -> Unit,
@@ -357,7 +388,7 @@ private fun SessionTabBar(
             Surface(
                 shape = RoundedCornerShape(8.dp),
                 color = if (isActive) Accent.copy(0.2f) else SurfaceLight.copy(0.08f),
-                border = androidx.compose.foundation.BorderStroke(
+                border = BorderStroke(
                     1.dp,
                     if (isActive) Accent.copy(0.6f) else SurfaceLight.copy(0.2f)
                 ),
@@ -384,17 +415,14 @@ private fun SessionTabBar(
                         fontFamily = FontFamily.Monospace,
                         maxLines = 1
                     )
-                    // Options icon for all sessions
-                    if (sessions.isNotEmpty()) {
-                        Icon(
-                            Icons.Default.ArrowDropDown,
-                            "Options",
-                            tint = if (isActive) Accent.copy(0.6f) else TerminalWhite.copy(0.3f),
-                            modifier = Modifier
-                                .size(14.dp)
-                                .clickable { onSessionLongPress(name) }
-                        )
-                    }
+                    Icon(
+                        Icons.Default.ArrowDropDown,
+                        "Options",
+                        tint = if (isActive) Accent.copy(0.6f) else TerminalWhite.copy(0.3f),
+                        modifier = Modifier
+                            .size(14.dp)
+                            .clickable { onSessionLongPress(name) }
+                    )
                 }
             }
         }
@@ -403,9 +431,7 @@ private fun SessionTabBar(
         Surface(
             shape = RoundedCornerShape(8.dp),
             color = TerminalGreen.copy(0.1f),
-            border = androidx.compose.foundation.BorderStroke(
-                1.dp, TerminalGreen.copy(0.3f)
-            ),
+            border = BorderStroke(1.dp, TerminalGreen.copy(0.3f)),
             modifier = Modifier.clickable(onClick = onAddSession)
         ) {
             Row(
@@ -421,6 +447,204 @@ private fun SessionTabBar(
     }
 }
 
+// ── ANSI Terminal Line ──────────────────────────────────────────────────────
+@Composable
+private fun AnsiTerminalLine(
+    text: String,
+    isLast: Boolean
+) {
+    // Strip ANSI escape codes and extract text
+    val cleanText = remember(text) { stripAnsiCodes(text) }
+
+    // Determine color from ANSI codes
+    val textColor = remember(text) { parseAnsiColor(text) }
+
+    Text(
+        text = cleanText,
+        color = textColor,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 12.sp,
+        lineHeight = 17.sp,
+        softWrap = true,
+        modifier = Modifier.padding(vertical = 1.dp)
+    )
+}
+
+/**
+ * Strip ANSI escape codes from text, returning clean display text.
+ */
+private fun stripAnsiCodes(text: String): String {
+    return text.replace(Regex("\u001b\\[[0-9;]*[a-zA-Z]"), "")
+        .replace(Regex("\u001b\\][0-9;]*[a-zA-Z]"), "")
+        .replace(Regex("[\\u0000-\\u001F]"), "") // Remove control chars except newline
+}
+
+/**
+ * Parse ANSI escape codes to determine text color.
+ * Returns appropriate TerminalWhite/TerminalGreen/TerminalRed etc.
+ */
+private fun parseAnsiColor(text: String): Color {
+    val ansiPattern = Regex("\u001b\\[([0-9;]*)m")
+    val matches = ansiPattern.findAll(text).map { it.groupValues[1] }.toList()
+
+    // Check the LAST ANSI code before reset
+    for (code in matches.reversed()) {
+        val codes = code.split(";")
+        for (c in codes) {
+            return when (c) {
+                "30", "38;5;0" -> TerminalWhite.copy(alpha = 0.5f)  // Dark gray
+                "31", "38;5;1", "38;5;160", "38;5;196", "38;5;197",
+                "38;5;198", "38;5;199", "38;5;200" -> TerminalRed
+                "32", "38;5;2", "38;5;28", "38;5;34", "38;5;40",
+                "38;5;46" -> TerminalGreen
+                "33", "38;5;3", "38;5;220", "38;5;226", "38;5;228" -> TerminalYellow
+                "34", "38;5;4", "38;5;21", "38;5;27", "38;5;33" -> Color(0xFF569CD6) // Blue
+                "35", "38;5;5" -> Color(0xFFC586C0) // Purple
+                "36", "38;5;6", "38;5;44", "38;5;45", "38;5;51" -> Color(0xFF4EC9B0) // Cyan
+                "37", "38;5;7" -> TerminalWhite
+                "90", "38;5;8" -> TerminalWhite.copy(alpha = 0.4f) // Bright black
+                "91", "38;5;9" -> Color(0xFFF44747) // Bright red
+                "92", "38;5;10" -> Color(0xFF4EC9B0) // Bright green
+                "93", "38;5;11" -> Color(0xFFDCDCAA) // Bright yellow
+                "94", "38;5;12" -> Color(0xFF569CD6) // Bright blue
+                "95", "38;5;13" -> Color(0xFFC586C0) // Bright magenta
+                "96", "38;5;14" -> Color(0xFF9CDCFE) // Bright cyan
+                "0", "0;0" -> return TerminalWhite // Reset
+                else -> continue
+            }
+        }
+    }
+    return TerminalWhite
+}
+
+// ── Terminal Input Bar ──────────────────────────────────────────────────────
+@Composable
+private fun TerminalInputBar(
+    text: String,
+    onTextChange: (String) -> Unit,
+    onSend: () -> Unit,
+    onKeyUp: () -> Unit,
+    onKeyDown: () -> Unit,
+    focusRequester: FocusRequester
+) {
+    Surface(
+        color = TerminalBg.copy(alpha = 0.95f),
+        tonalElevation = 4.dp
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .background(Color(0xFF0D0D0D), RoundedCornerShape(12.dp))
+                .border(BorderStroke(1.dp, Color(0xFF1E1E1E)), RoundedCornerShape(12.dp))
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Prompt character
+            Text(
+                "$ ",
+                color = TerminalGreen,
+                fontSize = 14.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 8.dp)
+            )
+
+            // Text input
+            TextField(
+                value = text,
+                onValueChange = onTextChange,
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester)
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyUp) {
+                            when (event.key) {
+                                Key.Enter -> { onSend(); true }
+                                Key.DirectionUp -> { onKeyUp(); true }
+                                Key.DirectionDown -> { onKeyDown(); true }
+                                else -> false
+                            }
+                        } else false
+                    },
+                placeholder = {
+                    Text("Type a command...",
+                        fontSize = 14.sp,
+                        color = TerminalWhite.copy(alpha = 0.2f),
+                        fontFamily = FontFamily.Monospace)
+                },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedTextColor = TerminalWhite,
+                    unfocusedTextColor = TerminalWhite,
+                    cursorColor = TerminalGreen
+                ),
+                textStyle = TextStyle(
+                    fontSize = 14.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = TerminalWhite
+                ),
+                maxLines = 1,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { if (text.isNotBlank()) onSend() }),
+                singleLine = true
+            )
+
+            // Send button
+            IconButton(
+                onClick = onSend,
+                enabled = text.isNotBlank(),
+                modifier = Modifier.size(36.dp)
+            ) {                        Icon(
+                            Icons.Default.PlayArrow,
+                            "Run",
+                    tint = if (text.isNotBlank()) TerminalGreen else TerminalWhite.copy(alpha = 0.2f),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+// ── Terminal Status Bar ─────────────────────────────────────────────────────
+@Composable
+private fun TerminalStatusBar(
+    lineCount: Int,
+    sessionName: String,
+    termuxInstalled: Boolean
+) {
+    Surface(color = Color(0xFF0A0A0A), tonalElevation = 0.dp) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 3.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "$lineCount lines · $sessionName",
+                color = TerminalWhite.copy(alpha = 0.25f),
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace
+            )
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!termuxInstalled) {
+                    Text("Termux not installed",
+                        color = TerminalRed.copy(alpha = 0.4f), fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace)
+                }
+                Text("↑↓ history · Enter run",
+                    color = TerminalWhite.copy(alpha = 0.2f), fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace)
+            }
+        }
+    }
+}
+
 // ── New Session Dialog ─────────────────────────────────────────────────────
 @Composable
 private fun NewSessionDialog(
@@ -428,13 +652,11 @@ private fun NewSessionDialog(
     onCreate: (name: String, workdir: String) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
-    var workdir by remember {
-        mutableStateOf("/data/data/com.termux/files/home")
-    }
+    var workdir by remember { mutableStateOf("/data/data/com.termux/files/home") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1A1B1E),
+        containerColor = TerminalBg,
         titleContentColor = TerminalWhite,
         textContentColor = TerminalWhite,
         title = {
@@ -462,7 +684,7 @@ private fun NewSessionDialog(
                         unfocusedLabelColor = TerminalWhite.copy(0.5f)
                     ),
                     modifier = Modifier.fillMaxWidth(),
-                    textStyle = LocalTextStyle.current.copy(fontSize = 14.sp, fontFamily = FontFamily.Monospace)
+                    textStyle = TextStyle(fontSize = 14.sp, fontFamily = FontFamily.Monospace, color = TerminalWhite)
                 )
                 OutlinedTextField(
                     value = workdir,
@@ -480,7 +702,7 @@ private fun NewSessionDialog(
                         unfocusedLabelColor = TerminalWhite.copy(0.5f)
                     ),
                     modifier = Modifier.fillMaxWidth(),
-                    textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                    textStyle = TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = TerminalWhite)
                 )
             }
         },
@@ -489,7 +711,7 @@ private fun NewSessionDialog(
                 onClick = { if (name.isNotBlank()) onCreate(name.trim(), workdir.trim()) },
                 enabled = name.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = Accent)
-            ) { Text("Create", color = ChatBg, fontWeight = FontWeight.Bold) }
+            ) { Text("Create", color = TerminalBg, fontWeight = FontWeight.Bold) }
         },
         dismissButton = {
             OutlinedButton(onClick = onDismiss) {
@@ -514,7 +736,7 @@ private fun SessionContextMenu(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1A1B1E),
+        containerColor = TerminalBg,
         titleContentColor = TerminalWhite,
         textContentColor = TerminalWhite,
         title = {
@@ -526,51 +748,17 @@ private fun SessionContextMenu(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                // Rename
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = SurfaceLight.copy(0.1f),
-                    modifier = Modifier.fillMaxWidth().clickable { showRenameDialog = true }
-                ) {
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Edit, null, tint = Accent, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text("Rename", color = TerminalWhite, fontSize = 14.sp)
-                            Text("Change session name", color = TerminalWhite.copy(0.4f), fontSize = 11.sp)
-                        }
-                    }
+                MenuItem(Icons.Default.Edit, "Rename", "Change session name", Accent) {
+                    showRenameDialog = true
                 }
-                // Clear history
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = SurfaceLight.copy(0.1f),
-                    modifier = Modifier.fillMaxWidth().clickable { onClearHistory(); onDismiss() }
-                ) {
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.DeleteSweep, null, tint = TerminalYellow, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text("Clear History", color = TerminalWhite, fontSize = 14.sp)
-                            Text("Remove all command history for this session", color = TerminalWhite.copy(0.4f), fontSize = 11.sp)
-                        }
-                    }
+                MenuItem(Icons.Default.DeleteSweep, "Clear Output", "Remove all terminal output", TerminalYellow) {
+                    onClearHistory()
+                    onDismiss()
                 }
-                // Delete (not for default)
                 if (!isDefault) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = TerminalRed.copy(0.1f),
-                        modifier = Modifier.fillMaxWidth().clickable { onDelete(); onDismiss() }
-                    ) {
-                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Delete, null, tint = TerminalRed, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(10.dp))
-                            Column {
-                                Text("Delete Session", color = TerminalRed, fontSize = 14.sp)
-                                Text("Permanently remove this session", color = TerminalRed.copy(0.5f), fontSize = 11.sp)
-                            }
-                        }
+                    MenuItem(Icons.Default.Delete, "Delete Session", "Permanently remove this session", TerminalRed) {
+                        onDelete()
+                        onDismiss()
                     }
                 }
             }
@@ -580,11 +768,10 @@ private fun SessionContextMenu(
         }
     )
 
-    // Rename dialog
     if (showRenameDialog) {
         AlertDialog(
             onDismissRequest = { showRenameDialog = false },
-            containerColor = Color(0xFF1A1B1E),
+            containerColor = TerminalBg,
             title = { Text("Rename Session", color = TerminalWhite) },
             text = {
                 OutlinedTextField(
@@ -610,7 +797,7 @@ private fun SessionContextMenu(
                         showRenameDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Accent)
-                ) { Text("Rename", color = ChatBg) }
+                ) { Text("Rename", color = TerminalBg) }
             },
             dismissButton = {
                 TextButton(onClick = { showRenameDialog = false }) { Text("Cancel", color = TerminalWhite) }
@@ -619,134 +806,26 @@ private fun SessionContextMenu(
     }
 }
 
-// ── Terminal Stats ─────────────────────────────────────────────────────────
-private data class TerminalStats(
-    val total: Int,
-    val ok: Int,
-    val fail: Int,
-    val commands: Int
-)
-
-// ── Termux Status Indicator ────────────────────────────────────────────────
 @Composable
-private fun TerminalStatusIndicator(installed: Boolean) {
-    val inf = rememberInfiniteTransition(label = "pulse")
-    val pulseAlpha by inf.animateFloat(0.4f, 1.0f,
-        infiniteRepeatable(tween(1200, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse")
-
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (installed) TerminalGreen.copy(0.12f) else TerminalRed.copy(0.12f))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        Box(
-            Modifier
-                .size(6.dp)
-                .alpha(pulseAlpha)
-                .clip(CircleShape)
-                .background(if (installed) TerminalGreen else TerminalRed)
-        )
-        Text(
-            if (installed) "Termux ✓" else "No Termux",
-            color = if (installed) TerminalGreen else TerminalRed.copy(0.7f),
-            fontSize = 9.sp,
-            fontWeight = FontWeight.SemiBold,
-            fontFamily = FontFamily.Monospace
-        )
-    }
-}
-
-// ── Enhanced Log Line ──────────────────────────────────────────────────────
-@Composable
-private fun EnhancedLogLine(
-    log: TerminalLog,
-    searchHighlight: String,
+private fun MenuItem(
+    icon: ImageVector,
+    label: String,
+    description: String,
+    iconColor: Color,
     onClick: () -> Unit
 ) {
-    val logColors = getLogColors(log.logType)
-    val prefix = getLogPrefix(log.logType)
-    val sdf = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
-
-    val animatedAlpha by animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = tween(300),
-        label = "logAlpha"
-    )
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .alpha(animatedAlpha)
-            .clip(RoundedCornerShape(6.dp))
-            .background(logColors.bg)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.Top
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = SurfaceLight.copy(0.1f),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
     ) {
-        Box(
-            modifier = Modifier
-                .padding(top = 2.dp, end = 8.dp)
-                .size(16.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(logColors.icon, null, tint = logColors.color, modifier = Modifier.size(14.dp))
-        }
-        Text(
-            text = sdf.format(Date(log.timestamp)),
-            color = TerminalWhite.copy(alpha = 0.2f),
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.width(52.dp).padding(top = 1.dp)
-        )
-        val displayText = "$prefix${log.content}"
-        Text(
-            text = displayText,
-            color = logColors.color,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp,
-            modifier = Modifier.weight(1f),
-            lineHeight = 17.sp,
-            maxLines = 8,
-            overflow = TextOverflow.Ellipsis
-        )
-        Surface(shape = RoundedCornerShape(4.dp), color = logColors.color.copy(alpha = 0.1f)) {
-            Text(
-                log.logType.name.take(6),
-                color = logColors.color.copy(alpha = 0.4f),
-                fontSize = 8.sp,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-            )
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = iconColor, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(label, color = TerminalWhite, fontSize = 14.sp)
+                Text(description, color = TerminalWhite.copy(0.4f), fontSize = 11.sp)
+            }
         }
     }
-}
-
-// ── Color & Icon mapping ───────────────────────────────────────────────────
-private data class LogColors(
-    val color: Color,
-    val bg: Color,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector
-)
-
-private fun getLogColors(type: LogType): LogColors = when (type) {
-    LogType.STATUS_OK -> LogColors(TerminalGreen, TerminalGreen.copy(alpha = 0.06f), Icons.Default.CheckCircle)
-    LogType.STATUS_FAIL -> LogColors(TerminalRed, TerminalRed.copy(alpha = 0.08f), Icons.Default.Cancel)
-    LogType.COMMAND, LogType.TERMUX_CMD -> LogColors(Color(0xFF00E5FF), Color(0xFF00E5FF).copy(alpha = 0.06f), Icons.Default.Terminal)
-    LogType.AI_INPUT -> LogColors(Color(0xFFB388FF), Color(0xFFB388FF).copy(alpha = 0.06f), Icons.Default.Person)
-    LogType.AI_INTENT -> LogColors(Color(0xFF82B1FF), Color(0xFF82B1FF).copy(alpha = 0.06f), Icons.Default.Psychology)
-    LogType.EXECUTION_PLAN -> LogColors(TerminalYellow, TerminalYellow.copy(alpha = 0.06f), Icons.Default.AccountTree)
-    LogType.INFO -> LogColors(TerminalWhite.copy(alpha = 0.6f), Color.Transparent, Icons.Default.Info)
-}
-
-private fun getLogPrefix(type: LogType): String = when (type) {
-    LogType.STATUS_OK -> "✓ "
-    LogType.STATUS_FAIL -> "✗ "
-    LogType.COMMAND, LogType.TERMUX_CMD -> "$ "
-    LogType.AI_INPUT -> "→ "
-    LogType.AI_INTENT -> "🧠 "
-    LogType.EXECUTION_PLAN -> "📋 "
-    LogType.INFO -> ""
 }
