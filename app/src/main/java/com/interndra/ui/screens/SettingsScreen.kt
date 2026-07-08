@@ -45,6 +45,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     val jailbreakEnabled by vm.jailbreakEnabled.collectAsState()
     val jailbreakLevel by vm.jailbreakLevel.collectAsState()
     val obfuscationTech by vm.obfuscationTechnique.collectAsState()
+    val ttsEnabled by vm.ttsEnabled.collectAsState()
 
     var tempKey  by remember { mutableStateOf(apiKey) }
     var tempGeminiKey by remember { mutableStateOf(geminiKey) }
@@ -436,6 +437,27 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                             }
                         }
                     }
+                }
+            }
+
+            // ── TTS (Text-to-Speech) ────────────────────────────────────────
+            Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+                shape = RoundedCornerShape(16.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🔊 Speech Output (TTS)", color = Accent, fontSize = 16.sp,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                        Spacer(Modifier.weight(1f))
+                        Switch(
+                            checked = ttsEnabled,
+                            onCheckedChange = { vm.saveTtsEnabled(it) },
+                            colors = SwitchDefaults.colors(checkedTrackColor = Accent)
+                        )
+                    }
+                    Text(
+                        "When enabled, the AI will read its replies aloud using Hindi/English text-to-speech.",
+                        color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp
+                    )
                 }
             }
 

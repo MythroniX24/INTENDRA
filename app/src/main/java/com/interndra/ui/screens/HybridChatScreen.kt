@@ -1,7 +1,10 @@
 package com.interndra.ui.screens
 
 import android.app.Activity
+import android.content.ContentResolver
 import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.speech.RecognizerIntent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -136,7 +139,7 @@ fun HybridChatScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Color(0xFF0F0F0F))) {
+    Column(Modifier.fillMaxSize().background(Color(0xFF0F0F0F)).imePadding()) {
 
         // ── Top bar ───────────────────────────────────────────────────────
         AnimatedTopBar(onOpenDrawer, onNavigateToTerminal, uiState.activeWorkspaceName)
@@ -661,6 +664,18 @@ private fun EnhancedHybridInputBar(
     val context = LocalContext.current
     var showMarkdownTools by remember { mutableStateOf(false) }
 
+    // File picker launcher — hoisted to top of composable
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            val fileName = getFileName(context, it)
+            val fileInfo = "[File: $fileName]"
+            onTextChange(text + "\n$fileInfo ")
+            Toast.makeText(context, "Attached: $fileName", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     val speechLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -719,6 +734,19 @@ private fun EnhancedHybridInputBar(
                     .padding(horizontal = 4.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Attach file button
+                IconButton(
+                    onClick = { filePickerLauncher.launch("*/*") },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Default.AttachFile,
+                        "Attach file",
+                        tint = Color.White.copy(0.7f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
                 // Markdown toggle
                 IconButton(
                     onClick = { showMarkdownTools = !showMarkdownTools },
@@ -1044,4 +1072,20 @@ private fun EnhancedWelcomeScreen(vm: HybridAgentViewModel, onTextChange: (Strin
 
         Spacer(Modifier.height(24.dp))
     }
+}
+
+// ── Helper: extract filename from content URI ──────────────────────────────
+private fun getFileName(context: android.content.Context, uri: Uri): String {
+    var name = "file"
+    if (uri.scheme == "content") {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0 && cursor.moveToFirst()) {
+                name = cursor.getString(idx)
+            }
+        }
+    } else {
+        name = uri.lastPathSegment ?: "file"
+    }
+    return name
 }

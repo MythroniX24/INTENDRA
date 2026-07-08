@@ -60,6 +60,7 @@ private val PRE_LOCK_MODE_PREF    = stringPreferencesKey("pre_lock_privacy_mode"
 // the line `prefs[EMERGENCY_LOCK_PREF] = true` fails to compile with
 // "The boolean literal does not conform to the expected type String".
 private val EMERGENCY_LOCK_PREF   = booleanPreferencesKey("emergency_lock_active")
+private val TTS_ENABLED_PREF      = booleanPreferencesKey("tts_enabled")
 
 data class HybridUiState(
     val isLoading: Boolean                  = false,
@@ -297,6 +298,11 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         }
     }
 
+    // ── TTS toggle ──────────────────────────────────────────────────────
+    val ttsEnabled: StateFlow<Boolean> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[TTS_ENABLED_PREF] ?: false }, false)
+    }
+
     // ── Init ──────────────────────────────────────────────────────────────
     // UPGRADE: Entire init block is wrapped in try-catch so that a crash in
     // ANY component (TTS, Room, DataStore, JNI, plugins, etc.) does NOT take
@@ -416,6 +422,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         JailbreakEngine.obfuscationTechnique = technique
         _uiState.update { it.copy(obfuscationTechnique = technique) }
     }
+    fun saveTtsEnabled(enabled: Boolean) = viewModelScope.launch {
+        app.dataStore.edit { it[TTS_ENABLED_PREF] = enabled }
+    }
     fun savePrivacyMode(mode: PrivacyMode) = viewModelScope.launch {
         if (_uiState.value.emergencyLockActive) return@launch
         app.dataStore.edit { it[PRIVACY_MODE_PREF] = mode.name }
@@ -473,11 +482,26 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         if (trimmed.isEmpty() || _uiState.value.isLoading) return
 
         val mode = privacyMode.value
+        val provider = aiProvider.value
         val key  = apiKey.value
+        val geminiKey = geminiApiKey.value
 
-        if (mode == PrivacyMode.CLOUD_ENHANCED && key.isBlank()) {
-            _uiState.update { it.copy(error = "Cloud mode needs OpenRouter API key — set it in Settings") }
-            return
+        // FIX: Check the correct API key based on selected provider
+        if (mode == PrivacyMode.CLOUD_ENHANCED) {
+            when (provider) {
+                Constants.AiProvider.GEMINI -> {
+                    if (geminiKey.isBlank()) {
+                        _uiState.update { it.copy(error = "Gemini mode needs Google Gemini API key — set it in Settings") }
+                        return
+                    }
+                }
+                Constants.AiProvider.OPENROUTER -> {
+                    if (key.isBlank()) {
+                        _uiState.update { it.copy(error = "Cloud mode needs OpenRouter API key — set it in Settings") }
+                        return
+                    }
+                }
+            }
         }
 
         viewModelScope.launch {
@@ -688,7 +712,8 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 val replyText = buildAiReply(intent, orchResult.explanation, suppressSteps = usingFallbackCommands) +
                     buildSourcesBlock(webSources)
                 repo.updateAiMessage(placeholderId, replyText)
-                if (!intent.reply.isNullOrBlank()) speak(intent.reply)
+                // TTS: only speak if user has enabled it in Settings
+                if (!intent.reply.isNullOrBlank() && ttsEnabled.value) speak(intent.reply)
                 if (commands.isNotEmpty()) executeCommands(session, trimmed, intent, commands, placeholderId)
 
                 // ── Record to timeline ────────────────────────────────────
