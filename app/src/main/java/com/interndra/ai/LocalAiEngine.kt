@@ -236,7 +236,7 @@ class LocalAiEngine(private val context: Context) {
             lo.contains("ip address") || lo.contains("ipconfig") ->
                 """{"action":"network_info","reply":"Getting network info...","commands":[{"type":"ADB_SHELL","command":"ifconfig wlan0","description":"Network info"}]}"""
             else ->
-                """{"action":"fallback","reply":"I need my local AI model to process that request. Please download the model in Settings, or switch to Cloud or Hybrid mode.","commands":[]}"""
+                """{"action":"fallback","reply":"⚠️ Unable to process this request.\n\n**Possible causes:**\n- Cloud AI (Gemini/OpenRouter) may have returned an error\n- Check your API key in Settings\n- Try a different AI model\n- Make sure you have internet connection\n\n*Tip: If you just saved your API key, try switching to Cloud Enhanced mode in Privacy settings.*","commands":[]}"""
         }
     }
 

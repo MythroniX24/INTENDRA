@@ -199,7 +199,7 @@ fun HybridChatScreen(
                 item { EnhancedWelcomeScreen(vm) { text -> inputText = text } }
             } else {
                 // Render grouped messages
-                itemsIndexed(groupedMessages, key = { idx, _ -> "group_$idx" }) { _, (role, msgs) ->
+                itemsIndexed(groupedMessages, key = { idx, _ -> "group_${idx}_${messages.size}" }) { _, (role, msgs) ->
                     MessageGroup(
                         role = role,
                         messages = msgs,
@@ -369,8 +369,7 @@ private fun MessageGroup(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = if (isUser) 8.dp else 4.dp)
-            .animateContentSize(tween(300)),
+            .padding(horizontal = if (isUser) 8.dp else 4.dp),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
         // Timestamp header for group
