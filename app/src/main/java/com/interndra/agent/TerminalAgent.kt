@@ -213,7 +213,7 @@ class TerminalAgent(
     suspend fun execute(
         sessionName: String,
         command: String,
-        timeoutMs: Long = 60_000L
+        timeoutMs: Long = 300_000L
     ): SessionResult = withContext(Dispatchers.IO) {
         val startMs = System.currentTimeMillis()
         val session = getOrCreateSession(sessionName)
@@ -283,7 +283,7 @@ class TerminalAgent(
     suspend fun executeWithRecovery(
         sessionName: String,
         command: String,
-        timeoutMs: Long = 120_000L
+        timeoutMs: Long = 300_000L
     ): SessionResult = withContext(Dispatchers.IO) {
         val firstResult = execute(sessionName, command, timeoutMs)
 

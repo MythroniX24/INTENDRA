@@ -773,7 +773,16 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 repo.updateAiMessage(placeholderId, replyText)
                 // TTS: only speak if user has enabled it in Settings
                 if (!intent.reply.isNullOrBlank() && ttsEnabled.value) speak(intent.reply)
-                if (commands.isNotEmpty()) executeCommands(session, trimmed, intent, commands, placeholderId)
+                if (commands.isNotEmpty()) {
+                    try {
+                        executeCommands(session, trimmed, intent, commands, placeholderId)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Command execution failed: ${e.message}")
+                        try { repo.log(session, LogType.STATUS_FAIL, "❌ Execution error: ${e.message}") } catch (_: Exception) {}
+                    }
+                }
 
                 // ── Record to timeline ────────────────────────────────────
                 timelineEngine.recordChat(

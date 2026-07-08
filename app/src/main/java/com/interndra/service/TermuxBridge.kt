@@ -140,7 +140,7 @@ class TermuxBridge(private val context: Context) {
     suspend fun executeShell(
         shellCommand: String,
         workdir: String? = null,
-        timeoutMs: Long = 60_000L
+        timeoutMs: Long = 180_000L
     ): TermuxResult = executeRaw(
         command = "/data/data/com.termux/files/usr/bin/sh",
         arguments = listOf("-c", shellCommand),
@@ -152,7 +152,7 @@ class TermuxBridge(private val context: Context) {
      * Install a package via pkg (Termux's package manager).
      */
     suspend fun installPackage(packageName: String): TermuxResult =
-        executeShell("pkg install -y $packageName 2>&1", timeoutMs = 120_000L)
+        executeShell("pkg install -y $packageName 2>&1", timeoutMs = 300_000L)
 
     /**
      * Update all packages.
