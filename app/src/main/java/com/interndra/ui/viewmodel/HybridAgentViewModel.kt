@@ -35,11 +35,12 @@ import com.interndra.services.AutomationWorker
 import com.interndra.service.TermuxBridge
 import com.interndra.services.InterndraNotificationListener
 import com.interndra.util.Constants
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 private val Context.dataStore by preferencesDataStore("interndra_prefs_v2")
 private val API_KEY_PREF          = stringPreferencesKey("openrouter_api_key")
@@ -129,6 +130,20 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
 
     private var tts: TextToSpeech? = null
     private var isTtsReady = false
+
+    // ── Crash protection ─────────────────────────────────────────────────
+    /** Prevents race condition: only one command executes at a time. */
+    private val commandGate = AtomicBoolean(false)
+
+    /** Catches any unhandled coroutine exception — NEVER crashes silently. */
+    private val crashHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.e(TAG, "💥 Unhandled coroutine crash: ${throwable.message}", throwable)
+        _uiState.update { it.copy(
+            isLoading = false,
+            error = "App error: ${throwable.message?.take(100) ?: "Unknown"}"
+        )}
+        InterndraApplication.writeCrashLog(throwable, app.filesDir, app.getExternalFilesDir(null))
+    }
 
     // ── State flows ───────────────────────────────────────────────────────
     private val _uiState = MutableStateFlow(HybridUiState())
@@ -506,7 +521,10 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     // ── Main command handler ──────────────────────────────────────────────
     fun sendCommand(input: String) {
         val trimmed = input.trim()
-        if (trimmed.isEmpty() || _uiState.value.isLoading) return
+        if (trimmed.isEmpty()) return
+        // AtomicBoolean gate prevents race condition: two rapid calls
+        // could both pass the isLoading check before the coroutine sets it.
+        if (!commandGate.compareAndSet(false, true)) return
 
         val mode = privacyMode.value
         val provider = aiProvider.value
@@ -544,10 +562,36 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             }
         }
 
-        viewModelScope.launch {
+        viewModelScope.launch(crashHandler + kotlinx.coroutines.Dispatchers.Main) {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
-            // FIX: ALL Room DB operations moved INSIDE try-catch.
+            // SAFETY NET: if the entire command takes > 5 minutes, force-reset
+            // to prevent "processing forever" bug.
+            try {
+                kotlinx.coroutines.withTimeout(300_000L) {
+                    processCommand(trimmed, effectiveMode, mode, provider, key)
+                }
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                Log.e(TAG, "⏱ Command timed out after 5 minutes")
+                try { repo.addUserMessage("⏱ Command timed out after 5 minutes") } catch (_: Exception) {}
+                _uiState.update { it.copy(error = "Command timed out after 5 minutes. Try a simpler request.") }
+            } finally {
+                _uiState.update { it.copy(isLoading = false) }
+                commandGate.set(false)
+            }
+        }
+    }
+
+    /** Actual command processing — extracted so withTimeout can wrap it. */
+    private suspend fun processCommand(
+        trimmed: String,
+        effectiveMode: PrivacyMode,
+        mode: PrivacyMode,
+        provider: Constants.AiProvider,
+        key: String
+    ) {
+
+        // FIX: ALL Room DB operations moved INSIDE try-catch.
             // Previously addUserMessage, addAiPlaceholder, newSession were
             // BEFORE the try-catch — any DB failure (corrupted data, missing
             // migration, null DAO) would crash the app.
@@ -565,7 +609,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                     isLoading = false,
                     error = "Database error: ${dbErr.message}. Try clearing app data."
                 )}
-                return@launch
+                return
             }
 
             // ── Phase 5/6/7: try the workflow planner FIRST ─────────────────
@@ -640,7 +684,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                             success = result.overallSuccess,
                             durationMs = result.durationMs
                         )
-                        return@launch
+                        return
                     }
                 }
             } catch (e: Exception) {
@@ -748,7 +792,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                     repo.log(session, LogType.STATUS_FAIL, "🚫 BLOCKED: ${blocked.reason}")
                     repo.updateAiMessage(placeholderId, "⛔ Command blocked by Safety Engine:\n${blocked.reason}")
                     _uiState.update { it.copy(isLoading = false) }
-                    return@launch
+                    return
                 }
 
                 if (safety.hasConfirmRequired(safetyReports)) {
@@ -764,7 +808,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                             onConfirm      = { executeCommands(session, trimmed, intent, commands) }
                         )
                     )}
-                    return@launch
+                    return
                 }
 
                 // ── Execute ───────────────────────────────────────────────
@@ -801,8 +845,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 try { repo.updateAiMessage(placeholderId, err) } catch (_: Exception) {}
                 try { repo.log(session, LogType.STATUS_FAIL, err) } catch (_: Exception) {}
                 _uiState.update { it.copy(error = msg) }
-            } finally {
-                _uiState.update { it.copy(isLoading = false) }
             }
         }
     }
