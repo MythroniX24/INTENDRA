@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlin.coroutines.CoroutineContext
 
 /**
  * TerminalAgent — persistent shell session manager with real-time streaming,
@@ -36,7 +37,8 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 class TerminalAgent(
     private val context: Context,
-    private val termuxBridge: TermuxBridge
+    private val termuxBridge: TermuxBridge,
+    private val scope: CoroutineScope? = null  // Optional lifecycle-bound scope for auto-save
 ) {
     companion object {
         private const val TAG = "TerminalAgent"
@@ -128,8 +130,9 @@ class TerminalAgent(
     // Known git branch cache (refreshed per session)
     private val gitBranchCache = mutableMapOf<String, List<String>>()
 
-    // Auto-save job
+    // Auto-save job - uses provided scope or creates one
     private var autoSaveJob: Job? = null
+    private val autoSaveScope: CoroutineScope = scope ?: CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // ── Session Management ────────────────────────────────────────────────
 
@@ -786,10 +789,21 @@ class TerminalAgent(
 
     private fun scheduleAutoSave() {
         autoSaveJob?.cancel()
-        autoSaveJob = CoroutineScope(Dispatchers.IO).launch {
+        autoSaveJob = autoSaveScope.launch {
             delay(AUTO_SAVE_DELAY_MS)
             saveSessionsToDisk()
         }
+    }
+
+    /**
+     * Cancel all pending auto-save jobs and release resources.
+     * Called when the ViewModel is cleared.
+     */
+    fun shutdown() {
+        autoSaveJob?.cancel()
+        autoSaveJob = null
+        saveSessionsToDisk() // Final save
+        sessions.clear()
     }
 
     fun saveSessionsToDisk() {

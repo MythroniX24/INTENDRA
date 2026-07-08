@@ -15,6 +15,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.interndra.agent.TerminalAgent
 import com.interndra.ai.*
+import com.interndra.ai.system.AiSystemHealthMonitor
 import com.interndra.ai.workflow.WorkflowEngine
 import com.interndra.ai.workflow.WorkflowPlanner
 import com.interndra.ai.agents.AgentPool
@@ -211,8 +212,11 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     private val _termuxExternalAppsEnabled = MutableStateFlow(false)
     val termuxExternalAppsEnabled: StateFlow<Boolean> = _termuxExternalAppsEnabled.asStateFlow()
 
+    // ── AI System Health Monitor ──────────────────────────────────────
+    val healthMonitor = AiSystemHealthMonitor(app)
+
     // ── Terminal Agent ───────────────────────────────────────────────────
-    val terminalAgent = TerminalAgent(app, termuxBridge)
+    val terminalAgent = TerminalAgent(app, termuxBridge, scope = viewModelScope)
     private val _terminalSessions = MutableStateFlow(terminalAgent.getSessionNames())
     val terminalSessions: StateFlow<List<String>> = _terminalSessions.asStateFlow()
     private val _activeTerminalSession = MutableStateFlow("default")
@@ -399,6 +403,17 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 _termuxExternalAppsEnabled.value = termuxBridge.isExternalAppsEnabled()
             } catch (e: Exception) {
                 Log.e(TAG, "Init: Termux check failed: ${e.message}")
+            }
+        }
+
+        // Restore terminal sessions from disk
+        viewModelScope.launch {
+            try {
+                terminalAgent.loadSessionsFromDisk()
+                _terminalSessions.value = terminalAgent.getSessionNames()
+                Log.i(TAG, "Restored ${_terminalSessions.value.size} terminal sessions")
+            } catch (e: Exception) {
+                Log.e(TAG, "Init: session restore failed: ${e.message}")
             }
         }
     }
@@ -1208,5 +1223,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         tts?.shutdown()
         localEngine.unload()
         termuxBridge.unregisterReceiver()
+        terminalAgent.shutdown()
+        healthMonitor.saveReport()
     }
 }

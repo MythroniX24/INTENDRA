@@ -86,6 +86,7 @@ class OcrPipeline(private val context: Context) {
             val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
             recognizer.process(image)
                 .addOnSuccessListener { result ->
+                    recognizer.close()  // FIX: Must close recognizer after use to avoid memory leak
                     val text      = result.text.trim()
                     val lineCount = result.textBlocks.sumOf { it.lines.size }
                     val wordCount = text.split(Regex("\\s+")).filter { it.isNotBlank() }.size
@@ -93,6 +94,7 @@ class OcrPipeline(private val context: Context) {
                     cont.resume(OcrResult(text, 0.95f, lineCount, wordCount))
                 }
                 .addOnFailureListener { e ->
+                    recognizer.close()  // FIX: Must close even on failure
                     Log.e(TAG, "OCR failed: ${e.message}")
                     cont.resumeWithException(e)
                 }

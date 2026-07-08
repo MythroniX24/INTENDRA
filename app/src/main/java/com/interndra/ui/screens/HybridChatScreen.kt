@@ -84,23 +84,34 @@ fun HybridChatScreen(
     val context    = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
 
-    // ── Streaming state: which message is currently streaming and its revealed text ──
+    // ── Streaming state: which FRESH (newly arrived) message is streaming ──
+    // FIX: The old code used LaunchedEffect(messages) which triggered on EVERY
+    // message list change, including loading old messages from the database.
+    // This caused ALL old AI messages to get the typing animation on app startup.
+    // Now we only animate messages that arrived AFTER the composable was created.
+    val initialMessageCount = remember { messages.size }
     var streamingMsgId by remember { mutableStateOf<Long?>(null) }
     var streamedText by remember { mutableStateOf("") }
     var streamCharsPerFrame by remember { mutableStateOf(3) }
 
-    // Auto-scroll on new messages
+    // Auto-scroll on new messages (use scrollToItem for instant, not animate)
     LaunchedEffect(messages.size, streamedText) {
         if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+            listState.scrollToItem(messages.size - 1)
         }
     }
 
-    // ── Streaming effect: when a new AI message arrives, animate it in ─────
-    LaunchedEffect(messages) {
+    // ── Streaming effect: animate NEW messages after initial load ──
+    // FIX: Use a Set<Long> to track which message IDs have been animated,
+    // so EVERY new AI message gets the typing effect, not just the first one.
+    val animatedMessageIds = remember { mutableSetOf<Long>() }
+    LaunchedEffect(messages.size) {
         val lastMsg = messages.lastOrNull()
-        if (lastMsg != null && lastMsg.role == MessageRole.AI && !lastMsg.isLoading && lastMsg.content.length > 30) {
-            val sid = nextStreamId()
+        // Only animate AI messages that arrived AFTER initial load and haven't been animated yet
+        if (lastMsg != null && messages.size > initialMessageCount &&
+            lastMsg.role == MessageRole.AI && !lastMsg.isLoading &&
+            lastMsg.content.length > 30 && lastMsg.id !in animatedMessageIds) {
+            animatedMessageIds.add(lastMsg.id)
             streamingMsgId = lastMsg.id
             streamedText = ""
             val text = lastMsg.content

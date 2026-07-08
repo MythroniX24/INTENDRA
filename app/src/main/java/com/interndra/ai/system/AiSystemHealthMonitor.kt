@@ -553,6 +553,20 @@ class AiSystemHealthMonitor(private val context: Context) {
     /**
      * Reset all health tracking data.
      */
+    /**
+     * Save the current health report for debugging purposes.
+     * Called when the ViewModel is cleared.
+     */
+    fun saveReport() {
+        try {
+            val report = generateReport()
+            Log.i(TAG, "Final health report: ${report.cacheHitRate * 100}% cache hit, " +
+                    "${report.totalQueries} queries, ${report.providerReports.size} providers")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to save health report: ${e.message}")
+        }
+    }
+
     fun reset() {
         responseCache.clear()
         cacheAccessOrder.clear()

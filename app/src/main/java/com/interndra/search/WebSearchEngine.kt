@@ -42,12 +42,14 @@ class WebSearchEngine(private val dao: AgentDao) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
+        .callTimeout(30, TimeUnit.SECONDS)  // FIX: Added to prevent hanging requests
         .followRedirects(true)
         .build()
 
     private val pageClient = OkHttpClient.Builder()
         .connectTimeout(6, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(20, TimeUnit.SECONDS)  // FIX: Added to prevent hanging page fetches
         .followRedirects(true)
         .build()
 

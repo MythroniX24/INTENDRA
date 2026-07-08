@@ -248,8 +248,8 @@ object EnhancedMarkdownParser {
             if (Regex("""^\s*[-*]\s+\[[ xX]\]\s+.+""").matches(line)) {
                 val items = mutableListOf<Pair<Boolean, String>>()
                 while (i < lines.size && Regex("""^\s*[-*]\s+\[[ xX]\]\s+.+""").matches(lines[i])) {
-                    val m = Regex("""^\s*[-*]\s+\[([ xX])\]\s+(.+)$""").find(lines[i])!!
-                    items.add((m.groupValues[1].lowercase() == "x") to m.groupValues[2]); i++ }
+                    val m = Regex("""^\s*[-*]\s+\[([ xX])\]\s+(.+)$""").find(lines[i])
+                    if (m != null) { items.add((m.groupValues[1].lowercase() == "x") to m.groupValues[2]); i++ } else { break } }
                 blocks.add(EnhancedBlock.Checklist(items)); continue
             }
             // Tag chip
@@ -259,21 +259,21 @@ object EnhancedMarkdownParser {
             if (Regex("""^\s*[-*+]\s+.+""").matches(line) && !Regex("""^\s*[-*+]\s+\[[ xX]\]""").matches(line)) {
                 val items = mutableListOf<String>(); val indents = mutableListOf<Int>()
                 while (i < lines.size && Regex("""^\s*[-*+]\s+.+""").matches(lines[i]) && !Regex("""^\s*[-*+]\s+\[[ xX]\]""").matches(lines[i])) {
-                    val m = Regex("""^(\s*)[-*+]\s+(.+)$""").find(lines[i])!!; indents.add(m.groupValues[1].length / 2); items.add(m.groupValues[2]); i++ }
+                    val m = Regex("""^(\s*)[-*+]\s+(.+)$""").find(lines[i]); if (m != null) { indents.add(m.groupValues[1].length / 2); items.add(m.groupValues[2]); i++ } else { break } }
                 blocks.add(EnhancedBlock.BulletList(items, indents)); continue
             }
             // Numbered
             if (Regex("""^\s*\d+[.)]\s+.+""").matches(line)) {
                 val items = mutableListOf<String>(); val nums = mutableListOf<Int>()
                 while (i < lines.size && Regex("""^\s*\d+[.)]\s+.+""").matches(lines[i])) {
-                    val m = Regex("""^\s*(\d+)[.)]\s+(.+)$""").find(lines[i])!!; nums.add(m.groupValues[1].toIntOrNull() ?: (items.size + 1)); items.add(m.groupValues[2]); i++ }
+                    val m = Regex("""^\s*(\d+)[.)]\s+(.+)$""").find(lines[i]); if (m != null) { nums.add(m.groupValues[1].toIntOrNull() ?: (items.size + 1)); items.add(m.groupValues[2]); i++ } else { break } }
                 blocks.add(EnhancedBlock.NumberedList(items, nums)); continue
             }
             // Footnotes
             if (line.trim().startsWith("[^") && line.trim().contains("]:")) {
                 val fns = mutableListOf<Pair<String, String>>()
                 while (i < lines.size && Regex("""^\s*\[\^[\w-]+\]:\s+.+""").matches(lines[i])) {
-                    val m = Regex("""^\s*\[\^([\w-]+)\]:\s+(.+)$""").find(lines[i])!!; fns.add(m.groupValues[1] to m.groupValues[2]); i++ }
+                    val m = Regex("""^\s*\[\^([\w-]+)\]:\s+(.+)$""").find(lines[i]); if (m != null) { fns.add(m.groupValues[1] to m.groupValues[2]); i++ } else { break } }
                 if (fns.isNotEmpty()) blocks.add(EnhancedBlock.FootnoteSection(fns)); continue
             }
             // Table
