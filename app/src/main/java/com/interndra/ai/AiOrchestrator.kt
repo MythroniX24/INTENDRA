@@ -160,11 +160,29 @@ class AiOrchestrator(
                                 jailbreakLevel = jailbreakLevel
                             ).copy(source = AiSource.FALLBACK)
                         } catch (e2: Exception) {
-                            // Both Gemini AND OpenRouter failed — show Gemini error to user
-                            runLocal(userInput, memory).copy(
+                            // Both Gemini AND OpenRouter failed — show Gemini error to user.
+                            // CRITICAL: Do NOT call runLocal() here — that triggers the
+                            // local rule-based fallback which returns "Unable to process".
+                            // Directly return the error so user sees the actual API error.
+                            val errReply = buildString {
+                                append("⚠️ **Cloud AI Error — $activeProvider**\n\n")
+                                append("`$geminiMsg`")
+                                append("\n\n**Troubleshooting:**")
+                                append("\n- Check your API key in Settings and re-save it")
+                                append("\n- Make sure you have an active internet connection")
+                                append("\n- Try a different AI model in Settings")
+                                append("\n- The selected model may not be available in your region")
+                                append("\n\n*If the problem persists, try OpenRouter instead.*")
+                            }
+                            val safeReply = errReply
+                                .replace("\\", "\\\\")
+                                .replace("\"", "\\\"")
+                                .replace("\n", "\\n")
+                            AiEngineResult(
                                 source = AiSource.FALLBACK,
                                 modelUsed = "gemini-error",
-                                intentJson = """{"action":"chat","reply":"⚠️ **Gemini API Error:** $geminiMsg\n\n**Troubleshooting:**\n- Check your Gemini API key in Settings\n- Make sure you have internet\n- Try a different Gemini model in Settings\n- The selected model may be unavailable — try Gemini 3.5 Flash","commands":[]}"""
+                                intentJson = """{"action":"chat","reply":"$safeReply","commands":[]}""",
+                                latencyMs = 0L
                             )
                         }
                     }
@@ -201,13 +219,6 @@ class AiOrchestrator(
             Log.e(TAG, "Local engine error: ${e.message}")
             AiEngineResult(intentJson = """{"action":"unknown","commands":[]}""",
                 source = AiSource.LOCAL, modelUsed = "local-error", latencyMs = 0)
-        }
-
-    private suspend fun runCloud(input: String, memory: List<CommandMemory>): AiEngineResult =
-        try { cloudEngine.parseIntent(input, memory) }
-        catch (e: Exception) {
-            Log.e(TAG, "Cloud error: ${e.message} — falling back to local")
-            runLocal(input, memory).copy(source = AiSource.FALLBACK)
         }
 
     @Suppress("UNCHECKED_CAST")
@@ -274,8 +285,10 @@ class AiOrchestrator(
         val cm  = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val net = cm.activeNetwork ?: return false
         val cap = cm.getNetworkCapabilities(net) ?: return false
-        return cap.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-               cap.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        // Use INTERNET capability only — VALIDATED can be false on devices with
+        // custom ROMs, VPNs, captive portals, or aggressive power saving.
+        // The API call itself will timeout if there's genuinely no connectivity.
+        return cap.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     private fun isGoodResult(json: String): Boolean = try {

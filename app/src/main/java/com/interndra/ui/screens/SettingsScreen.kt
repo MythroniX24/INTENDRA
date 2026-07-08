@@ -52,6 +52,8 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     var showGeminiKey by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf(false) }
     var geminiExpanded by remember { mutableStateOf(false) }
+    var geminiTestResult by remember { mutableStateOf<String?>(null) }
+    var isTesting by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().background(ChatBg)) {
 
@@ -242,6 +244,48 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                             colors  = ButtonDefaults.buttonColors(containerColor = TerminalGreen),
                             modifier = Modifier.fillMaxWidth()
                         ) { Text("Save Gemini Key", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) }
+
+                        Spacer(Modifier.height(4.dp))
+                        Button(
+                            onClick = {
+                                isTesting = true
+                                geminiTestResult = null
+                                vm.testGeminiApi { ok, msg ->
+                                    geminiTestResult = msg
+                                    isTesting = false
+                                }
+                            },
+                            enabled  = !isTesting && tempGeminiKey.isNotBlank(),
+                            colors   = ButtonDefaults.buttonColors(containerColor = Accent.copy(0.2f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (isTesting) {
+                                CircularProgressIndicator(
+                                    Modifier.size(16.dp),
+                                    color = Accent,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text("Testing...", color = Accent)
+                            } else {
+                                Text("🧪 Test Gemini API", color = Accent,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                            }
+                        }
+                        geminiTestResult?.let { result ->
+                            val isOk = result.startsWith("✅")
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isOk) TerminalGreen.copy(0.1f) else TerminalRed.copy(0.1f)
+                            ) {
+                                Text(
+                                    result,
+                                    color = if (isOk) TerminalGreen else TerminalRed,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }

@@ -400,7 +400,34 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
 
     // ── Preference save ───────────────────────────────────────────────────
     fun saveApiKey(key: String)           = viewModelScope.launch { app.dataStore.edit { it[API_KEY_PREF] = key } }
-    fun saveGeminiApiKey(key: String)     = viewModelScope.launch { app.dataStore.edit { it[GEMINI_KEY_PREF] = key } }
+    fun saveGeminiApiKey(key: String)     = viewModelScope.launch {
+        app.dataStore.edit { it[GEMINI_KEY_PREF] = key }
+    }
+
+    /** Test Gemini API key by making an actual API call. Returns true on success. */
+    fun testGeminiApi(onResult: (Boolean, String) -> Unit) = viewModelScope.launch {
+        val key = geminiApiKey.value
+        val model = selectedGeminiModel.value
+        if (key.isBlank()) {
+            onResult(false, "❌ Gemini API key is empty. Save your key first.")
+            return@launch
+        }
+        _uiState.update { it.copy(isLoading = true, error = null) }
+        try {
+            val engine = GeminiAiEngine(key, model)
+            val ok = engine.validateApiKey()
+            if (ok) {
+                onResult(true, "✅ Gemini API is working!\nModel: $model\nKey: ${key.takeLast(4)}")
+            } else {
+                onResult(false, "❌ Gemini API returned an error.\nPossible causes:\n- Invalid API key\n- Model '$model' not available\n- Check your internet connection\n\nTry: re-save your key or select a different model.")
+            }
+        } catch (e: Exception) {
+            val msg = e.message?.replace(key, "***") ?: "Unknown error"
+            onResult(false, "❌ Gemini API test failed:\n$msg")
+        } finally {
+            _uiState.update { it.copy(isLoading = false) }
+        }
+    }
     fun saveModel(model: String)          = viewModelScope.launch { app.dataStore.edit { it[MODEL_PREF] = model } }
     fun saveGeminiModel(model: String)    = viewModelScope.launch { app.dataStore.edit { it[GEMINI_MODEL_PREF] = model } }
     fun saveProvider(provider: Constants.AiProvider) = viewModelScope.launch {
