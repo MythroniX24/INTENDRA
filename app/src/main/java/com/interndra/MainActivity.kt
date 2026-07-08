@@ -20,9 +20,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.ViewModelProvider
 import com.interndra.ui.screens.MainScreen
-import com.interndra.ui.theme.InterndraTheme
-import com.interndra.ui.theme.TerminalRed
-import com.interndra.ui.theme.TerminalWhite
+import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 import com.interndra.ui.viewmodel.HybridAgentViewModelFactory
 import java.io.File
@@ -43,12 +41,74 @@ class MainActivity : ComponentActivity() {
         viewModel?.refreshStatus()
     }
 
+    private var crashRecoveryInfo: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         setupCrashLogger()
         installSplashScreen()
         super.onCreate(savedInstanceState)
 
-        // ── Safe ViewModel creation ───────────────────────────────────────
+        // ── Check if app crashed on previous launch ─────────────────────
+        // If yes, show the crash info to the user with recovery options.
+        crashRecoveryInfo = InterndraApplication.didCrashLastLaunch(application)
+
+        // ── Crash Recovery Screen ──────────────────────────────────────────
+    @Composable
+    private fun CrashRecoveryScreen(crashInfo: String) {
+        Box(
+            modifier = Modifier.fillMaxSize().padding(32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "💥",
+                    fontSize = 56.sp
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "App crashed on previous launch",
+                    color = TerminalRed,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(8.dp))
+                Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                    color = TerminalRed.copy(0.1f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        crashInfo.take(500),
+                        color = TerminalRed.copy(0.8f),
+                        fontSize = 11.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        modifier = Modifier.padding(12.dp),
+                        maxLines = 15,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(Modifier.height(20.dp))
+                Text(
+                    "To recover: Clear app data or reinstall.",
+                    color = TerminalWhite.copy(0.5f),
+                    fontSize = 13.sp
+                )
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = {
+                        // Clear crash flag and restart
+                        InterndraApplication.didCrashLastLaunch(application)
+                        recreate()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent)
+                ) {
+                    Text("Try Again", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+
+    // ── Safe ViewModel creation ───────────────────────────────────────
         // Catches any crash during ViewModel construction or init and shows
         // a graceful error screen instead of crashing the app.
         try {
@@ -77,14 +137,17 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color    = MaterialTheme.colorScheme.background
                 ) {
-                    val vm = viewModel
-                    if (vm != null) {
-                        MainScreen(vm)
+                    // ── Show crash recovery FIRST if app crashed before ─
+                    val crashInfo = crashRecoveryInfo
+                    if (crashInfo != null) {
+                        CrashRecoveryScreen(crashInfo)
                     } else {
-                        // ── Graceful error fallback ──────────────────────
-                        // Shown when ViewModel construction throws — user
-                        // can still see the error message and close the app.
-                        ErrorFallbackScreen(vmInitError ?: "Unknown initialization error")
+                        val vm = viewModel
+                        if (vm != null) {
+                            MainScreen(vm)
+                        } else {
+                            ErrorFallbackScreen(vmInitError ?: "Unknown initialization error")
+                        }
                     }
                 }
             }
@@ -132,15 +195,8 @@ class MainActivity : ComponentActivity() {
      * storage isn't mounted.
      */
     private fun setupCrashLogger() {
-        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            InterndraApplication.writeCrashLog(
-                throwable,
-                filesDir,                           // internal: always available
-                getExternalFilesDir(null)           // external: may be null
-            )
-            defaultHandler?.uncaughtException(thread, throwable)
-        }
+        // Crash logging is handled at Application level in InterndraApplication.
+        // No need to override here — it would conflict with the Application handler.
     }
 
     private fun requestRequiredPermissions() {

@@ -21,6 +21,7 @@ class InterndraApplication : Application() {
     companion object {
         private const val TAG = "InterndraApp"
         private const val CRASH_LOG_FILENAME = "crash_log.txt"
+        private const val CRASH_FLAG_FILENAME = ".last_crashed"
 
         /**
          * Write a crash log to every available location so the user can
@@ -36,10 +37,20 @@ class InterndraApplication : Application() {
                 try {
                     val file = File(dir, CRASH_LOG_FILENAME)
                     file.appendText(entry)
-                } catch (_: Exception) {
-                    // Never crash harder while trying to log a crash
-                }
+                } catch (_: Exception) {}
             }
+        }
+
+        /**
+         * Check if the app crashed on the previous launch.
+         */
+        @JvmStatic
+        fun didCrashLastLaunch(app: Application): String? {
+            val flagFile = File(app.filesDir, CRASH_FLAG_FILENAME)
+            if (!flagFile.exists()) return null
+            val info = try { flagFile.readText().trim().ifBlank { null } } catch (_: Exception) { null }
+            flagFile.delete()
+            return info
         }
     }
 
@@ -48,19 +59,28 @@ class InterndraApplication : Application() {
         Log.i(TAG, "INTERNDRA starting — ${BuildConfig.VERSION_NAME}")
 
         // ── Application-level crash handler ──────────────────────────────
-        // Catches crashes that happen BEFORE MainActivity.onCreate() runs.
-        // Writes to internal storage (always available on API 26+) so the
-        // crash log is always findable even if external storage is missing.
-        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        // Replaces the default Android crash dialog with our own handler.
+        // CRITICAL: We do NOT call defaultHandler - that shows the system
+        // "App has stopped" dialog. Instead we write the crash info + set
+        // a flag file. On next launch, MainActivity reads the flag and
+        // shows a friendly error screen with the crash details.
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
+                val trace = Log.getStackTraceString(throwable)
+                val info = "${throwable::class.simpleName}: ${throwable.message}\n\n$trace"
                 writeCrashLog(
                     throwable,
-                    filesDir,                           // internal: always available
-                    getExternalFilesDir(null)           // external: may be null
+                    filesDir,
+                    getExternalFilesDir(null)
                 )
-            } catch (_: Exception) { /* last resort — silent */ }
-            defaultHandler?.uncaughtException(thread, throwable)
+                // Write crash flag so next launch shows error screen
+                try {
+                    File(filesDir, CRASH_FLAG_FILENAME).writeText(info.take(2000))
+                } catch (_: Exception) {}
+                Log.e(TAG, "💥 App crashed: ${throwable.message}")
+            } catch (_: Exception) {}
+            // Terminate the process without showing the system crash dialog
+            android.os.Process.killProcess(android.os.Process.myPid())
         }
 
         if (BuildConfig.DEBUG) {
