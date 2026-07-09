@@ -158,13 +158,16 @@ fun ResearchDashboardScreen(
                 }
 
             // ── Recent research ───────────────────────────────────────
-            if (researchEntries.isNotEmpty()) {
-                item {
+            item {
+                if (researchEntries.isNotEmpty()) {
                     Text("🔬 Recent Research", color = TerminalWhite, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
-                items(researchEntries.take(10), key = { it.id }) { entry ->
-                    CompactKnowledgeCard(entry)
-                }
+            }
+            items(
+                if (researchEntries.isNotEmpty()) researchEntries.take(10) else emptyList(),
+                key = { it.id }
+            ) { entry ->
+                CompactKnowledgeCard(entry)
             }
 
             item { Spacer(Modifier.height(80.dp)) }
