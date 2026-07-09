@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.shape.CircleShape
 import kotlinx.coroutines.launch
 import com.interndra.data.model.Workspace
 import com.interndra.ui.theme.*
@@ -146,6 +147,20 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
                 DrawerItem(icon = Icons.Default.Security, label = "Security & Privacy", selected = selectedTab.value == TAB_SECURITY)
                     { navigateTo(TAB_SECURITY) }
 
+                // ── Shizuku status (elevated shell) ─────────────────────────
+                val shizukuAuth by viewModel.shizukuAuthorized.collectAsState()
+                val shizukuAvail by viewModel.shizukuAvailable.collectAsState()
+                val shizukuPriv = viewModel.shizukuPrivilegeLevel
+
+                ShizukuStatusRow(
+                    isAvailable = shizukuAvail,
+                    isAuthorized = shizukuAuth,
+                    privilegeLevel = shizukuPriv,
+                    backendDesc = viewModel.executionBackendDescription,
+                    onRequestPermission = { viewModel.requestShizukuPermission() },
+                    onRefresh = { viewModel.refreshShizukuStatus() }
+                )
+
                 Spacer(Modifier.weight(1f))
                 HorizontalDivider(color = SurfaceLight, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
 
@@ -221,6 +236,88 @@ private fun DrawerItem(
         modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
         shape    = RoundedCornerShape(12.dp)
     )
+}
+
+// ── Shizuku Status Row ───────────────────────────────────────────────────
+@Composable
+private fun ShizukuStatusRow(
+    isAvailable: Boolean,
+    isAuthorized: Boolean,
+    privilegeLevel: String,
+    backendDesc: String,
+    onRequestPermission: () -> Unit,
+    onRefresh: () -> Unit
+) {
+    val statusColor = when {
+        !isAvailable -> TerminalWhite.copy(0.3f)
+        isAuthorized -> TerminalGreen
+        else -> TerminalYellow
+    }
+    val statusText = when {
+        !isAvailable -> "Shizuku not running"
+        isAuthorized -> "Shizuku Active"
+        else -> "Shizuku — Tap to authorize"
+    }
+    val isClickable = isAvailable && !isAuthorized
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .then(if (isClickable) Modifier.clickable { onRequestPermission() } else Modifier),
+        shape = RoundedCornerShape(12.dp),
+        color = if (isAuthorized) TerminalGreen.copy(0.08f) else Color.Transparent
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Status indicator dot
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(statusColor, CircleShape)
+            )
+            Spacer(Modifier.width(10.dp))
+
+            Column(Modifier.weight(1f)) {
+                Text(
+                    statusText,
+                    color = TerminalWhite,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                if (isAuthorized) {
+                    Text(
+                        privilegeLevel,
+                        color = TerminalGreen,
+                        fontSize = 10.sp
+                    )
+                }
+                Text(
+                    "Backend: $backendDesc",
+                    color = TerminalWhite.copy(0.4f),
+                    fontSize = 9.sp
+                )
+            }
+
+            if (isClickable) {
+                Icon(
+                    Icons.Default.PowerSettingsNew,
+                    "Authorize Shizuku",
+                    tint = TerminalYellow,
+                    modifier = Modifier.size(18.dp)
+                )
+            } else if (isAuthorized) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    "Connected",
+                    tint = TerminalGreen,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
 }
 
 @Composable

@@ -30,6 +30,8 @@ import com.interndra.data.model.*
 import com.interndra.plugin.PluginManager
 import com.interndra.search.WebSearchEngine
 import com.interndra.service.AgentAccessibilityService
+import com.interndra.service.ShizukuManager
+import com.interndra.service.ShizukuShell
 import com.interndra.service.SmartShell
 import com.interndra.services.AutomationEngine
 import com.interndra.services.AutomationWorker
@@ -205,6 +207,18 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         }, ObfuscationTechnique.NONE)
     }
 
+    // ── Shizuku — elevated shell access ───────────────────────────────────
+    val shizukuManager = ShizukuManager(app)
+    val shizukuShell = ShizukuShell(app)
+    private val _shizukuAvailable = MutableStateFlow(false)
+    val shizukuAvailable: StateFlow<Boolean> = _shizukuAvailable.asStateFlow()
+    private val _shizukuAuthorized = MutableStateFlow(false)
+    val shizukuAuthorized: StateFlow<Boolean> = _shizukuAuthorized.asStateFlow()
+    private val _shizukuUid = MutableStateFlow(-1)
+    val shizukuUid: StateFlow<Int> = _shizukuUid.asStateFlow()
+    val shizukuPrivilegeLevel: String get() = shizukuManager.privilegeLevel
+    val isShizukuElevated: Boolean get() = shizukuShell.isElevatedAvailable
+
     // ── Termux status ────────────────────────────────────────────────────
     private val termuxBridge = TermuxBridge(app)
     private val _termuxInstalled = MutableStateFlow(termuxBridge.isTermuxInstalled())
@@ -216,7 +230,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     val healthMonitor = AiSystemHealthMonitor(app)
 
     // ── Terminal Agent ───────────────────────────────────────────────────
-    val terminalAgent = TerminalAgent(app, termuxBridge, scope = viewModelScope)
+    val terminalAgent = TerminalAgent(app, termuxBridge, shizukuShell, scope = viewModelScope)
     private val _terminalSessions = MutableStateFlow(terminalAgent.getSessionNames())
     val terminalSessions: StateFlow<List<String>> = _terminalSessions.asStateFlow()
     private val _activeTerminalSession = MutableStateFlow("default")
@@ -403,6 +417,26 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 _termuxExternalAppsEnabled.value = termuxBridge.isExternalAppsEnabled()
             } catch (e: Exception) {
                 Log.e(TAG, "Init: Termux check failed: ${e.message}")
+            }
+        }
+
+        // ── Initialize Shizuku ───────────────────────────────────────────
+        viewModelScope.launch {
+            try {
+                shizukuManager.init(onBinderDeath = {
+                    _shizukuAvailable.value = false
+                    _shizukuAuthorized.value = false
+                    _shizukuUid.value = -1
+                    Log.w(TAG, "Shizuku binder died — attempting re-auth on next command")
+                })
+                shizukuManager.refreshStatus()
+                _shizukuAvailable.value = shizukuManager.isBinderAlive
+                _shizukuAuthorized.value = shizukuManager.isAuthorized()
+                _shizukuUid.value = shizukuManager.shizukuUid
+                Log.i(TAG, "Shizuku initialized: available=${_shizukuAvailable.value}, " +
+                    "authorized=${_shizukuAuthorized.value}, UID=${_shizukuUid.value}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Init: Shizuku init failed: ${e.message}")
             }
         }
 
@@ -1102,6 +1136,36 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     fun clearAll()      = viewModelScope.launch { repo.clearMessages(); repo.clearLogs() }
     fun dismissError()  = _uiState.update { it.copy(error = null) }
 
+    // ── Shizuku management ────────────────────────────────────────────────
+
+    /**
+     * Request Shizuku authorization from the user.
+     * This opens the Shizuku authorization dialog.
+     */
+    fun requestShizukuPermission() {
+        shizukuManager.requestPermission { granted ->
+            _shizukuAuthorized.value = granted
+            if (granted) {
+                shizukuManager.refreshStatus()
+                _shizukuUid.value = shizukuManager.shizukuUid
+                Log.i(TAG, "Shizuku permission granted! UID=${shizukuManager.shizukuUid}")
+            } else {
+                Log.w(TAG, "Shizuku permission denied by user")
+            }
+        }
+    }
+
+    /** Refresh Shizuku status. */
+    fun refreshShizukuStatus() {
+        shizukuManager.refreshStatus()
+        _shizukuAvailable.value = shizukuManager.isBinderAlive
+        _shizukuAuthorized.value = shizukuManager.isAuthorized()
+        _shizukuUid.value = shizukuManager.shizukuUid
+    }
+
+    /** Whether Shizuku is the active execution backend. */
+    val executionBackendDescription: String get() = terminalAgent.executionBackendDescription
+
     fun refreshStatus() {
         // Phase 2 FIX: previously read privacyMode.value which could still be
         // the default HYBRID before DataStore emitted on cold start. Now sync
@@ -1223,6 +1287,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         tts?.shutdown()
         localEngine.unload()
         termuxBridge.unregisterReceiver()
+        shizukuManager.shutdown()
         terminalAgent.shutdown()
         healthMonitor.saveReport()
     }

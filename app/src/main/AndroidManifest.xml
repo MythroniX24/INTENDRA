@@ -164,6 +164,17 @@
                 android:value="androidx.startup" />
         </provider>
 
+        <!-- ── ShizukuProvider — elevated shell access via Shizuku ───────── -->
+        <!-- Allows INTERNDRA to execute shell commands with ADB-level (UID 2000)
+             or root (UID 0) privileges when Shizuku is running and authorized.
+             Provides access to system APIs and file paths beyond app sandbox. -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true" />
+
         <!-- ── FileProvider for sharing exported log files ────────────── -->
         <provider
             android:name="androidx.core.content.FileProvider"

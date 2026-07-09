@@ -2,6 +2,7 @@ package com.interndra.agent
 
 import android.content.Context
 import android.util.Log
+import com.interndra.service.ShizukuShell
 import com.interndra.service.TermuxBridge
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -38,6 +39,7 @@ import kotlin.coroutines.CoroutineContext
 class TerminalAgent(
     private val context: Context,
     private val termuxBridge: TermuxBridge,
+    private val shizukuShell: ShizukuShell,
     private val scope: CoroutineScope? = null  // Optional lifecycle-bound scope for auto-save
 ) {
     companion object {
@@ -133,6 +135,17 @@ class TerminalAgent(
     // Auto-save job - uses provided scope or creates one
     private var autoSaveJob: Job? = null
     private val autoSaveScope: CoroutineScope = scope ?: CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    /** Human-readable description of the current execution backend. */
+    val executionBackendDescription: String
+        get() = when {
+            shizukuShell.isElevatedAvailable -> "Shizuku (${shizukuShell.privilegeDescription})"
+            termuxBridge.isTermuxInstalled() && termuxBridge.hasPermission() -> "Termux"
+            else -> "Sandboxed (SmartShell)"
+        }
+
+    /** Whether elevated execution (Shizuku) is currently available. */
+    val isElevated: Boolean get() = shizukuShell.isElevatedAvailable
 
     // ── Session Management ────────────────────────────────────────────────
 
@@ -287,18 +300,59 @@ class TerminalAgent(
         }
 
         // Run command with streaming output
+        // EXECUTION PRIORITY: ShizukuShell > TermuxBridge > SmartShell
+        // Shizuku provides ADB/root-level privileges without requiring Termux.
+        // Termux provides a full Linux environment (pkg, git, python, etc.).
+        // SmartShell is the sandboxed fallback (Runtime.exec).
         val workdir = session.workdir
 
-        // Use TermuxBridge with a streaming callback
-        val result = termuxBridge.executeShell(
-            shellCommand = trimmed,
-            workdir = workdir,
-            timeoutMs = timeoutMs,
-            onOutput = { line ->
-                session.outputLines.add(line)
-                _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
+        val result = if (shizukuShell.isElevatedAvailable) {
+            // Shizuku is authorized — use elevated shell
+            val shResult = shizukuShell.execute(
+                command = trimmed,
+                timeoutMs = timeoutMs,
+                onOutput = { line ->
+                    session.outputLines.add(line)
+                    _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
+                }
+            )
+            // Track backend used in output
+            if (shResult.isSuccess && shResult.exitCode >= 0) {
+                session.outputLines.add("\u001b[90m[Shizuku ${shizukuShell.privilegeDescription}]\u001b[0m\n")
+                _outputFlow.tryEmit(StreamEvent.Output(sessionName, "\u001b[90m[Shizuku ${shizukuShell.privilegeDescription}]\u001b[0m\n"))
             }
-        )
+            TermuxBridge.TermuxResult(
+                stdout = shResult.stdout,
+                stderr = shResult.stderr,
+                exitCode = shResult.exitCode
+            )
+        } else if (termuxBridge.isTermuxInstalled() && termuxBridge.hasPermission()) {
+            // Fall back to TermuxBridge
+            termuxBridge.executeShell(
+                shellCommand = trimmed,
+                workdir = workdir,
+                timeoutMs = timeoutMs,
+                onOutput = { line ->
+                    session.outputLines.add(line)
+                    _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
+                }
+            )
+        } else {
+            // Last resort: SmartShell via ShizukuShell fallback
+            val shResult = shizukuShell.execute(
+                command = trimmed,
+                timeoutMs = timeoutMs,
+                onOutput = { line ->
+                    session.outputLines.add(line)
+                    _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
+                }
+            )
+            TermuxBridge.TermuxResult(
+                stdout = shResult.stdout,
+                stderr = shResult.stderr,
+                exitCode = shResult.exitCode
+            )
+        }
 
         // Track the session state
         val duration = System.currentTimeMillis() - startMs

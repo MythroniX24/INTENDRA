@@ -168,12 +168,27 @@ dependencies {
     // ── ML Kit — barcode / QR scanning (optional — comment out if unused) ──
     // implementation("com.google.mlkit:barcode-scanning:17.3.0")
 
+    // ── Shizuku — elevated shell access ───────────────────────────────────
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+
     // ── Debug / testing ───────────────────────────────────────────────────
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    // Unit testing
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    testImplementation("io.mockk:mockk:1.13.12")
+    testImplementation("com.google.truth:truth:1.4.4")
+    testImplementation("app.cash.turbine:turbine:1.1.0")
+    testImplementation("org.json:json:20240303")
+
+    // Android instrumented tests
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.room:room-testing:2.6.1")
+
+    // JaCoCo for code coverage reporting
+    testImplementation("org.jacoco:org.jacoco.core:0.8.12")
 }
