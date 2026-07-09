@@ -121,6 +121,20 @@ class ShizukuManager(private val context: Context) {
         }
     }
 
+    // ── Reflection: Shizuku.newProcess is private in v13+ ──────────────
+    private fun newShizukuProcess(cmd: Array<String>): Process? {
+        return try {
+            val method = Shizuku::class.java.getDeclaredMethod(
+                "newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java
+            )
+            method.isAccessible = true
+            method.invoke(null, cmd, null, null) as? Process
+        } catch (e: Exception) {
+            Log.e(TAG, "Shizuku.newProcess failed: ${e.message}")
+            null
+        }
+    }
+
     // ── Shell Execution — returns unified ShellExecutionResult ─────────
 
     /**
@@ -140,7 +154,11 @@ class ShizukuManager(private val context: Context) {
         try {
             Log.d(TAG, "Executing via Shizuku (UID $shizukuUid): ${command.take(100)}")
 
-            val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
+            val process = newShizukuProcess(arrayOf("sh", "-c", command)) ?: return ShellExecutionResult(
+                "", "Shizuku: unable to create process.", -1, false,
+                backend = executionBackend,
+                durationMs = System.currentTimeMillis() - startMs
+            )
             val stdoutSb = StringBuilder()
             val stderrSb = StringBuilder()
             val truncatedRef = AtomicBoolean(false)
@@ -204,7 +222,7 @@ class ShizukuManager(private val context: Context) {
                 "$stdout\n…(output truncated at ${TerminalConfig.MAX_OUTPUT_BYTES / 1024} KB)" else stdout
 
             Log.d(TAG, "Shizuku exec done: exit=${process.exitValue()}, stdout=${stdout.length} chars")
-            ShellExecutionResult(finalStdout, stderr, process.exitValue(),
+            return ShellExecutionResult(finalStdout, stderr, process.exitValue(),
                 backend = executionBackend,
                 durationMs = System.currentTimeMillis() - startMs)
 
@@ -237,7 +255,11 @@ class ShizukuManager(private val context: Context) {
         val startMs = System.currentTimeMillis()
         try {
             Log.d(TAG, "Streaming via Shizuku: ${command.take(80)}")
-            val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
+            val process = newShizukuProcess(arrayOf("sh", "-c", command)) ?: return ShellExecutionResult(
+                "", "Shizuku: unable to create process.", -1, false,
+                backend = executionBackend,
+                durationMs = System.currentTimeMillis() - startMs
+            )
             val stdoutSb = StringBuilder(); val stderrSb = StringBuilder()
 
             val outThread = Thread {
@@ -272,7 +294,7 @@ class ShizukuManager(private val context: Context) {
             }
 
             runCatching { outThread.join(2000) }; runCatching { errThread.join(2000) }
-            ShellExecutionResult(stdoutSb.toString().trim(), stderrSb.toString().trim(), process.exitValue(),
+            return ShellExecutionResult(stdoutSb.toString().trim(), stderrSb.toString().trim(), process.exitValue(),
                 backend = executionBackend,
                 durationMs = System.currentTimeMillis() - startMs)
         } catch (e: Exception) {
