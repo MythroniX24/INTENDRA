@@ -136,7 +136,8 @@ private fun MemoryCard(
     onImportance: (Int) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val sdf = remember { SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()) }Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+    val sdf = remember { SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()) }
+    Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
         shape  = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth()
     ) {

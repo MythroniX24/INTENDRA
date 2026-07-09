@@ -97,7 +97,6 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
             // ── Current Privacy Status ─────────────────────────────────────
             item {
                 DashboardCard(title = "Current Privacy State", icon = Icons.Default.Shield) {
-
                         StatusRow("Processing Mode",
                             "${privacyMode.emoji} ${privacyMode.label}",
                             when (privacyMode) {
@@ -116,7 +115,6 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
                             if (networkEvents.isEmpty()) TerminalGreen else TerminalYellow)
                     }
                 }
-            }
 
             // ── Privacy Audit Checklist ────────────────────────────────────
             item {
@@ -131,7 +129,6 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
                         AuditRow("Memory encrypted at rest (Room + Android Keystore)", uiState.localModelReady)
                     }
                 }
-            }
 
             // ── Network Transparency ───────────────────────────────────────
             item {
@@ -151,7 +148,6 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
                         }
                     }
                 }
-            }
 
             items(networkEvents.take(20), key = { it.id }) { event ->
                 NetworkEventRow(event)

@@ -137,8 +137,8 @@ fun ResearchDashboardScreen(
             }
 
             // ── Top concepts ──────────────────────────────────────────
-            if (topConcepts.isNotEmpty()) {
-                item {
+            item {
+                if (topConcepts.isNotEmpty()) {
                     DashboardCard(title = "🕸️ Top Concepts") {
                             androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 items(topConcepts.take(15), key = { it }) { concept ->
@@ -156,7 +156,6 @@ fun ResearchDashboardScreen(
                         }
                     }
                 }
-            }
 
             // ── Recent research ───────────────────────────────────────
             if (researchEntries.isNotEmpty()) {
