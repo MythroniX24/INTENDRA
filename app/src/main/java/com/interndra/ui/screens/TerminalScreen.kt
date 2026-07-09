@@ -297,7 +297,73 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
             } // end Box (terminal output)
         } // end Column (output area + jobs panel)
 
-        // ── Animated Background Job Row ──────────────────────────────────────────
+        TerminalInputBar(
+            text = inputText,
+            onTextChange = { inputText = it },
+            onSend = {
+                if (inputText.isNotBlank()) {
+                    scope.launch {
+                        vm.terminalAgent.execute(activeSession, inputText.trim()).let { }
+                    }
+                    commandHistoryIndex = -1
+                    inputText = ""
+                }
+            },
+            onKeyUp = {
+                val history = vm.terminalAgent.getHistory(activeSession)
+                if (history.isNotEmpty()) {
+                    val newIndex = if (commandHistoryIndex < 0) 0
+                        else (commandHistoryIndex + 1).coerceAtMost(history.size - 1)
+                    if (commandHistoryIndex < 0) savedCurrentInput = inputText
+                    commandHistoryIndex = newIndex
+                    inputText = history[newIndex].command
+                }
+            },
+            onKeyDown = {
+                if (commandHistoryIndex >= 0) {
+                    val newIndex = commandHistoryIndex - 1
+                    if (newIndex < 0) {
+                        commandHistoryIndex = -1
+                        inputText = savedCurrentInput
+                        savedCurrentInput = ""
+                    } else {
+                        commandHistoryIndex = newIndex
+                        val history = vm.terminalAgent.getHistory(activeSession)
+                        if (newIndex < history.size) {
+                            inputText = history[newIndex].command
+                        }
+                    }
+                }
+            },
+            focusRequester = inputFocusRequester
+        )
+
+        // Status bar
+        TerminalStatusBar(
+            lineCount = terminalLines.size,
+            sessionName = activeSession,
+            termuxInstalled = termuxInstalled
+        )
+    }
+
+    // ── Command History Panel (slide-up) ────────────────────────────────
+    AnimatedVisibility(
+        visible = showHistoryPanel,
+        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+    ) {
+        HistoryPanel(
+            history = vm.terminalAgent.getHistory(activeSession),
+            onSelect = { entry ->
+                inputText = entry.command
+                showHistoryPanel = false
+            },
+            onClose = { showHistoryPanel = false }
+        )
+    }
+}
+
+// ── Animated Background Job Row ─────────────────────────────────────────────
 @Composable
 private fun AnimatedJobRow(
     job: TerminalAgent.SessionJob,
@@ -428,71 +494,6 @@ private fun AnimatedJobRow(
                 modifier = Modifier.padding(start = 12.dp, top = 1.dp)
             )
         }
-    }
-}
-        TerminalInputBar(
-            text = inputText,
-            onTextChange = { inputText = it },
-            onSend = {
-                if (inputText.isNotBlank()) {
-                    scope.launch {
-                        vm.terminalAgent.execute(activeSession, inputText.trim()).let { }
-                    }
-                    commandHistoryIndex = -1
-                    inputText = ""
-                }
-            },
-            onKeyUp = {
-                val history = vm.terminalAgent.getHistory(activeSession)
-                if (history.isNotEmpty()) {
-                    val newIndex = if (commandHistoryIndex < 0) 0
-                        else (commandHistoryIndex + 1).coerceAtMost(history.size - 1)
-                    if (commandHistoryIndex < 0) savedCurrentInput = inputText
-                    commandHistoryIndex = newIndex
-                    inputText = history[newIndex].command
-                }
-            },
-            onKeyDown = {
-                if (commandHistoryIndex >= 0) {
-                    val newIndex = commandHistoryIndex - 1
-                    if (newIndex < 0) {
-                        commandHistoryIndex = -1
-                        inputText = savedCurrentInput
-                        savedCurrentInput = ""
-                    } else {
-                        commandHistoryIndex = newIndex
-                        val history = vm.terminalAgent.getHistory(activeSession)
-                        if (newIndex < history.size) {
-                            inputText = history[newIndex].command
-                        }
-                    }
-                }
-            },
-            focusRequester = inputFocusRequester
-        )
-
-        // Status bar
-        TerminalStatusBar(
-            lineCount = terminalLines.size,
-            sessionName = activeSession,
-            termuxInstalled = termuxInstalled
-        )
-    }
-
-    // ── Command History Panel (slide-up) ────────────────────────────────
-    AnimatedVisibility(
-        visible = showHistoryPanel,
-        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-    ) {
-        HistoryPanel(
-            history = vm.terminalAgent.getHistory(activeSession),
-            onSelect = { entry ->
-                inputText = entry.command
-                showHistoryPanel = false
-            },
-            onClose = { showHistoryPanel = false }
-        )
     }
 }
 
