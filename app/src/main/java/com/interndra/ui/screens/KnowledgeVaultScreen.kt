@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interndra.data.model.KnowledgeEntry
 import com.interndra.data.model.KnowledgeType
+import com.interndra.ui.components.*
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 
@@ -84,76 +85,33 @@ fun KnowledgeVaultScreen(
         Column(Modifier.fillMaxSize().padding(padding)) {
 
             // ── Search bar ────────────────────────────────────────────
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Search vault…", color = TerminalWhite.copy(alpha = 0.4f)) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = VaultGold) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Clear, contentDescription = null, tint = TerminalWhite)
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor   = VaultGold,
-                    unfocusedBorderColor = SurfaceLight,
-                    focusedTextColor     = TerminalWhite,
-                    unfocusedTextColor   = TerminalWhite,
-                    cursorColor          = VaultGold
-                ),
-                shape = RoundedCornerShape(12.dp),
-                singleLine = true
+            SearchBar(
+                query = searchQuery,
+                onQueryChange = { searchQuery = it },
+                placeholder = "Search vault…",
+                accentColor = VaultGold,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
             // ── Type filter chips ─────────────────────────────────────
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                item {
-                    FilterChip(
-                        selected = selectedType == null,
-                        onClick = { selectedType = null },
-                        label = { Text("All") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = VaultGold,
-                            selectedLabelColor     = Background800
-                        )
-                    )
-                }
-                items(KnowledgeType.entries) { type ->
-                    FilterChip(
-                        selected = selectedType == type,
-                        onClick  = { selectedType = if (selectedType == type) null else type },
-                        label    = { Text("${type.emoji} ${type.label}") },
-                        colors   = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = VaultGold,
-                            selectedLabelColor     = Background800,
-                            labelColor             = TerminalWhite
-                        )
-                    )
-                }
-            }
+            FilterChipRow(
+                items = KnowledgeType.entries.map {
+                    FilterChipItem(it.name, "${it.emoji} ${it.label}")
+                },
+                selectedItem = selectedType?.name,
+                onItemSelected = { id -> selectedType = KnowledgeType.entries.find { it.name == id } },
+                accentColor = VaultGold
+            )
 
             Spacer(Modifier.height(4.dp))
 
             // ── Entry list ────────────────────────────────────────────
             if (filtered.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("📚", fontSize = 48.sp)
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            if (searchQuery.isBlank()) "Your vault is empty.\nTap + to add your first entry."
-                            else "No results for \"$searchQuery\"",
-                            color     = TerminalWhite.copy(alpha = 0.5f),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-                }
+                EmptyState(
+                    emoji = "📚",
+                    title = if (searchQuery.isBlank()) "Your vault is empty.\nTap + to add your first entry."
+                            else "No results for \"$searchQuery\""
+                )
             } else {
                 LazyColumn(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
@@ -192,11 +150,8 @@ private fun KnowledgeCard(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
-        colors   = CardDefaults.cardColors(containerColor = SurfaceCard),
-        shape    = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    DashboardCard(
+        modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

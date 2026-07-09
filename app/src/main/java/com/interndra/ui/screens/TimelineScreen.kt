@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interndra.data.model.TimelineEntry
 import com.interndra.data.model.TimelineEventType
+import com.interndra.ui.components.*
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 import java.text.SimpleDateFormat
@@ -79,76 +80,33 @@ fun TimelineScreen(
         Column(Modifier.fillMaxSize().padding(padding)) {
 
             // ── Search ────────────────────────────────────────────────
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Search timeline…", color = TerminalWhite.copy(alpha = 0.4f)) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TerminalBlue) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Clear, contentDescription = null, tint = TerminalWhite)
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor   = TerminalBlue,
-                    unfocusedBorderColor = SurfaceLight,
-                    focusedTextColor     = TerminalWhite,
-                    unfocusedTextColor   = TerminalWhite,
-                    cursorColor          = TerminalBlue
-                ),
-                shape = RoundedCornerShape(12.dp),
-                singleLine = true
+            SearchBar(
+                query = searchQuery,
+                onQueryChange = { searchQuery = it },
+                placeholder = "Search timeline…",
+                accentColor = TerminalBlue,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
             // ── Event type filter chips ───────────────────────────────
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                item {
-                    FilterChip(
-                        selected = filterType == null,
-                        onClick  = { filterType = null },
-                        label    = { Text("All") },
-                        colors   = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = TerminalBlue,
-                            selectedLabelColor     = Background800
-                        )
-                    )
-                }
-                items(TimelineEventType.entries) { type ->
-                    FilterChip(
-                        selected = filterType == type,
-                        onClick  = { filterType = if (filterType == type) null else type },
-                        label    = { Text("${type.emoji} ${type.label}") },
-                        colors   = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = TerminalBlue,
-                            selectedLabelColor     = Background800,
-                            labelColor             = TerminalWhite
-                        )
-                    )
-                }
-            }
+            FilterChipRow(
+                items = TimelineEventType.entries.map {
+                    FilterChipItem(it.name, "${it.emoji} ${it.label}")
+                },
+                selectedItem = filterType?.name,
+                onItemSelected = { id -> filterType = TimelineEventType.entries.find { it.name == id } },
+                accentColor = TerminalBlue
+            )
 
             Spacer(Modifier.height(4.dp))
 
             // ── Timeline list ─────────────────────────────────────────
             if (filtered.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("📅", fontSize = 48.sp)
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            if (searchQuery.isBlank()) "No timeline events yet.\nStart chatting or running commands!"
-                            else "No events matching \"$searchQuery\"",
-                            color     = TerminalWhite.copy(alpha = 0.5f),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-                }
+                EmptyState(
+                    emoji = "📅",
+                    title = if (searchQuery.isBlank()) "No timeline events yet.\nStart chatting or running commands!"
+                            else "No events matching \"$searchQuery\""
+                )
             } else {
                 LazyColumn(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),

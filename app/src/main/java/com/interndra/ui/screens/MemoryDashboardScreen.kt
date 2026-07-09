@@ -21,6 +21,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interndra.data.model.MemoryEntry
+import com.interndra.ui.components.*
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 import java.text.SimpleDateFormat
@@ -60,32 +61,15 @@ fun MemoryDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {
         }
 
         // ── Search bar ────────────────────────────────────────────────────
-        OutlinedTextField(
-            value         = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder   = { Text("Search memories...", color = TerminalWhite.copy(alpha = 0.4f)) },
-            leadingIcon   = { Icon(Icons.Default.Search, contentDescription = null, tint = Accent) },
-            trailingIcon  = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { searchQuery = ""; searchResults = null }) {
-                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = TerminalWhite.copy(alpha = 0.6f))
-                    }
-                }
-            },
-            modifier      = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            singleLine    = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = {
-                kbController?.hide()
+        SearchBar(
+            query = searchQuery,
+            onQueryChange = { searchQuery = it },
+            placeholder = "Search memories...",
+            accentColor = Accent,
+            onSearch = {
                 vm.searchMemories(searchQuery) { results -> searchResults = results }
-            }),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor   = Accent,
-                unfocusedBorderColor = SurfaceLight,
-                focusedTextColor     = TerminalWhite,
-                unfocusedTextColor   = TerminalWhite
-            ),
-            shape = RoundedCornerShape(12.dp)
+            },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
         )
 
         // ── Tab row ───────────────────────────────────────────────────────
@@ -115,21 +99,14 @@ fun MemoryDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {
         }
 
         if (displayList.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Psychology, contentDescription = null,
-                        tint = TerminalWhite.copy(alpha = 0.2f), modifier = Modifier.size(64.dp))
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        if (selectedTab == 1) "No pinned memories yet"
+            EmptyState(
+                emoji = "🧠",
+                title = if (selectedTab == 1) "No pinned memories yet"
                         else if (searchResults != null) "No results for \"$searchQuery\""
-                        else "No memories yet.\nSuccessful commands will be remembered automatically.",
-                        color     = TerminalWhite.copy(alpha = 0.4f),
-                        fontSize  = 14.sp,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-            }
+                        else "No memories yet.",
+                subtitle = if (selectedTab == 0 && searchResults == null)
+                    "Successful commands will be remembered automatically." else null
+            )
         } else {
             LazyColumn(
                 modifier        = Modifier.fillMaxSize(),

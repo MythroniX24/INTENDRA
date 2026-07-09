@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interndra.data.model.NetworkEvent
 import com.interndra.data.model.PrivacyMode
+import com.interndra.ui.components.*
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 import java.text.SimpleDateFormat
@@ -55,9 +56,7 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
 
             // ── Emergency Lock ─────────────────────────────────────────────
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-                    shape = RoundedCornerShape(16.dp)) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                DashboardCard(title = "Emergency Privacy Lock", icon = Icons.Default.LockPerson, iconTint = TerminalRed) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.LockPerson, null, tint = TerminalRed, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(8.dp))
@@ -97,15 +96,7 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
 
             // ── Current Privacy Status ─────────────────────────────────────
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-                    shape = RoundedCornerShape(16.dp)) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Shield, null, tint = Accent, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Current Privacy State", color = Accent, fontSize = 16.sp,
-                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                        }
+                DashboardCard(title = "Current Privacy State", icon = Icons.Default.Shield) {
 
                         StatusRow("Processing Mode",
                             "${privacyMode.emoji} ${privacyMode.label}",
@@ -129,15 +120,7 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
 
             // ── Privacy Audit Checklist ────────────────────────────────────
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-                    shape = RoundedCornerShape(16.dp)) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.FactCheck, null, tint = Accent, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Privacy Audit", color = Accent, fontSize = 16.sp,
-                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                        }
+                DashboardCard(title = "Privacy Audit", icon = Icons.Default.FactCheck) {
                         AuditRow("Local files stay on device", true)
                         AuditRow("Notification content not logged", true)
                         AuditRow("API key stored in DataStore (encrypted)", true)
@@ -152,19 +135,12 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
 
             // ── Network Transparency ───────────────────────────────────────
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-                    shape = RoundedCornerShape(16.dp)) {
-                    Column(Modifier.padding(16.dp)) {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.NetworkCheck, null, tint = Accent, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Network Transparency", color = Accent, fontSize = 16.sp,
-                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                                modifier = Modifier.weight(1f))
-                            TextButton(onClick = { vm.clearNetworkEvents() }) {
-                                Text("Clear", color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp)
-                            }
-                        }
+                DashboardCard(
+                    title = "Network Transparency", icon = Icons.Default.NetworkCheck,
+                    action = { TextButton(onClick = { vm.clearNetworkEvents() }) {
+                        Text("Clear", color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp)
+                    }}
+                ) {
                         Spacer(Modifier.height(8.dp))
                         if (networkEvents.isEmpty()) {
                             Text("No outgoing requests recorded.", color = TerminalWhite.copy(alpha = 0.4f),

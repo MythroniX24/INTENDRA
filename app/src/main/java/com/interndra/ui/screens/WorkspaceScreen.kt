@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interndra.data.model.Workspace
+import com.interndra.ui.components.*
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 
@@ -191,21 +192,17 @@ fun WorkspaceScreen(
         }
 
         if (workspaces.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Workspaces, null, tint = TerminalWhite.copy(0.2f),
-                        modifier = Modifier.size(64.dp))
-                    Spacer(Modifier.height(12.dp))
-                    Text("No workspaces yet.\nCreate one to separate your contexts.",
-                        color = TerminalWhite.copy(0.4f), fontSize = 14.sp,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    Spacer(Modifier.height(16.dp))
+            EmptyState(
+                emoji = "📋",
+                title = "No workspaces yet.",
+                subtitle = "Create one to separate your contexts.",
+                action = {
                     Button(onClick = { showCreateDialog = true },
                         colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
                         Text("Create First Workspace")
                     }
                 }
-            }
+            )
         } else {
             LazyColumn(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),

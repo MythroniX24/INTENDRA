@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interndra.data.model.KnowledgeEntry
 import com.interndra.data.model.KnowledgeType
+import com.interndra.ui.components.*
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 
@@ -72,9 +73,9 @@ fun ResearchDashboardScreen(
             // ── Stats row ─────────────────────────────────────────────
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    StatCard("📚", knowledge.size.toString(), "Entries", VaultGold, Modifier.weight(1f))
-                    StatCard("💬", totalWords.toString(), "Words", VaultCyan, Modifier.weight(1f))
-                    StatCard("🔬", researchEntries.size.toString(), "Research", VaultPurple, Modifier.weight(1f))
+                    com.interndra.ui.components.StatCard("📚", knowledge.size.toString(), "Entries", VaultGold, Modifier.weight(1f))
+                    com.interndra.ui.components.StatCard("💬", totalWords.toString(), "Words", VaultCyan, Modifier.weight(1f))
+                    com.interndra.ui.components.StatCard("🔬", researchEntries.size.toString(), "Research", VaultPurple, Modifier.weight(1f))
                 }
             }
 
@@ -85,44 +86,30 @@ fun ResearchDashboardScreen(
 
             // ── RAG search ────────────────────────────────────────────
             item {
-                Card(
-                    colors    = CardDefaults.cardColors(containerColor = SurfaceCard),
-                    shape     = RoundedCornerShape(16.dp)
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("🔍 Semantic Search (RAG)", color = TerminalWhite, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(10.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(
-                                value = ragQuery,
-                                onValueChange = { ragQuery = it },
-                                placeholder = { Text("Search your knowledge base…", color = TerminalWhite.copy(alpha = 0.4f)) },
-                                modifier = Modifier.weight(1f),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor   = VaultCyan,
-                                    unfocusedBorderColor = SurfaceLight,
-                                    focusedTextColor     = TerminalWhite,
-                                    unfocusedTextColor   = TerminalWhite,
-                                    cursorColor          = VaultCyan
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                singleLine = true
-                            )
-                            IconButton(
-                                onClick = {
-                                    if (ragQuery.isNotBlank()) {
-                                        isSearching = true
-                                        vm.runRagSearch(ragQuery) { isSearching = false }
-                                    }
-                                }
-                            ) {
-                                if (isSearching) {
-                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = VaultCyan, strokeWidth = 2.dp)
-                                } else {
-                                    Icon(Icons.Default.Search, contentDescription = "Search", tint = VaultCyan)
+                DashboardCard(title = "🔍 Semantic Search (RAG)") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        SearchBar(
+                            query = ragQuery,
+                            onQueryChange = { ragQuery = it },
+                            placeholder = "Search your knowledge base…",
+                            accentColor = VaultCyan,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                if (ragQuery.isNotBlank()) {
+                                    isSearching = true
+                                    vm.runRagSearch(ragQuery) { isSearching = false }
                                 }
                             }
+                        ) {
+                            if (isSearching) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = VaultCyan, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Search, contentDescription = "Search", tint = VaultCyan)
+                            }
                         }
+                    }
 
                         if (ragResults.isNotEmpty()) {
                             Spacer(Modifier.height(12.dp))
@@ -152,13 +139,7 @@ fun ResearchDashboardScreen(
             // ── Top concepts ──────────────────────────────────────────
             if (topConcepts.isNotEmpty()) {
                 item {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-                        shape  = RoundedCornerShape(16.dp)
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text("🕸️ Top Concepts", color = TerminalWhite, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.height(10.dp))
+                    DashboardCard(title = "🕸️ Top Concepts") {
                             androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 items(topConcepts.take(15), key = { it }) { concept ->
                                     Surface(shape = RoundedCornerShape(50), color = VaultPurple.copy(alpha = 0.15f)) {
@@ -188,18 +169,6 @@ fun ResearchDashboardScreen(
             }
 
             item { Spacer(Modifier.height(80.dp)) }
-        }
-    }
-}
-
-@Composable
-private fun StatCard(emoji: String, value: String, label: String, color: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier) {
-    Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = SurfaceCard), shape = RoundedCornerShape(12.dp)) {
-        Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(emoji, fontSize = 20.sp)
-            Spacer(Modifier.height(4.dp))
-            Text(value, color = color, fontWeight = FontWeight.ExtraBold, fontSize = 20.sp)
-            Text(label, color = TerminalWhite.copy(alpha = 0.5f), fontSize = 11.sp)
         }
     }
 }
