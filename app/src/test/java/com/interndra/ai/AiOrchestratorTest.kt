@@ -7,6 +7,7 @@ import android.net.Network
 import com.google.common.truth.Truth.assertThat
 import com.interndra.data.model.*
 import com.interndra.util.Constants
+import io.mockk.coEvery
 import io.mockk.eq
 import io.mockk.every
 import io.mockk.mockk
@@ -68,7 +69,7 @@ class AiOrchestratorTest {
 
     @Test
     fun `LOCAL_ONLY mode always routes to local`() = runBlocking {
-        every { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"chat","reply":"local answer"}""",
             source = AiSource.LOCAL
         )
@@ -86,7 +87,7 @@ class AiOrchestratorTest {
 
     @Test
     fun `CLOUD_ENHANCED mode routes to cloud when internet available`() = runBlocking {
-        every { mockCloudEngine.parseIntent(any(), any(), any(), any(), any()) } returns AiEngineResult(
+        coEvery { mockCloudEngine.parseIntent(any(), any(), any(), any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"chat","reply":"cloud answer"}""",
             source = AiSource.CLOUD
         )
@@ -103,7 +104,7 @@ class AiOrchestratorTest {
     fun `CLOUD_ENHANCED mode falls back to local when no internet`() = runBlocking {
         every { mockConnectivityManager.activeNetwork } returns null
 
-        every { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"chat","reply":"local fallback"}""",
             source = AiSource.LOCAL
         )
@@ -119,7 +120,7 @@ class AiOrchestratorTest {
 
     @Test
     fun `HYBRID mode routes short local keywords to local`() = runBlocking {
-        every { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"chat","reply":"hi"}""",
             source = AiSource.LOCAL
         )
@@ -133,11 +134,11 @@ class AiOrchestratorTest {
 
     @Test
     fun `HYBRID mode routes long cloud keywords to cloud fallback`() = runBlocking {
-        every { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"unknown","commands":[]}""",
             source = AiSource.LOCAL
         )
-        every { mockCloudEngine.parseIntent(any(), any(), any(), any(), any()) } returns AiEngineResult(
+        coEvery { mockCloudEngine.parseIntent(any(), any(), any(), any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"analyze","reply":"analysis result"}""",
             source = AiSource.CLOUD
         )
@@ -154,7 +155,7 @@ class AiOrchestratorTest {
     fun `HYBRID mode routes long inputs to cloud fallback`() = runBlocking {
         val longInput = "a".repeat(250)
 
-        every { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"unknown","commands":[]}""",
             source = AiSource.LOCAL
         )
@@ -172,13 +173,13 @@ class AiOrchestratorTest {
     fun `cloud execution with OpenRouter succeeds`() = runBlocking {
         orchestrator.activeProvider = Constants.AiProvider.OPENROUTER
         every { mockCloudEngine.isConfigured() } returns true
-        every { mockCloudEngine.parseIntent(any(), any(), any(), any(), any()) } returns AiEngineResult(
+        coEvery { mockCloudEngine.parseIntent(any(), any(), any(), any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"chat","reply":"openrouter response"}""",
             source = AiSource.CLOUD,
             modelUsed = "openrouter/auto"
         )
 
-        every { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"chat","reply":"local"}""",
             source = AiSource.LOCAL
         )
@@ -194,13 +195,13 @@ class AiOrchestratorTest {
     fun `cloud execution with Gemini succeeds`() = runBlocking {
         orchestrator.activeProvider = Constants.AiProvider.GEMINI
         every { mockGeminiEngine.isConfigured() } returns true
-        every { mockGeminiEngine.parseIntent(any(), any(), any(), any(), any()) } returns AiEngineResult(
+        coEvery { mockGeminiEngine.parseIntent(any(), any(), any(), any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"chat","reply":"gemini response"}""",
             source = AiSource.CLOUD,
             modelUsed = "gemini/gemini-2.5-flash"
         )
 
-        every { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"chat","reply":"local"}""",
             source = AiSource.LOCAL
         )
@@ -216,14 +217,14 @@ class AiOrchestratorTest {
     fun `Gemini falls back to OpenRouter on error`() = runBlocking {
         orchestrator.activeProvider = Constants.AiProvider.GEMINI
         every { mockGeminiEngine.isConfigured() } returns true
-        every { mockGeminiEngine.parseIntent(any(), any(), any(), any(), any()) } throws
+        coEvery { mockGeminiEngine.parseIntent(any(), any(), any(), any(), any()) } throws
             IllegalStateException("Gemini API error")
-        every { mockCloudEngine.parseIntent(any(), any(), any(), any(), any()) } returns AiEngineResult(
+        coEvery { mockCloudEngine.parseIntent(any(), any(), any(), any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"chat","reply":"openrouter fallback"}""",
             source = AiSource.CLOUD
         )
 
-        every { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"chat","reply":"local"}""",
             source = AiSource.LOCAL
         )
@@ -240,12 +241,12 @@ class AiOrchestratorTest {
     fun `Gemini falls back to OpenRouter when not configured`() = runBlocking {
         orchestrator.activeProvider = Constants.AiProvider.GEMINI
         every { mockGeminiEngine.isConfigured() } returns false
-        every { mockCloudEngine.parseIntent(any(), any(), any(), any(), any()) } returns AiEngineResult(
+        coEvery { mockCloudEngine.parseIntent(any(), any(), any(), any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"chat","reply":"openrouter"}""",
             source = AiSource.CLOUD
         )
 
-        every { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"chat","reply":"local"}""",
             source = AiSource.LOCAL
         )
@@ -261,7 +262,7 @@ class AiOrchestratorTest {
 
     @Test
     fun `local engine errors are caught gracefully`() = runBlocking {
-        every { mockLocalEngine.parseIntent(any(), any()) } throws
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } throws
             IllegalStateException("Local engine crashed")
 
         val result = orchestrator.process(
@@ -276,7 +277,7 @@ class AiOrchestratorTest {
 
     @Test
     fun `parses valid JSON response correctly`() = runBlocking {
-        every { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"battery_info","reply":"Checking...","commands":[{"type":"ADB_SHELL","command":"dumpsys battery","description":"Battery status"}]}""",
             source = AiSource.LOCAL
         )
@@ -293,7 +294,7 @@ class AiOrchestratorTest {
 
     @Test
     fun `parses JSON with action unknown gracefully`() = runBlocking {
-        every { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"unknown","commands":[]}""",
             source = AiSource.LOCAL
         )
@@ -313,9 +314,9 @@ class AiOrchestratorTest {
         orchestrator.jailbreakActive = true
         orchestrator.jailbreakLevel = JailbreakLevel.LIGHT
 
-        every { mockCloudEngine.parseIntent(any(), any(), any(), eq(true), eq(JailbreakLevel.LIGHT)) } returns
+        coEvery { mockCloudEngine.parseIntent(any(), any(), any(), eq(true), eq(JailbreakLevel.LIGHT)) } returns
             AiEngineResult(intentJson = """{"action":"chat","reply":"jailbroken"}""", source = AiSource.CLOUD)
-        every { mockLocalEngine.parseIntent(any(), any()) } returns
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } returns
             AiEngineResult(intentJson = """{"action":"chat","reply":"local"}""", source = AiSource.LOCAL)
 
         val result = orchestrator.process(
@@ -329,7 +330,7 @@ class AiOrchestratorTest {
 
     @Test
     fun `buildExplanation includes source and latency`() = runBlocking {
-        every { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"chat","reply":"test"}""",
             source = AiSource.LOCAL,
             modelUsed = "local-model",
@@ -348,7 +349,7 @@ class AiOrchestratorTest {
 
     @Test
     fun `opens and launches are routed locally`() = runBlocking {
-        every { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
+        coEvery { mockLocalEngine.parseIntent(any(), any()) } returns AiEngineResult(
             intentJson = """{"action":"open_app","reply":"Opening"}""",
             source = AiSource.LOCAL
         )

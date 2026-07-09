@@ -1,6 +1,8 @@
 package com.interndra.ai
 
 import com.google.common.truth.Truth.assertThat
+import com.interndra.data.model.CommandType
+import com.interndra.data.model.ShellCommand
 import org.junit.Before
 import org.junit.Test
 
@@ -449,7 +451,7 @@ class SafetyEngineTest {
         )
         val reports = safety.validateAll(commands)
         assertThat(safety.hasBlocked(reports)).isFalse()
-        assertThat(reports).allMatch { it.result == SafetyEngine.ValidationResult.SAFE }
+        assertThat(reports.all { it.result == SafetyEngine.ValidationResult.SAFE }).isTrue()
     }
 
     // ── isSafe / safeVerdict ───────────────────────────────────────────────

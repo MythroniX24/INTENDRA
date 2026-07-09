@@ -430,7 +430,7 @@ class JailbreakEngineTest {
     @Test
     fun `generateManyShotExamples returns requested number of examples`() {
         val result = JailbreakEngine.generateManyShotExamples("python", 3)
-        assertThat(result).contains("[TOPIC]").anyTimes() // Should be replaced
+        assertThat(result).contains("[TOPIC]")
         assertThat(result).doesNotContain("[TOPIC]")
     }
 

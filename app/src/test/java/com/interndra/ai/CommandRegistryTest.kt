@@ -343,8 +343,6 @@ class CommandRegistryTest {
     @Test
     fun `getAvailableCommands contains expected entries`() {
         val commands = CommandRegistry.getAvailableCommands()
-        assertThat(commands).containsAtLeast(
-            "battery_info: battery"
-        )
+        assertThat(commands).contains("battery_info: battery")
     }
 }
