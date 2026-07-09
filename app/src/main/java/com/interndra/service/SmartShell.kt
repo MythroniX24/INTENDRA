@@ -7,37 +7,26 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
  * SmartShell — executes shell commands safely on a background dispatcher.
  *
- * FIXES (Phase 2 + Phase 10 + Phase 11):
- *  1. ANR FIX: `run()` is now a `suspend fun` that runs on `Dispatchers.IO`.
- *     Callers no longer block the main thread for up to 30 s.
- *  2. DEADLOCK FIX: stdout and stderr are drained concurrently in separate
- *     threads. Previously they were read sequentially AFTER `waitFor()`,
- *     which deadlocked when a verbose command filled the 64 KB pipe buffer.
- *  3. OUTPUT CAP: output is capped at MAX_OUTPUT_BYTES to prevent OOM on
- *     commands like `yes` or `cat /dev/urandom`.
- *  4. REGEX PRECOMPILE: the 6 path-normalization regexes are now class-level
- *     vals, not recompiled per call.
- *  5. PROCESS CLEANUP: `destroyForcibly()` is always called in a `finally`
- *     block, even on timeout, to prevent zombie processes.
- *  6. TIMEOUT: configurable per-call (default 30 s), enforced via
- *     `waitFor(timeout, SECONDS)` + watchdog.
+ * ## A+++ UPGRADES:
+ *  1. Returns unified [ShellExecutionResult] with correct backend tag.
+ *  2. Uses [TerminalConfig] for all constants (MAX_OUTPUT_BYTES, timeouts).
+ *  3. Concurrent stdout/stderr draining avoids pipe-buffer deadlock.
+ *  4. Output capped at TerminalConfig.MAX_OUTPUT_BYTES to prevent OOM.
+ *  5. Process always destroyed in finally to prevent zombies.
+ *  6. Default timeout from TerminalConfig.DEFAULT_TIMEOUT_MS.
  */
 class SmartShell(private val context: Context) {
 
     companion object {
         private const val TAG = "SmartShell"
-        private const val DEFAULT_TIMEOUT_SEC = 30L
 
-        // Cap output to 512 KB to prevent OOM from runaway commands.
-        private const val MAX_OUTPUT_BYTES = 512 * 1024
-
-        // Precompiled path-normalization patterns (Phase 11 — regex no longer
-        // recompiled on every invocation).
+        // Precompiled path-normalization patterns
         private val RE_DOWNLOADS = Regex("~/Downloads?\\b")
         private val RE_PICTURES   = Regex("~/Pictures\\b")
         private val RE_DCIM       = Regex("~/DCIM\\b")
@@ -46,7 +35,6 @@ class SmartShell(private val context: Context) {
         private val RE_HOME_SLASH = Regex("~/")
         private val RE_HOME_BARE  = Regex("(?<![\\w/])~(?![\\w/])")
 
-        /** Singleton instance — SmartShell is stateless and safe to share. */
         @Volatile private var instance: SmartShell? = null
         fun get(context: Context): SmartShell =
             instance ?: synchronized(this) {
@@ -56,78 +44,176 @@ class SmartShell(private val context: Context) {
 
     /**
      * Suspend variant — runs the command on Dispatchers.IO.
-     * This is the preferred entry point from any coroutine scope.
+     * Returns unified [ShellExecutionResult] with [ExecutionBackend.SMART_SHELL].
      */
-    suspend fun runAsync(cmd: String, timeoutSec: Long = DEFAULT_TIMEOUT_SEC): String =
-        withContext(Dispatchers.IO) {
-            run(cmd, timeoutSec)
-        }
+    suspend fun runAsync(
+        cmd: String,
+        timeoutMs: Long = TerminalConfig.DEFAULT_TIMEOUT_MS
+    ): ShellExecutionResult = withContext(Dispatchers.IO) {
+        runInternal(cmd, timeoutMs)
+    }
 
     /**
-     * Blocking variant — kept for compatibility with non-coroutine callers
-     * (e.g. InterndraNotificationListener's serviceScope on Dispatchers.IO).
-     * Must NOT be called from the main thread.
+     * Blocking variant — kept for non-coroutine callers.
+     * Returns unified [ShellExecutionResult] with [ExecutionBackend.SMART_SHELL].
      */
-    fun run(cmd: String, timeoutSec: Long = DEFAULT_TIMEOUT_SEC): String {
+    fun run(
+        cmd: String,
+        timeoutMs: Long = TerminalConfig.DEFAULT_TIMEOUT_MS
+    ): ShellExecutionResult = runInternal(cmd, timeoutMs)
+
+    /**
+     * Backward-compatible overload — returns stdout as a plain String.
+     * For callers that don't need the full ShellExecutionResult (InterndraNotificationListener,
+     * AutomationWorker, AutomationEngine, HybridExecutionEngine).
+     */
+    @Suppress("unused")
+    fun run(cmd: String): String {
+        val result = runInternal(cmd, TerminalConfig.DEFAULT_TIMEOUT_MS)
+        return when {
+            result.isSuccess && result.stdout.isNotBlank() -> result.stdout
+            result.stderr.isNotBlank() -> result.stderr
+            else -> result.stdout.ifEmpty { "(no output)" }
+        }
+    }
+
+    /**
+     * Execute with streaming line-by-line output callback.
+     */
+    suspend fun runStreaming(
+        cmd: String,
+        timeoutMs: Long = TerminalConfig.DEFAULT_TIMEOUT_MS,
+        onOutput: (String) -> Unit
+    ): ShellExecutionResult = withContext(Dispatchers.IO) {
+        val startMs = System.currentTimeMillis()
+        val normalizedCmd = normalizePaths(cmd)
+        try {
+            Log.d(TAG, "Executing streaming: ${normalizedCmd.take(100)}")
+
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", normalizedCmd))
+            val stdoutSb = StringBuilder()
+            val stderrSb = StringBuilder()
+
+            val stdoutThread = Thread {
+                try {
+                    process.inputStream.bufferedReader().use { reader ->
+                        reader.lines().forEach { line ->
+                            val l = "$line\n"
+                            stdoutSb.append(l)
+                            onOutput(l)
+                        }
+                    }
+                } catch (_: Exception) {}
+            }.apply { isDaemon = true; name = "smartshell-stream-out" }
+
+            val stderrThread = Thread {
+                try {
+                    process.errorStream.bufferedReader().use { reader ->
+                        reader.lines().forEach { line ->
+                            val l = "$line\n"
+                            stderrSb.append(l)
+                            onOutput("\u001b[31m$l\u001b[0m")
+                        }
+                    }
+                } catch (_: Exception) {}
+            }.apply { isDaemon = true; name = "smartshell-stream-err" }
+
+            stdoutThread.start(); stderrThread.start()
+
+            val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+            if (!completed) {
+                process.destroyForcibly()
+                runCatching { stdoutThread.join(500) }
+                runCatching { stderrThread.join(500) }
+                return@withContext ShellExecutionResult(
+                    stdoutSb.toString().trim(),
+                    "⏱ Timed out after ${timeoutMs}ms",
+                    -1, false,
+                    backend = ExecutionBackend.SMART_SHELL,
+                    durationMs = System.currentTimeMillis() - startMs
+                )
+            }
+
+            runCatching { stdoutThread.join(1000) }
+            runCatching { stderrThread.join(1000) }
+
+            ShellExecutionResult(
+                stdoutSb.toString().trim(),
+                stderrSb.toString().trim(),
+                process.exitValue(),
+                durationMs = System.currentTimeMillis() - startMs,
+                backend = ExecutionBackend.SMART_SHELL
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Streaming exec failed: ${e.message}")
+            ShellExecutionResult("", "Error: ${e.message}", -1, false,
+                backend = ExecutionBackend.SMART_SHELL,
+                durationMs = System.currentTimeMillis() - startMs)
+        }
+    }
+
+    // ── Private helpers ──────────────────────────────────────────────────
+
+    private fun runInternal(cmd: String, timeoutMs: Long): ShellExecutionResult {
+        val startMs = System.currentTimeMillis()
         val normalizedCmd = normalizePaths(cmd)
         return try {
             Log.d(TAG, "Executing: ${normalizedCmd.take(100)}")
 
             val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", normalizedCmd))
-
-            // Drain stdout and stderr CONCURRENTLY to avoid pipe-buffer deadlock.
             val stdoutRef = AtomicReference("")
             val stderrRef = AtomicReference("")
-            val truncatedRef = AtomicReference(false)
+            val truncatedRef = AtomicBoolean(false)
 
             val stdoutThread = Thread {
                 stdoutRef.set(readStreamCapped(process.inputStream, truncatedRef))
-            }.apply { isDaemon = true; name = "smartshell-stdout" }
+            }.apply { isDaemon = true; name = "smartshell-out" }
 
             val stderrThread = Thread {
                 stderrRef.set(readStreamCapped(process.errorStream, truncatedRef))
-            }.apply { isDaemon = true; name = "smartshell-stderr" }
+            }.apply { isDaemon = true; name = "smartshell-err" }
 
-            stdoutThread.start()
-            stderrThread.start()
+            stdoutThread.start(); stderrThread.start()
 
-            val completed = process.waitFor(timeoutSec, TimeUnit.SECONDS)
+            val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
             if (!completed) {
                 process.destroyForcibly()
-                // give drain threads a moment to flush
                 runCatching { stdoutThread.join(500) }
                 runCatching { stderrThread.join(500) }
-                Log.w(TAG, "Command timed out after ${timeoutSec}s: ${normalizedCmd.take(60)}")
-                return "⏱ Command timed out after ${timeoutSec}s"
+                Log.w(TAG, "Timed out after ${timeoutMs}ms: ${normalizedCmd.take(60)}")
+                return ShellExecutionResult(
+                    stdoutRef.get().trim(),
+                    "⏱ Timed out after ${timeoutMs}ms",
+                    -1, false,
+                    backend = ExecutionBackend.SMART_SHELL,
+                    durationMs = System.currentTimeMillis() - startMs
+                )
             }
 
-            // Wait for drain threads to finish reading residual buffer content.
             runCatching { stdoutThread.join(2000) }
             runCatching { stderrThread.join(2000) }
 
-            val output = stdoutRef.get().trim()
-            val error  = stderrRef.get().trim()
+            val stdout = stdoutRef.get().trim()
+            val stderr = stderrRef.get().trim()
             val truncated = truncatedRef.get()
 
-            val body = when {
-                output.isNotEmpty() && error.isNotEmpty() -> "$output\n⚠ stderr: $error"
-                error.isNotEmpty() -> "⚠ Error: $error"
-                else -> output.ifEmpty { "(no output)" }
-            }
+            val finalStdout = if (truncated)
+                "$stdout\n…(output truncated at ${TerminalConfig.MAX_OUTPUT_BYTES / 1024} KB)" else stdout
 
-            if (truncated) "$body\n…(output truncated at ${MAX_OUTPUT_BYTES / 1024} KB)" else body
-
+            ShellExecutionResult(
+                finalStdout, stderr, process.exitValue(),
+                durationMs = System.currentTimeMillis() - startMs,
+                backend = ExecutionBackend.SMART_SHELL
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Shell exec failed: ${e.message}")
-            "Execution failed: ${e.message}"
+            ShellExecutionResult("", "Execution failed: ${e.message}", -1, false,
+                backend = ExecutionBackend.SMART_SHELL,
+                durationMs = System.currentTimeMillis() - startMs)
         }
     }
 
-    /**
-     * Reads a stream into a String, capping total bytes at MAX_OUTPUT_BYTES.
-     * Sets `truncatedRef` to true if the cap was hit.
-     */
-    private fun readStreamCapped(stream: java.io.InputStream, truncatedRef: AtomicReference<Boolean>): String {
+    private fun readStreamCapped(stream: java.io.InputStream, truncatedRef: AtomicBoolean): String {
         val sb = StringBuilder()
         val reader = BufferedReader(InputStreamReader(stream))
         val buffer = CharArray(8192)
@@ -137,37 +223,24 @@ class SmartShell(private val context: Context) {
                 val read = reader.read(buffer)
                 if (read < 0) break
                 total += read
-                if (total > MAX_OUTPUT_BYTES) {
-                    sb.append(buffer, 0, read.coerceAtMost(MAX_OUTPUT_BYTES - (total - read)))
+                if (total > TerminalConfig.MAX_OUTPUT_BYTES) {
+                    sb.append(buffer, 0, read.coerceAtMost(TerminalConfig.MAX_OUTPUT_BYTES - (total - read)))
                     truncatedRef.set(true)
                     break
                 }
                 sb.append(buffer, 0, read)
             }
-        } catch (_: Exception) {
-            // Stream closed or process died — return what we have.
-        }
+        } catch (_: Exception) {}
         return sb.toString()
     }
 
-    /**
-     * This app's `sh -c` process does NOT have HOME set to Android's shared
-     * storage (it's the app's own sandboxed exec environment), so `~` never
-     * resolves to where the user's actual Downloads/Pictures/etc. live.
-     * Rewrite common `~`-based paths to the real Android shared-storage paths
-     * BEFORE execution, regardless of whether the command came from the AI
-     * or the local CommandRegistry fallback.
-     */
     private fun normalizePaths(cmd: String): String {
         var c = cmd
-        // Specific known folders first (note: Android's real folder is
-        // singular "Download", not "Downloads")
         c = c.replace(RE_DOWNLOADS, "/storage/emulated/0/Download")
         c = c.replace(RE_PICTURES,  "/storage/emulated/0/Pictures")
         c = c.replace(RE_DCIM,      "/storage/emulated/0/DCIM")
         c = c.replace(RE_DOCUMENTS, "/storage/emulated/0/Documents")
         c = c.replace(RE_MUSIC,     "/storage/emulated/0/Music")
-        // Catch-all: any other ~/something or bare ~
         c = c.replace(RE_HOME_SLASH, "/storage/emulated/0/")
         c = c.replace(RE_HOME_BARE,  "/storage/emulated/0")
         return c

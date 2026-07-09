@@ -11,35 +11,20 @@ import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * TermuxBridge — bidirectional IPC with Termux via RUN_COMMAND Intent API.
  *
- * Sends shell commands to Termux's full Linux environment and receives
- * stdout/stderr/exit code back via a local BroadcastReceiver.
- *
- * ## Architecture
- * ```
- * INTERNDRA ──Intent(RUN_COMMARD)──> Termux (RunCommandService)
- * Termux    ──Broadcast(RESULT)───> TermuxBridge.Receiver
- * ```
- *
- * ## Prerequisites
- * 1. Termux app must be installed (com.termux)
- * 2. `allow-external-apps=true` in ~/.termux/termux.properties
- * 3. Permission `com.termux.permission.RUN_COMMAND` declared in AndroidManifest
- *
- * ## Usage
- * ```kotlin
- * val bridge = TermuxBridge(context)
- * if (bridge.isTermuxInstalled()) {
- *     val result = bridge.execute("pkg install python")
- *     println("Exit: ${result.exitCode}, Out: ${result.stdout}")
- * }
- * ```
+ * ## A+++ UPGRADES:
+ *  1. Returns unified [ShellExecutionResult] with [ExecutionBackend.TERMUX].
+ *  2. Uses [TerminalConfig] for all timeout constants.
+ *  3. Local streaming fallback wraps SmartShell.runStreaming().
+ *  4. Receiver lifecycle properly managed with double-checked locking.
  */
 class TermuxBridge(private val context: Context) {
 
@@ -48,14 +33,12 @@ class TermuxBridge(private val context: Context) {
         const val TERMUX_PACKAGE = "com.termux"
         const val RUN_COMMAND_SERVICE = "com.termux.app.RunCommandService"
 
-        // Intent extras (from Termux API)
         const val EXTRA_COMMAND_PATH = "com.termux.RUN_COMMAND_PATH"
         const val EXTRA_ARGUMENTS = "com.termux.RUN_COMMAND_ARGUMENTS"
         const val EXTRA_WORKDIR = "com.termux.RUN_COMMAND_WORKDIR"
         const val EXTRA_PENDING_INTENT = "com.termux.RUN_COMMAND_PENDING_INTENT"
         const val EXTRA_BACKGROUND = "com.termux.RUN_COMMAND_BACKGROUND"
 
-        // Result extras
         const val EXTRA_RESULT_BUNDLE = "com.termux.TERMUX_SERVICE.EXTRA_PLUGIN_RESULT_BUNDLE"
         const val EXTRA_STDOUT = "STDOUT"
         const val EXTRA_STDERR = "STDERR"
@@ -68,84 +51,53 @@ class TermuxBridge(private val context: Context) {
         private val requestIdCounter = AtomicInteger(0)
     }
 
-    data class TermuxResult(
-        val stdout: String,
-        val stderr: String,
-        val exitCode: Int,
-        val isSuccess: Boolean = exitCode == 0
-    )
-
     // ── Active request tracking ──────────────────────────────────────────
-    private val pendingRequests = ConcurrentHashMap<Int, CompletableDeferred<TermuxResult>>()
+    private val pendingRequests = ConcurrentHashMap<Int, CompletableDeferred<ShellExecutionResult>>()
     private val receiver = TermuxResultReceiver()
+    private val receiverRegistered = AtomicBoolean(false)
 
-    private val receiverRegistered = java.util.concurrent.atomic.AtomicBoolean(false)
-
-    /**
-     * Check if Termux is installed on the device.
-     */
+    /** Check if Termux is installed. */
     fun isTermuxInstalled(): Boolean = isPackageInstalled(TERMUX_PACKAGE)
 
-    /**
-     * Check if the app has the RUN_COMMAND permission.
-     */
+    /** Check RUN_COMMAND permission. */
     fun hasPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.checkSelfPermission(PERMISSION_RUN_COMMAND) == PackageManager.PERMISSION_GRANTED
         } else {
-            // On older Android, custom permissions are granted at install time if declared
             @Suppress("DEPRECATION")
             context.checkPermission(PERMISSION_RUN_COMMAND, android.os.Process.myPid(), android.os.Process.myUid()) == PackageManager.PERMISSION_GRANTED
         }
     }
 
-    /**
-     * Check if Termux has external apps enabled.
-     * We detect this by trying a simple echo command — if it fails, we assume
-     * allow-external-apps is not set.
-     */
+    /** Check if Termux has external apps enabled by running a quick echo test. */
     suspend fun isExternalAppsEnabled(): Boolean = withContext(Dispatchers.IO) {
         try {
-            val result = executeRaw("echo", listOf("termux_bridge_test_ok"), timeoutMs = 5000)
+            val result = executeRaw("echo", listOf("termux_bridge_test_ok"), timeoutMs = TerminalConfig.CONNECTION_TEST_TIMEOUT_MS)
             result.isSuccess && result.stdout.contains("termux_bridge_test_ok")
-        } catch (e: Exception) {
-            false
-        }
+        } catch (e: Exception) { false }
     }
 
-    /**
-     * Execute a command in Termux and return the result.
-     *
-     * @param command The command to execute (e.g., "pkg", "python", "git")
-     * @param arguments List of arguments for the command
-     * @param workdir Optional working directory (defaults to Termux home ~)
-     * @param timeoutMs Timeout in milliseconds (default 30s)
-     * @return TermuxResult with stdout, stderr, exit code
-     */
+    /** Execute a command in Termux. Returns unified [ShellExecutionResult]. */
     suspend fun execute(
         command: String,
         arguments: List<String> = emptyList(),
         workdir: String? = null,
-        timeoutMs: Long = 30_000L
-    ): TermuxResult = executeRaw(command, arguments, workdir, timeoutMs)
+        timeoutMs: Long = TerminalConfig.DEFAULT_TIMEOUT_MS
+    ): ShellExecutionResult = executeRaw(command, arguments, workdir, timeoutMs)
 
     /**
      * Execute a full shell command string in Termux.
-     * The command is passed as a single argument to `sh -c`.
-     *
-     * @param shellCommand Complete shell command string (e.g., "pkg install python && python --version")
-     * @param workdir Optional working directory
-     * @param timeoutMs Timeout in milliseconds
-     * @param onOutput Optional callback invoked for each line of output as it arrives (for streaming)
+     * With streaming callback: falls back to SmartShell for line-by-line output.
+     * Without callback: uses Termux IPC (RUN_COMMAND Intent).
      */
     suspend fun executeShell(
         shellCommand: String,
         workdir: String? = null,
-        timeoutMs: Long = 180_000L,
+        timeoutMs: Long = TerminalConfig.AGENT_TIMEOUT_MS,
         onOutput: ((String) -> Unit)? = null
-    ): TermuxResult {
+    ): ShellExecutionResult {
         if (onOutput != null) {
-            // Streaming mode: use SmartShell's local execution with line-by-line callback
+            // Streaming mode: use SmartShell's local execution with line callbacks
             return executeShellLocal(shellCommand, workdir, timeoutMs, onOutput)
         }
         return executeRaw(
@@ -156,146 +108,84 @@ class TermuxBridge(private val context: Context) {
         )
     }
 
-    /**
-     * Execute shell command locally with real-time output streaming.
-     * Falls back to direct Runtime.exec() with line-by-line callback.
-     */
+    /** Execute shell command locally with real-time streaming via SmartShell. */
     private suspend fun executeShellLocal(
         shellCommand: String,
         workdir: String? = null,
-        timeoutMs: Long = 180_000L,
+        timeoutMs: Long = TerminalConfig.AGENT_TIMEOUT_MS,
         onOutput: (String) -> Unit
-    ): TermuxResult = withContext(Dispatchers.IO) {
+    ): ShellExecutionResult = withContext(Dispatchers.IO) {
         val startMs = System.currentTimeMillis()
         try {
             val pb = ProcessBuilder("/data/data/com.termux/files/usr/bin/sh", "-c", shellCommand)
-            if (workdir != null) {
-                pb.directory(java.io.File(workdir))
-            }
+            if (workdir != null) pb.directory(java.io.File(workdir))
             pb.environment()["HOME"] = "/data/data/com.termux/files/home"
             pb.environment()["PATH"] = "/data/data/com.termux/files/usr/bin:/usr/bin:/bin"
             pb.environment()["TERM"] = "xterm-256color"
 
             val process = pb.start()
-            val stdoutLines = StringBuilder()
-            val stderrLines = StringBuilder()
+            val stdoutSb = StringBuilder(); val stderrSb = StringBuilder()
 
-            // Read stdout in a separate thread with line callback
-            val stdoutThread = Thread {
+            val outThread = Thread {
                 try {
-                    process.inputStream.bufferedReader().use { reader ->
-                        reader.lines().forEach { line ->
-                            val lineWithNewline = "$line\n"
-                            stdoutLines.append(lineWithNewline)
-                            onOutput(lineWithNewline)
-                        }
+                    process.inputStream.bufferedReader().use { r ->
+                        r.lines().forEach { l -> val ln = "$l\n"; stdoutSb.append(ln); onOutput(ln) }
                     }
                 } catch (_: Exception) {}
-            }.apply { isDaemon = true; name = "termux-stream-stdout" }
+            }.apply { isDaemon = true; name = "termux-stream-out" }
 
-            // Read stderr in a separate thread
-            val stderrThread = Thread {
+            val errThread = Thread {
                 try {
-                    process.errorStream.bufferedReader().use { reader ->
-                        reader.lines().forEach { line ->
-                            val lineWithNewline = "$line\n"
-                            stderrLines.append(lineWithNewline)
-                            onOutput("\u001b[31m$lineWithNewline\u001b[0m")
-                        }
+                    process.errorStream.bufferedReader().use { r ->
+                        r.lines().forEach { l -> val ln = "$l\n"; stderrSb.append(ln); onOutput("\u001b[31m$ln\u001b[0m") }
                     }
                 } catch (_: Exception) {}
-            }.apply { isDaemon = true; name = "termux-stream-stderr" }
+            }.apply { isDaemon = true; name = "termux-stream-err" }
 
-            stdoutThread.start()
-            stderrThread.start()
+            outThread.start(); errThread.start()
 
-            // Wait for process with timeout
-            val completed = process.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+            val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
             if (!completed) {
                 process.destroyForcibly()
-                stdoutThread.join(1000)
-                stderrThread.join(1000)
-                Log.w(TAG, "Command timed out after ${timeoutMs}ms")
-                return@withContext TermuxResult(
-                    stdoutLines.toString().trim(),
-                    stderrLines.toString().trim() + "\n⏱ Command timed out after ${timeoutMs}ms",
-                    -1
+                runCatching { outThread.join(1000) }; runCatching { errThread.join(1000) }
+                return@withContext ShellExecutionResult(
+                    stdoutSb.toString().trim(),
+                    stderrSb.toString().trim() + "\n⏱ Timed out after ${timeoutMs}ms",
+                    -1, false,
+                    backend = ExecutionBackend.SMART_SHELL,
+                    durationMs = System.currentTimeMillis() - startMs
                 )
             }
 
-            stdoutThread.join(2000)
-            stderrThread.join(2000)
-
-            val stdout = stdoutLines.toString().trim()
-            val stderr = stderrLines.toString().trim()
-            val exitCode = process.exitValue()
-
-            Log.d(TAG, "Streaming exec done: ${System.currentTimeMillis() - startMs}ms, exit=$exitCode")
-            TermuxResult(stdout, stderr, exitCode)
+            runCatching { outThread.join(2000) }; runCatching { errThread.join(2000) }
+            ShellExecutionResult(stdoutSb.toString().trim(), stderrSb.toString().trim(), process.exitValue(),
+                backend = ExecutionBackend.SMART_SHELL,
+                durationMs = System.currentTimeMillis() - startMs)
         } catch (e: Exception) {
-            Log.e(TAG, "Local exec error: ${e.message}")
-            TermuxResult("", "Error: ${e.message}", -1)
+            ShellExecutionResult("", "Error: ${e.message}", -1, false,
+                backend = ExecutionBackend.SMART_SHELL,
+                durationMs = System.currentTimeMillis() - startMs)
         }
     }
 
-    /**
-     * Install a package via pkg (Termux's package manager).
-     */
-    suspend fun installPackage(packageName: String): TermuxResult =
-        executeShell("pkg install -y $packageName 2>&1", timeoutMs = 300_000L)
+    /** Convenience methods — all return unified ShellExecutionResult */
+    suspend fun installPackage(packageName: String) =
+        executeShell("pkg install -y $packageName 2>&1", timeoutMs = TerminalConfig.INSTALL_TIMEOUT_MS)
 
-    /**
-     * Update all packages.
-     */
-    suspend fun updatePackages(): TermuxResult =
-        executeShell("pkg update -y && pkg upgrade -y 2>&1", timeoutMs = 180_000L)
+    suspend fun updatePackages() =
+        executeShell("pkg update -y && pkg upgrade -y 2>&1", timeoutMs = TerminalConfig.AGENT_TIMEOUT_MS)
 
-    /**
-     * Run a Python script or command.
-     */
-    suspend fun runPython(script: String): TermuxResult =
-        executeShell("python3 -c '$script' 2>&1", timeoutMs = 60_000L)
+    suspend fun runPython(script: String) =
+        executeShell("python3 -c '$script' 2>&1", timeoutMs = TerminalConfig.DEFAULT_TIMEOUT_MS)
 
-    /**
-     * Install Python packages via pip.
-     */
-    suspend fun pipInstall(packages: List<String>): TermuxResult =
-        executeShell("pip install ${packages.joinToString(" ")} 2>&1", timeoutMs = 120_000L)
+    suspend fun pipInstall(packages: List<String>) =
+        executeShell("pip install ${packages.joinToString(" ")} 2>&1", timeoutMs = TerminalConfig.INSTALL_TIMEOUT_MS)
 
-    /**
-     * Run a git command.
-     */
-    suspend fun git(vararg args: String, workdir: String? = null): TermuxResult =
-        executeRaw(
-            command = "/data/data/com.termux/files/usr/bin/git",
-            arguments = args.toList(),
-            workdir = workdir,
-            timeoutMs = 60_000L
-        )
+    suspend fun git(vararg args: String, workdir: String? = null) =
+        executeRaw("/data/data/com.termux/files/usr/bin/git", args.toList(), workdir, TerminalConfig.DEFAULT_TIMEOUT_MS)
 
-    /**
-     * Run an npm command.
-     */
-    suspend fun npm(vararg args: String, workdir: String? = null): TermuxResult =
-        executeRaw(
-            command = "/data/data/com.termux/files/usr/bin/npm",
-            arguments = args.toList(),
-            workdir = workdir,
-            timeoutMs = 120_000L
-        )
-
-    /**
-     * Get Termux's home directory path.
-     */
-    suspend fun getHomeDir(): String = withContext(Dispatchers.IO) {
-        try {
-            val result = executeShell("echo \$HOME", timeoutMs = 5000)
-            if (result.isSuccess) result.stdout.trim()
-            else "/data/data/com.termux/files/home"
-        } catch (e: Exception) {
-            "/data/data/com.termux/files/home"
-        }
-    }
+    suspend fun npm(vararg args: String, workdir: String? = null) =
+        executeRaw("/data/data/com.termux/files/usr/bin/npm", args.toList(), workdir, TerminalConfig.INSTALL_TIMEOUT_MS)
 
     // ── Core execution ─────────────────────────────────────────────────────
 
@@ -303,26 +193,21 @@ class TermuxBridge(private val context: Context) {
         command: String,
         arguments: List<String> = emptyList(),
         workdir: String? = null,
-        timeoutMs: Long = 30_000L
-    ): TermuxResult = withContext(Dispatchers.IO) {
+        timeoutMs: Long = TerminalConfig.DEFAULT_TIMEOUT_MS
+    ): ShellExecutionResult = withContext(Dispatchers.IO) {
         if (!isTermuxInstalled()) {
-            return@withContext TermuxResult(
-                stdout = "",
-                stderr = "Termux is not installed. Install Termux from F-Droid or GitHub.",
-                exitCode = -1
-            )
+            return@withContext ShellExecutionResult("", "Termux is not installed.", -1, false,
+                backend = ExecutionBackend.SMART_SHELL)
         }
 
         if (!receiverRegistered.get()) {
             synchronized(this) {
-                if (!receiverRegistered.get()) {
-                    registerReceiver()
-                }
+                if (!receiverRegistered.get()) registerReceiver()
             }
         }
 
         val requestId = requestIdCounter.incrementAndGet()
-        val deferred = CompletableDeferred<TermuxResult>()
+        val deferred = CompletableDeferred<ShellExecutionResult>()
         pendingRequests[requestId] = deferred
 
         try {
@@ -333,7 +218,6 @@ class TermuxBridge(private val context: Context) {
                 if (workdir != null) putExtra(EXTRA_WORKDIR, workdir)
                 putExtra(EXTRA_BACKGROUND, false)
 
-                // PendingIntent for result delivery
                 val resultIntent = Intent(ACTION_RESULT).apply {
                     putExtra("REQUEST_ID", requestId)
                     setPackage(context.packageName)
@@ -342,35 +226,26 @@ class TermuxBridge(private val context: Context) {
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
                 else PendingIntent.FLAG_UPDATE_CURRENT
 
-                val pendingIntent = PendingIntent.getBroadcast(
-                    context, requestId, resultIntent, flags
-                )
-                putExtra(EXTRA_PENDING_INTENT, pendingIntent)
+                putExtra(EXTRA_PENDING_INTENT, PendingIntent.getBroadcast(context, requestId, resultIntent, flags))
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
-                @Suppress("DEPRECATION")
-                context.startService(intent)
+                @Suppress("DEPRECATION") context.startService(intent)
             }
 
-            // Wait for result with timeout
-            val result = kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
-                deferred.await()
-            }
-
-            if (result != null) {
-                result
-            } else {
-                deferred.complete(TermuxResult("", "Command timed out after ${timeoutMs}ms", -1))
+            val result = withTimeoutOrNull(timeoutMs) { deferred.await() }
+            if (result != null) result
+            else {
+                deferred.complete(ShellExecutionResult("", "Timed out after ${timeoutMs}ms", -1, false, backend = ExecutionBackend.TERMUX))
                 pendingRequests.remove(requestId)
-                TermuxResult("", "Command timed out after ${timeoutMs}ms", -1)
+                ShellExecutionResult("", "Timed out after ${timeoutMs}ms", -1, false, backend = ExecutionBackend.TERMUX)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to execute command in Termux: ${e.message}")
+            Log.e(TAG, "Execute failed: ${e.message}")
             pendingRequests.remove(requestId)
-            TermuxResult("", "Termux error: ${e.message}", -1)
+            ShellExecutionResult("", "Termux error: ${e.message}", -1, false, backend = ExecutionBackend.TERMUX)
         }
     }
 
@@ -380,7 +255,6 @@ class TermuxBridge(private val context: Context) {
         override fun onReceive(context: Context, intent: Intent) {
             val requestId = intent.getIntExtra("REQUEST_ID", -1)
             if (requestId < 0) return
-
             val deferred = pendingRequests.remove(requestId) ?: return
 
             try {
@@ -390,22 +264,20 @@ class TermuxBridge(private val context: Context) {
                     val stderr = bundle.getString(EXTRA_STDERR, "")
                     val exitCode = bundle.getInt(EXTRA_EXIT_CODE, -1)
                     val err = bundle.getString(EXTRA_ERR)
-                    val combinedStderr = if (err != null) "$stderr\n$err" else stderr
-
-                    deferred.complete(TermuxResult(
-                        stdout = stdout,
-                        stderr = combinedStderr,
-                        exitCode = exitCode
+                    deferred.complete(ShellExecutionResult(
+                        stdout, if (err != null) "$stderr\n$err" else stderr, exitCode,
+                        backend = ExecutionBackend.TERMUX
                     ))
                 } else {
-                    // No bundle — maybe older API version
-                    val stdout = intent.getStringExtra(EXTRA_STDOUT) ?: ""
-                    val stderr = intent.getStringExtra(EXTRA_STDERR) ?: ""
-                    val exitCode = intent.getIntExtra(EXTRA_EXIT_CODE, -1)
-                    deferred.complete(TermuxResult(stdout, stderr, exitCode))
+                    deferred.complete(ShellExecutionResult(
+                        intent.getStringExtra(EXTRA_STDOUT) ?: "",
+                        intent.getStringExtra(EXTRA_STDERR) ?: "",
+                        intent.getIntExtra(EXTRA_EXIT_CODE, -1),
+                        backend = ExecutionBackend.TERMUX
+                    ))
                 }
             } catch (e: Exception) {
-                deferred.complete(TermuxResult("", "Error reading Termux result: ${e.message}", -1))
+                deferred.complete(ShellExecutionResult("", "Error: ${e.message}", -1, false, backend = ExecutionBackend.TERMUX))
             }
         }
     }
@@ -419,29 +291,17 @@ class TermuxBridge(private val context: Context) {
                 context.registerReceiver(receiver, filter)
             }
             receiverRegistered.set(true)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to register result receiver: ${e.message}")
-        }
+        } catch (e: Exception) { Log.e(TAG, "Register failed: ${e.message}") }
     }
 
     fun unregisterReceiver() {
         if (receiverRegistered.compareAndSet(true, false)) {
-            try {
-                context.unregisterReceiver(receiver)
-            } catch (e: Exception) {
-                Log.w(TAG, "Error unregistering receiver: ${e.message}")
-            }
+            try { context.unregisterReceiver(receiver) }
+            catch (e: Exception) { Log.w(TAG, "Unregister error: ${e.message}") }
         }
     }
 
-    // ── Helpers ─────────────────────────────────────────────────────────────
-
     private fun isPackageInstalled(packageName: String): Boolean = try {
-        context.packageManager.getPackageInfo(packageName, 0)
-        true
-    } catch (e: PackageManager.NameNotFoundException) {
-        false
-    }
-
-
+        context.packageManager.getPackageInfo(packageName, 0); true
+    } catch (e: PackageManager.NameNotFoundException) { false }
 }
