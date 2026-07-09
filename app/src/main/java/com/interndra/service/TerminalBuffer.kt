@@ -82,7 +82,10 @@ class TerminalBuffer {
     /**
      * Process a raw string containing ANSI escape codes.
      * Builds internal buffer state. Call [flush] to get structured lines.
+     *
+     * Thread-safe — can be called from multiple coroutines.
      */
+    @Synchronized
     fun processOutput(raw: String) {
         var i = 0
         while (i < raw.length) {
@@ -133,7 +136,10 @@ class TerminalBuffer {
     /**
      * Flush all buffered lines and return as [TerminalLine] objects.
      * Clears the internal buffer.
+     *
+     * Thread-safe.
      */
+    @Synchronized
     fun flush(): List<TerminalLine> {
         if (currentLine.isNotEmpty()) {
             commitLine()
@@ -146,13 +152,15 @@ class TerminalBuffer {
     }
 
     /**
-     * Flush and return plain text (all ANSI stripped).
+     * Flush and return plain text (all ANSI stripped). Thread-safe.
      */
+    @Synchronized
     fun flushPlainText(): String {
         return flush().joinToString("\n") { it.text }
     }
 
-    /** Reset all state. */
+    /** Reset all state. Thread-safe. */
+    @Synchronized
     fun reset() {
         cursorRow = 0; cursorCol = 0
         currentLine.clear(); currentSpans.clear()

@@ -24,14 +24,19 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.*
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interndra.agent.TerminalAgent
+import com.interndra.service.TerminalBuffer
 import com.interndra.service.TermuxBridge
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
@@ -40,11 +45,18 @@ import kotlinx.coroutines.launch
 /**
  * TerminalScreen — REAL interactive terminal emulator.
  *
+ * ## A+++ UPGRADE: TerminalBuffer-powered ANSI rendering
+ * Raw shell output is now piped through [TerminalBuffer] which handles:
+ * - Full SGR color sequences (30-37, 40-47, 90-97, 100-107)
+ * - Bold, dim, underline text styling
+ * - Cursor movement + screen clear sequences
+ * - Per-character color spans rendered as [AnnotatedString]
+ *
  * Features:
- * - Live output with ANSI color rendering
+ * - Live output with proper ANSI color rendering (no more raw escape codes)
  * - Command input at bottom with history (Up/Down arrows)
  * - Session tabs with create/rename/delete
- * - Real-time streaming output from TermuxBridge
+ * - Real-time streaming output from TerminalAgent
  * - Auto-scroll toggle
  * - Clear, Copy functionality
  * - Workdir display
@@ -60,7 +72,6 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     // Terminal state
     var inputText by remember { mutableStateOf("") }
     var autoScroll by remember { mutableStateOf(true) }
-    var showSearch by remember { mutableStateOf(false) }
     var showNewSessionDialog by remember { mutableStateOf(false) }
     var showSessionMenu by remember { mutableStateOf<String?>(null) }
 
@@ -68,40 +79,46 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     var commandHistoryIndex by remember { mutableStateOf(-1) }
     var savedCurrentInput by remember { mutableStateOf("") }
 
-    // Streaming output lines for active session
-    val outputLines = remember(activeSession) {
-        vm.terminalAgent.getOutputLines(activeSession)
-    }
-    // Refresh output lines periodically
+    // ── TerminalBuffer: per-session ANSI parser ──
+    val terminalBuffer = remember { TerminalBuffer() }
+
+    // Parsed terminal lines from TerminalBuffer (structured with color spans)
+    var terminalLines by remember { mutableStateOf<List<TerminalBuffer.TerminalLine>>(emptyList()) }
     var refreshTick by remember { mutableStateOf(0L) }
 
-    // Observe streaming output
-    LaunchedEffect(Unit) {
+    // Single unified LaunchedEffect: handles session switch (reset + re-parse)
+    // AND real-time streaming output collection. Cancels/restarts on session change.
+    LaunchedEffect(activeSession) {
+        // Reset and re-parse all output for the newly active session
+        terminalBuffer.reset()
+        val allLines = vm.terminalAgent.getOutputLines(activeSession)
+        for (line in allLines) {
+            terminalBuffer.processOutput(line)
+        }
+        terminalLines = terminalBuffer.flush()
+
+        // Start collecting streaming output for this session
         vm.terminalAgent.outputFlow.collect { event ->
-            when (event) {
-                is TerminalAgent.StreamEvent.Output -> {
-                    if (event.sessionName == activeSession || activeSession == "default") {
-                        refreshTick = System.currentTimeMillis()
-                    }
+            if (event is TerminalAgent.StreamEvent.Output &&
+                (event.sessionName == activeSession || activeSession == "default")) {
+                terminalBuffer.processOutput(event.text)
+                // Flush with minimal debounce — 16ms (one frame) for smooth streaming
+                val now = System.currentTimeMillis()
+                if (now - refreshTick > 16) {
+                    refreshTick = now
+                    terminalLines = terminalBuffer.flush()
                 }
-                else -> {}
             }
         }
-    }
-
-    // Get fresh output lines
-    val displayLines = remember(refreshTick, activeSession, outputLines.size) {
-        vm.terminalAgent.getOutputLines(activeSession)
     }
 
     // Focus requester for input field
     val inputFocusRequester = remember { FocusRequester() }
 
-    // Auto-scroll — use instant scrollToItem (no animation) for high-frequency updates
-    // to prevent animation jitter during streaming output
-    LaunchedEffect(displayLines.size) {
-        if (autoScroll && displayLines.isNotEmpty()) {
-            listState.scrollToItem(displayLines.size - 1)
+    // Auto-scroll — use instant scrollToItem for high-frequency streaming
+    LaunchedEffect(terminalLines.size) {
+        if (autoScroll && terminalLines.isNotEmpty()) {
+            listState.scrollToItem(terminalLines.size - 1)
         }
     }
 
@@ -191,7 +208,7 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                 .fillMaxWidth()
                 .background(TerminalBg)
         ) {
-            if (displayLines.isEmpty()) {
+            if (terminalLines.isEmpty()) {
                 // Empty state
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -225,10 +242,13 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                         .clickable { inputFocusRequester.requestFocus() },
                     verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
-                    itemsIndexed(displayLines, key = { idx, _ -> "line_${idx}_${refreshTick}" }) { index, line ->
+                    itemsIndexed(
+                        terminalLines,
+                        key = { idx, _ -> "tline_${idx}_${refreshTick}" }
+                    ) { index, line ->
                         AnsiTerminalLine(
-                            text = line,
-                            isLast = index == displayLines.size - 1
+                            terminalLine = line,
+                            isLast = index == terminalLines.size - 1
                         )
                     }
                 }
@@ -279,7 +299,7 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
 
         // Status bar
         TerminalStatusBar(
-            lineCount = displayLines.size,
+            lineCount = terminalLines.size,
             sessionName = activeSession,
             termuxInstalled = termuxInstalled
         )
@@ -447,74 +467,84 @@ private fun SessionRow(
     }
 }
 
-// ── ANSI Terminal Line ──────────────────────────────────────────────────────
+// ── ANSI Terminal Line (TerminalBuffer-powered) ────────────────────────────
+/**
+ * Renders a single [TerminalBuffer.TerminalLine] with full ANSI color support.
+ * Uses [buildAnnotatedString] + [SpanStyle] to apply per-character foreground
+ * colors, background colors, bold, dim, and underline from parsed color spans.
+ */
 @Composable
 private fun AnsiTerminalLine(
-    text: String,
+    terminalLine: TerminalBuffer.TerminalLine,
     isLast: Boolean
 ) {
-    // Strip ANSI escape codes and extract text
-    val cleanText = remember(text) { stripAnsiCodes(text) }
+    val annotated = remember(terminalLine) {
+        buildAnnotatedString {
+            val text = terminalLine.text
+            val spans = terminalLine.spans
 
-    // Determine color from ANSI codes
-    val textColor = remember(text) { parseAnsiColor(text) }
+            if (spans.isEmpty()) {
+                // No color spans — append plain text with default terminal color
+                withStyle(SpanStyle(color = TerminalWhite)) {
+                    append(text)
+                }
+            } else {
+                var lastEnd = 0
+                for (span in spans.sortedBy { it.start }) {
+                    // Append any plain text between spans
+                    if (span.start > lastEnd) {
+                        withStyle(SpanStyle(color = TerminalWhite)) {
+                            append(text.substring(lastEnd, span.start))
+                        }
+                    }
+
+                    // Build the span style from ANSI attributes
+                    val fg = span.fgColor?.let { Color(it) } ?: TerminalWhite
+                    val bg = span.bgColor?.let { Color(it) }
+                    val fontWeight = when {
+                        span.bold -> FontWeight.Bold
+                        span.dim -> FontWeight.Light
+                        else -> FontWeight.Normal
+                    }
+                    val fontStyle = if (span.dim) FontStyle.Italic else FontStyle.Normal
+
+                    withStyle(SpanStyle(
+                        color = fg,
+                        background = bg ?: Color.Transparent,
+                        fontWeight = fontWeight,
+                        fontStyle = fontStyle,
+                        textDecoration = if (span.underline)
+                            androidx.compose.ui.text.style.TextDecoration.Underline
+                        else androidx.compose.ui.text.style.TextDecoration.None
+                    )) {
+                        val end = span.end.coerceAtMost(text.length)
+                        val start = span.start.coerceAtLeast(0)
+                        if (end > start) {
+                            append(text.substring(start, end))
+                        }
+                    }
+
+                    lastEnd = span.end.coerceAtMost(text.length)
+                }
+
+                // Append any remaining plain text after the last span
+                if (lastEnd < text.length) {
+                    withStyle(SpanStyle(color = TerminalWhite)) {
+                        append(text.substring(lastEnd))
+                    }
+                }
+            }
+        }
+    }
 
     Text(
-        text = cleanText,
-        color = textColor,
+        text = annotated,
         fontFamily = FontFamily.Monospace,
         fontSize = 12.sp,
         lineHeight = 17.sp,
         softWrap = true,
         modifier = Modifier.padding(vertical = 1.dp)
     )
-}
-
-/**
- * Strip ANSI escape codes from text, returning clean display text.
- */
-private fun stripAnsiCodes(text: String): String {
-    return text.replace(Regex("\u001b\\[[0-9;]*[a-zA-Z]"), "")
-        .replace(Regex("\u001b\\][0-9;]*[a-zA-Z]"), "")
-        .replace(Regex("[\\u0000-\\u001F]"), "") // Remove control chars except newline
-}
-
-/**
- * Parse ANSI escape codes to determine text color.
- * Returns appropriate TerminalWhite/TerminalGreen/TerminalRed etc.
- */
-private fun parseAnsiColor(text: String): Color {
-    val ansiPattern = Regex("\u001b\\[([0-9;]*)m")
-    val matches = ansiPattern.findAll(text).map { it.groupValues[1] }.toList()
-
-    // Check the LAST ANSI code before reset
-    for (code in matches.reversed()) {
-        val codes = code.split(";")
-        for (c in codes) {
-            return when (c) {
-                "30", "38;5;0" -> TerminalWhite.copy(alpha = 0.5f)  // Dark gray
-                "31", "38;5;1", "38;5;160", "38;5;196", "38;5;197",
-                "38;5;198", "38;5;199", "38;5;200" -> TerminalRed
-                "32", "38;5;2", "38;5;28", "38;5;34", "38;5;40",
-                "38;5;46" -> TerminalGreen
-                "33", "38;5;3", "38;5;220", "38;5;226", "38;5;228" -> TerminalYellow
-                "34", "38;5;4", "38;5;21", "38;5;27", "38;5;33" -> Color(0xFF569CD6) // Blue
-                "35", "38;5;5" -> Color(0xFFC586C0) // Purple
-                "36", "38;5;6", "38;5;44", "38;5;45", "38;5;51" -> Color(0xFF4EC9B0) // Cyan
-                "37", "38;5;7" -> TerminalWhite
-                "90", "38;5;8" -> TerminalWhite.copy(alpha = 0.4f) // Bright black
-                "91", "38;5;9" -> Color(0xFFF44747) // Bright red
-                "92", "38;5;10" -> Color(0xFF4EC9B0) // Bright green
-                "93", "38;5;11" -> Color(0xFFDCDCAA) // Bright yellow
-                "94", "38;5;12" -> Color(0xFF569CD6) // Bright blue
-                "95", "38;5;13" -> Color(0xFFC586C0) // Bright magenta
-                "96", "38;5;14" -> Color(0xFF9CDCFE) // Bright cyan
-                "0", "0;0" -> return TerminalWhite // Reset
-                else -> continue
-            }
-        }
-    }
-    return TerminalWhite
 }
 
 // ── Terminal Input Bar ──────────────────────────────────────────────────────
@@ -540,7 +570,6 @@ private fun TerminalInputBar(
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Prompt character
             Text(
                 "$ ",
                 color = TerminalGreen,
@@ -550,7 +579,6 @@ private fun TerminalInputBar(
                 modifier = Modifier.padding(start = 8.dp)
             )
 
-            // Text input
             TextField(
                 value = text,
                 onValueChange = onTextChange,
@@ -582,7 +610,7 @@ private fun TerminalInputBar(
                     unfocusedTextColor = TerminalWhite,
                     cursorColor = TerminalGreen
                 ),
-                textStyle = TextStyle(
+                textStyle = androidx.compose.ui.text.TextStyle(
                     fontSize = 14.sp,
                     fontFamily = FontFamily.Monospace,
                     color = TerminalWhite
@@ -593,14 +621,14 @@ private fun TerminalInputBar(
                 singleLine = true
             )
 
-            // Send button
             IconButton(
                 onClick = onSend,
                 enabled = text.isNotBlank(),
                 modifier = Modifier.size(36.dp)
-            ) {                        Icon(
-                            Icons.Default.PlayArrow,
-                            "Run",
+            ) {
+                Icon(
+                    Icons.Default.PlayArrow,
+                    "Run",
                     tint = if (text.isNotBlank()) TerminalGreen else TerminalWhite.copy(alpha = 0.2f),
                     modifier = Modifier.size(18.dp)
                 )
@@ -684,7 +712,7 @@ private fun NewSessionDialog(
                         unfocusedLabelColor = TerminalWhite.copy(0.5f)
                     ),
                     modifier = Modifier.fillMaxWidth(),
-                    textStyle = TextStyle(fontSize = 14.sp, fontFamily = FontFamily.Monospace, color = TerminalWhite)
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, fontFamily = FontFamily.Monospace, color = TerminalWhite)
                 )
                 OutlinedTextField(
                     value = workdir,
@@ -702,7 +730,7 @@ private fun NewSessionDialog(
                         unfocusedLabelColor = TerminalWhite.copy(0.5f)
                     ),
                     modifier = Modifier.fillMaxWidth(),
-                    textStyle = TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = TerminalWhite)
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = TerminalWhite)
                 )
             }
         },
