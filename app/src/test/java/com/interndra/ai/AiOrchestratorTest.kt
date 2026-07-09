@@ -8,7 +8,6 @@ import com.google.common.truth.Truth.assertThat
 import com.interndra.data.model.*
 import com.interndra.util.Constants
 import io.mockk.coEvery
-import io.mockk.eq
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -314,7 +313,7 @@ class AiOrchestratorTest {
         orchestrator.jailbreakActive = true
         orchestrator.jailbreakLevel = JailbreakLevel.LIGHT
 
-        coEvery { mockCloudEngine.parseIntent(any(), any(), any(), eq(true), eq(JailbreakLevel.LIGHT)) } returns
+        coEvery { mockCloudEngine.parseIntent(any(), any(), any(), true, JailbreakLevel.LIGHT) } returns
             AiEngineResult(intentJson = """{"action":"chat","reply":"jailbroken"}""", source = AiSource.CLOUD)
         coEvery { mockLocalEngine.parseIntent(any(), any()) } returns
             AiEngineResult(intentJson = """{"action":"chat","reply":"local"}""", source = AiSource.LOCAL)
