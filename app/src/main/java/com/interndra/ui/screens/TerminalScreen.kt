@@ -40,6 +40,7 @@ import com.interndra.service.TerminalBuffer
 import com.interndra.service.TermuxBridge
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -78,6 +79,7 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     // Command history navigation
     var commandHistoryIndex by remember { mutableStateOf(-1) }
     var savedCurrentInput by remember { mutableStateOf("") }
+    var showHistoryPanel by remember { mutableStateOf(false) }
 
     // ── TerminalBuffer: per-session ANSI parser ──
     val terminalBuffer = remember { TerminalBuffer() }
@@ -235,7 +237,7 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                             }
                         }
                         bgJobs.forEach { job ->
-                            BackgroundJobRow(
+                            AnimatedJobRow(
                                 job = job,
                                 onCancel = { vm.terminalAgent.cancelJob(job.id) }
                             )
@@ -295,14 +297,37 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
             } // end Box (terminal output)
         } // end Column (output area + jobs panel)
 
-        // ── Background Job Row ──────────────────────────────────────────────────
+        // ── Animated Background Job Row ──────────────────────────────────────────
 @Composable
-private fun BackgroundJobRow(
+private fun AnimatedJobRow(
     job: TerminalAgent.SessionJob,
     onCancel: () -> Unit
 ) {
-    val duration = remember(job.startedAt) {
-        val secs = (System.currentTimeMillis() - job.startedAt) / 1000
+    // ── Live duration counter ──
+    val durationTick = remember { mutableStateOf(0L) }
+    LaunchedEffect(job.id, job.status) {
+        if (job.status == TerminalAgent.BackgroundJobStatus.RUNNING) {
+            while (true) {
+                durationTick.value = System.currentTimeMillis() - job.startedAt
+                delay(1000)
+            }
+        } else {
+            durationTick.value = System.currentTimeMillis() - job.startedAt
+        }
+    }
+
+    // ── Animated progress bar for running jobs ──
+    val progressAnim = rememberInfiniteTransition(label = "job_progress")
+    val progressShift by progressAnim.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(2000, easing = LinearEasing),
+            RepeatMode.Restart
+        ), label = "progress_shift"
+    )
+
+    val durationFormatted = remember(durationTick.value) {
+        val secs = durationTick.value / 1000
         when {
             secs < 60 -> "${secs}s"
             secs < 3600 -> "${secs / 60}m ${secs % 60}s"
@@ -310,35 +335,101 @@ private fun BackgroundJobRow(
         }
     }
 
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 1.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            Modifier.size(6.dp).clip(CircleShape)
-                .background(when (job.status) {
-                    TerminalAgent.BackgroundJobStatus.RUNNING -> TerminalGreen
-                    TerminalAgent.BackgroundJobStatus.COMPLETED -> Accent
-                    TerminalAgent.BackgroundJobStatus.CANCELLED -> TerminalYellow
-                    TerminalAgent.BackgroundJobStatus.FAILED -> TerminalRed
-                })
-        )
-        Spacer(Modifier.width(6.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text("#${job.id}: ${job.command.take(50)}",
-                color = TerminalWhite.copy(alpha = 0.7f), fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("⏱ $duration · ${job.outputLines.size} lines",
-                color = TerminalWhite.copy(alpha = 0.35f), fontSize = 8.sp,
-                fontFamily = FontFamily.Monospace)
+    val statusColor = when (job.status) {
+        TerminalAgent.BackgroundJobStatus.RUNNING -> TerminalGreen
+        TerminalAgent.BackgroundJobStatus.COMPLETED -> Accent
+        TerminalAgent.BackgroundJobStatus.CANCELLED -> TerminalYellow
+        TerminalAgent.BackgroundJobStatus.FAILED -> TerminalRed
+    }
+
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Status icon (animated pulse for running)
+            if (job.status == TerminalAgent.BackgroundJobStatus.RUNNING) {
+                val pulseAnim = rememberInfiniteTransition(label = "pulse_job")
+                val pulseAlpha by pulseAnim.animateFloat(0.4f, 1.0f,
+                    infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "pulse")
+                Box(
+                    Modifier.size(6.dp).alpha(pulseAlpha).clip(CircleShape).background(statusColor)
+                )
+            } else {
+                val icon = when (job.status) {
+                    TerminalAgent.BackgroundJobStatus.COMPLETED -> "✓"
+                    TerminalAgent.BackgroundJobStatus.CANCELLED -> "⏹"
+                    TerminalAgent.BackgroundJobStatus.FAILED -> "✗"
+                    else -> "●"
+                }
+                Text(icon, fontSize = 8.sp, color = statusColor)
+            }
+            Spacer(Modifier.width(6.dp))
+
+            // Command + duration
+            Column(modifier = Modifier.weight(1f)) {
+                Text("#${job.id}: ${job.command.take(40)}",
+                    color = TerminalWhite.copy(alpha = 0.7f), fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("⏱ $durationFormatted",
+                        color = statusColor.copy(alpha = 0.6f), fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace)
+                    Text("${job.outputLines.size} lines",
+                        color = TerminalWhite.copy(alpha = 0.3f), fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace)
+                }
+            }
+
+            // Cancel button
+            IconButton(onClick = onCancel, modifier = Modifier.size(20.dp)) {
+                Icon(Icons.Default.Close, "Cancel",
+                    tint = if (job.status == TerminalAgent.BackgroundJobStatus.RUNNING)
+                        TerminalRed.copy(alpha = 0.7f) else TerminalWhite.copy(alpha = 0.3f),
+                    modifier = Modifier.size(12.dp))
+            }
         }
-        IconButton(onClick = onCancel, modifier = Modifier.size(20.dp)) {
-            Icon(Icons.Default.Close, "Cancel", tint = TerminalRed.copy(alpha = 0.7f), modifier = Modifier.size(12.dp))
+
+        // ── Animated progress bar (running only) ──
+        if (job.status == TerminalAgent.BackgroundJobStatus.RUNNING) {
+            Spacer(Modifier.height(2.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .clip(RoundedCornerShape(1.dp))
+                    .background(SurfaceLight.copy(alpha = 0.2f))
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(0.4f)
+                        .offset(x = (progressShift * 60).dp) // Sweep across
+                        .height(2.dp)
+                        .clip(RoundedCornerShape(1.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(
+                                    TerminalGreen.copy(alpha = 0.3f),
+                                    TerminalGreen,
+                                    TerminalGreen.copy(alpha = 0.3f)
+                                )
+                            )
+                        )
+                )
+            }
+        }
+
+        // ── Exit code display for completed/failed jobs ──
+        if (job.status != TerminalAgent.BackgroundJobStatus.RUNNING && job.exitCode != null) {
+            Text(
+                "Exit ${job.exitCode}",
+                color = if (job.exitCode == 0) TerminalGreen.copy(0.5f) else TerminalRed.copy(0.5f),
+                fontSize = 8.sp, fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(start = 12.dp, top = 1.dp)
+            )
         }
     }
 }
-
-// ── Terminal Input Bar ───────────────────────────────────────────
         TerminalInputBar(
             text = inputText,
             onTextChange = { inputText = it },
@@ -387,9 +478,157 @@ private fun BackgroundJobRow(
             termuxInstalled = termuxInstalled
         )
     }
+
+    // ── Command History Panel (slide-up) ────────────────────────────────
+    AnimatedVisibility(
+        visible = showHistoryPanel,
+        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+    ) {
+        HistoryPanel(
+            history = vm.terminalAgent.getHistory(activeSession),
+            onSelect = { entry ->
+                inputText = entry.command
+                showHistoryPanel = false
+            },
+            onClose = { showHistoryPanel = false }
+        )
+    }
 }
 
-// ── Terminal Top Bar ────────────────────────────────────────────────────────
+// ── Command History Panel ───────────────────────────────────────────────────
+@Composable
+private fun HistoryPanel(
+    history: List<TerminalAgent.HistoryEntry>,
+    onSelect: (TerminalAgent.HistoryEntry) -> Unit,
+    onClose: () -> Unit
+) {
+    Surface(
+        color = TerminalBg,
+        border = BorderStroke(1.dp, SurfaceLight.copy(0.2f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 250.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+        ) {
+            // Header
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.History, null,
+                    tint = Accent.copy(0.7f), modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Command History (${history.size})",
+                    color = TerminalWhite.copy(0.7f), fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f))
+                TextButton(
+                    onClick = onClose,
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                ) {
+                    Text("Close", color = Accent, fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace)
+                }
+            }
+
+            // List
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                itemsIndexed(history, key = { idx, _ -> "hist_${idx}" }) { idx, entry ->
+                    val isSuccess = entry.exitCode == 0
+                    val timeStr = remember(entry.timestamp) {
+                        java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+                            .format(java.util.Date(entry.timestamp))
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isSuccess) TerminalGreen.copy(0.05f) else TerminalRed.copy(0.05f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(entry) }
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Exit code indicator
+                            Box(
+                                Modifier
+                                    .width(20.dp)
+                                    .padding(end = 4.dp)
+                            ) {
+                                Text(
+                                    if (isSuccess) "✓" else "✗",
+                                    color = if (isSuccess) TerminalGreen else TerminalRed,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+
+                            // Command
+                            Text(
+                                entry.command.take(60),
+                                color = TerminalWhite,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            // Timestamp + duration
+                            Column(
+                                horizontalAlignment = Alignment.End,
+                                modifier = Modifier.padding(start = 8.dp)
+                            ) {
+                                Text(
+                                    timeStr,
+                                    color = TerminalWhite.copy(0.3f),
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                if (entry.durationMs > 0) {
+                                    Text(
+                                        "${entry.durationMs}ms",
+                                        color = TerminalWhite.copy(0.2f),
+                                        fontSize = 8.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+
+                            // Backend tag
+                            if (entry.backend != "UNKNOWN") {
+                                Spacer(Modifier.width(4.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Accent.copy(0.1f)
+                                ) {
+                                    Text(
+                                        entry.backend.take(8),
+                                        color = Accent.copy(0.6f),
+                                        fontSize = 7.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Terminal Top Bar (Enhanced) ───────────────────────────────────────────
 @Composable
 private fun TerminalTopBar(
     sessions: List<String>,
@@ -411,16 +650,23 @@ private fun TerminalTopBar(
         Column(Modifier.fillMaxWidth()) {
             // Title row
             Row(
-                Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp),
+                Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onOpenDrawer) {
                     Icon(Icons.Default.Menu, "Menu", tint = TerminalWhite)
                 }
-                Text("Terminal", color = TerminalWhite, fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f))
-                // Termux status
+
+                Column(Modifier.weight(1f)) {
+                    Text("Terminal", color = TerminalWhite, fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("${sessions.size} sessions", color = TerminalWhite.copy(0.4f), fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace)
+                    }
+                }
+
+                // Termux status with pulse
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
@@ -437,28 +683,45 @@ private fun TerminalTopBar(
                             .background(if (termuxInstalled) TerminalGreen else TerminalRed)
                     )
                     Text(
-                        if (termuxInstalled) "Termux" else "No Termux",
+                        if (termuxInstalled) "Termux" else "Shell",
                         color = if (termuxInstalled) TerminalGreen else TerminalRed.copy(0.7f),
                         fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
                         fontFamily = FontFamily.Monospace
                     )
                 }
                 Spacer(Modifier.width(4.dp))
-                IconButton(onClick = { onToggleAutoScroll() }) {
-                    Icon(
-                        if (autoScroll) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
-                        "Auto-scroll",
-                        tint = if (autoScroll) Accent else TerminalWhite.copy(alpha = 0.5f)
-                    )
+
+                // Auto-scroll toggle
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (autoScroll) Accent.copy(0.15f) else Color.Transparent,
+                    modifier = Modifier.clickable { onToggleAutoScroll() }
+                ) {
+                    Box(Modifier.padding(6.dp)) {
+                        Icon(
+                            if (autoScroll) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
+                            "Auto-scroll",
+                            tint = if (autoScroll) Accent else TerminalWhite.copy(alpha = 0.4f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
-                IconButton(onClick = onClear) {
-                    Icon(Icons.Default.DeleteSweep, "Clear",
-                        tint = TerminalRed.copy(alpha = 0.7f))
+
+                // Clear
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color.Transparent,
+                    modifier = Modifier.clickable { onClear() }
+                ) {
+                    Box(Modifier.padding(6.dp)) {
+                        Icon(Icons.Default.DeleteSweep, "Clear",
+                            tint = TerminalRed.copy(alpha = 0.6f), modifier = Modifier.size(16.dp))
+                    }
                 }
             }
 
-            // Session tabs
-            SessionRow(
+            // Session tabs (Enhanced)
+            EnhancedSessionRow(
                 sessions = sessions,
                 activeSession = activeSession,
                 onSelectSession = onSelectSession,
@@ -469,9 +732,9 @@ private fun TerminalTopBar(
     }
 }
 
-// ── Session Row ──────────────────────────────────────────────────────────────
+// ── Enhanced Session Row ─────────────────────────────────────────────────────
 @Composable
-private fun SessionRow(
+private fun EnhancedSessionRow(
     sessions: List<String>,
     activeSession: String,
     onSelectSession: (String) -> Unit,
@@ -482,46 +745,57 @@ private fun SessionRow(
         Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         sessions.forEach { name ->
             val isActive = name == activeSession
+            val isDefault = name == "default"
+            val emoji = if (isDefault) "💻" else "📂"
+
             Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = if (isActive) Accent.copy(0.2f) else SurfaceLight.copy(0.08f),
+                shape = RoundedCornerShape(10.dp),
+                color = if (isActive) Accent.copy(0.18f) else SurfaceCard.copy(0.5f),
                 border = BorderStroke(
                     1.dp,
-                    if (isActive) Accent.copy(0.6f) else SurfaceLight.copy(0.2f)
+                    if (isActive) Accent.copy(0.5f) else SurfaceLight.copy(0.15f)
                 ),
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(10.dp))
                     .clickable { onSelectSession(name) }
             ) {
                 Row(
-                    Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Box(
-                        Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(if (isActive) Accent else SurfaceLight.copy(0.3f))
-                    )
+                    // Icon
+                    Text(emoji, fontSize = 12.sp)
+
+                    // Session name
                     Text(
                         name,
-                        color = if (isActive) Accent else TerminalWhite.copy(0.7f),
-                        fontSize = 11.sp,
+                        color = if (isActive) TerminalWhite else TerminalWhite.copy(0.65f),
+                        fontSize = 12.sp,
                         fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
                         fontFamily = FontFamily.Monospace,
                         maxLines = 1
                     )
+
+                    // Status dot (pulsing for active, static for others)
+                    Box(
+                        Modifier
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(if (isActive) Accent else SurfaceLight.copy(0.3f))
+                    )
+
+                    // Dropdown arrow
                     Icon(
                         Icons.Default.ArrowDropDown,
                         "Options",
-                        tint = if (isActive) Accent.copy(0.6f) else TerminalWhite.copy(0.3f),
+                        tint = if (isActive) TerminalWhite.copy(0.5f) else TerminalWhite.copy(0.25f),
                         modifier = Modifier
                             .size(14.dp)
                             .clickable { onSessionLongPress(name) }
@@ -532,13 +806,13 @@ private fun SessionRow(
 
         // Add session button
         Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = TerminalGreen.copy(0.1f),
-            border = BorderStroke(1.dp, TerminalGreen.copy(0.3f)),
+            shape = RoundedCornerShape(10.dp),
+            color = TerminalGreen.copy(0.08f),
+            border = BorderStroke(1.dp, TerminalGreen.copy(0.25f)),
             modifier = Modifier.clickable(onClick = onAddSession)
         ) {
             Row(
-                Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
@@ -742,13 +1016,16 @@ private fun TerminalStatusBar(
                 fontFamily = FontFamily.Monospace
             )
             Row(verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (!termuxInstalled) {
-                    Text("Termux not installed",
-                        color = TerminalRed.copy(alpha = 0.4f), fontSize = 9.sp,
+                    Text("Shell mode",
+                        color = TerminalYellow.copy(alpha = 0.4f), fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace)
                 }
-                Text("↑↓ history · Enter run",
+                Text("↑↓ history",
+                    color = TerminalWhite.copy(alpha = 0.2f), fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace)
+                Text("⏎ run",
                     color = TerminalWhite.copy(alpha = 0.2f), fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace)
             }
