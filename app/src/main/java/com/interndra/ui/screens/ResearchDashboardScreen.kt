@@ -132,7 +132,6 @@ fun ResearchDashboardScreen(
                                 }
                             }
                         }
-                    }
                 }
             }
 
@@ -173,6 +172,7 @@ fun ResearchDashboardScreen(
             item { Spacer(Modifier.height(80.dp)) }
         }
     }
+}
 
 @Composable
 private fun TypeBreakdownCard(knowledge: List<KnowledgeEntry>) {

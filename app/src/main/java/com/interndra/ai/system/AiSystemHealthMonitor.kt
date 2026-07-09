@@ -472,7 +472,7 @@ class AiSystemHealthMonitor(private val context: Context) {
                 "⚠️ $preferredProvider has ${preferredHealth.consecutiveFailures} consecutive failures."
             cacheHitRate > 0.5f ->
                 "✅ Cache hit rate is ${(cacheHitRate * 100).toInt()}% — good!"
-            cacheHitRate < 0.1f && totalQueries > 50 ->
+            cacheHitRate < 0.1f && _totalQueries.get() > 50 ->
                 "💡 Consider enabling cache for repeated queries."
             else ->
                 "✅ System healthy."

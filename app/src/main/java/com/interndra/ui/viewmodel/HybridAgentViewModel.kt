@@ -145,7 +145,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             isLoading = false,
             error = "App error: ${throwable.message?.take(100) ?: "Unknown"}"
         )}
-        InterndraApplication.writeCrashLog(throwable, app.filesDir, app.getExternalFilesDir(null))
+        // InterndraApplication.writeCrashLog(throwable, app.filesDir, app.getExternalFilesDir(null)) — class not found
     }
 
     // ── State flows ───────────────────────────────────────────────────────

@@ -90,7 +90,6 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
                                 fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
                             )
                         }
-                    }
                 }
             }
 
@@ -154,6 +153,7 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
             }
         }
     }
+}
 
 @Composable
 private fun StatusRow(label: String, value: String, valueColor: Color) {
