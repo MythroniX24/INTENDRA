@@ -895,7 +895,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 try { repo.log(session, LogType.STATUS_FAIL, err) } catch (_: Exception) {}
                 _uiState.update { it.copy(error = msg) }
             }
-        }
     }
 
     // ── Execute commands ──────────────────────────────────────────────────
