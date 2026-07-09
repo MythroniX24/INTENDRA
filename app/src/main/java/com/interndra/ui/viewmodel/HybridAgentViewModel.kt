@@ -1291,3 +1291,4 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         terminalAgent.shutdown()
         healthMonitor.saveReport()
     }
+}
