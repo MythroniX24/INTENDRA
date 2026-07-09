@@ -1,6 +1,6 @@
 package com.interndra.ui.screens
 
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -304,10 +304,22 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
                     .padding(paddingValues),
                 color = Background800
             ) {
-                Crossfade(
-                    targetState = selectedAppTab,
-                    label = "Tab"
-                ) { tab ->
+                AnimatedContent(
+                    targetState = selectedAppTab to selectedDashboard,
+                    transitionSpec = {
+                        val fromTab = initialState.first.ordinal
+                        val toTab = targetState.first.ordinal
+                        if (toTab != fromTab) {
+                            val direction = if (toTab > fromTab) 1 else -1
+                            val offset = direction * 120
+                            (slideInHorizontally(initialOffsetX = { offset }) + fadeIn(tween(250))) togetherWith
+                                    (slideOutHorizontally(targetOffsetX = { -offset / 2 }) + fadeOut(tween(200)))
+                        } else {
+                            fadeIn(tween(200)) togetherWith fadeOut(tween(150))
+                        }
+                    },
+                    label = "TabTransition"
+                ) { (tab, dashIdx) ->
                     when (tab) {
                         AppTab.CHAT -> HybridChatScreen(
                             vm = viewModel,
@@ -322,7 +334,7 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
                             vm = viewModel,
                             onOpenDrawer = { scope.launch { drawerState.open() } }
                         )
-                        AppTab.DASHBOARDS -> when (selectedDashboard) {
+                        AppTab.DASHBOARDS -> when (dashIdx) {
                             0 -> MemoryDashboardScreen(
                                 vm = viewModel,
                                 onOpenDrawer = { scope.launch { drawerState.open() } }
