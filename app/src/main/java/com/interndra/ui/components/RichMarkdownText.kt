@@ -52,7 +52,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interndra.ui.theme.Accent
-import com.interndra.ui.theme.ChatBg
+import com.interndra.ui.theme.Background800
 import com.interndra.ui.theme.Danger
 import com.interndra.ui.theme.SurfaceLight
 import com.interndra.ui.theme.Success
@@ -384,7 +384,7 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
             Box(Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp)).background(SurfaceLight)){Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(Success))} } }
         b.items.forEach{(checked,text)->
             Row(Modifier.fillMaxWidth().padding(bottom=3.dp),verticalAlignment=Alignment.Top){
-                Box(Modifier.padding(top=3.dp,end=8.dp).size(18.dp).clip(RoundedCornerShape(4.dp)).background(if(checked)Success else SurfaceLight).border(1.5.dp,if(checked)Success else TerminalWhite.copy(0.4f),RoundedCornerShape(4.dp)),contentAlignment=Alignment.Center){if(checked)Text("✓",color=ChatBg,fontSize=12.sp,fontWeight=FontWeight.Bold)}
+                Box(Modifier.padding(top=3.dp,end=8.dp).size(18.dp).clip(RoundedCornerShape(4.dp)).background(if(checked)Success else SurfaceLight).border(1.5.dp,if(checked)Success else TerminalWhite.copy(0.4f),RoundedCornerShape(4.dp)),contentAlignment=Alignment.Center){if(checked)Text("✓",color=Background800,fontSize=12.sp,fontWeight=FontWeight.Bold)}
                 val r=parseInline(text); ClickableText(text=r.annotated,color=if(checked)TerminalWhite.copy(0.6f)else TerminalWhite,fontSize=15.sp,lineHeight=22.sp,textDecoration=if(checked)TextDecoration.LineThrough else TextDecoration.None,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) } } }
 }
 

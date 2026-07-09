@@ -38,10 +38,10 @@ fun MemoryDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {
     var selectedTab      by remember { mutableStateOf(0) }
     val kbController     = LocalSoftwareKeyboardController.current
 
-    Column(Modifier.fillMaxSize().background(ChatBg)) {
+    Column(Modifier.fillMaxSize().background(Background800)) {
 
         // ── Top bar ───────────────────────────────────────────────────────
-        Surface(color = CardSurface, tonalElevation = 2.dp) {
+        Surface(color = SurfaceCard, tonalElevation = 2.dp) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onOpenDrawer) {
@@ -91,7 +91,7 @@ fun MemoryDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {
         // ── Tab row ───────────────────────────────────────────────────────
         TabRow(
             selectedTabIndex = selectedTab,
-            containerColor   = CardSurface,
+            containerColor   = SurfaceCard,
             contentColor     = Accent
         ) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0; searchResults = null }) {
@@ -159,10 +159,7 @@ private fun MemoryCard(
     onImportance: (Int) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val sdf = remember { SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()) }
-
-    Card(
-        colors = CardDefaults.cardColors(containerColor = CardSurface),
+    val sdf = remember { SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()) }Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
         shape  = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth()
     ) {

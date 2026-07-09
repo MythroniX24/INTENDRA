@@ -29,10 +29,10 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
     val networkEvents by vm.networkEvents.collectAsState()
     val privacyMode  by vm.privacyMode.collectAsState()
 
-    Column(Modifier.fillMaxSize().background(ChatBg)) {
+    Column(Modifier.fillMaxSize().background(Background800)) {
 
         // ── Top bar ───────────────────────────────────────────────────────
-        Surface(color = CardSurface, tonalElevation = 2.dp) {
+        Surface(color = SurfaceCard, tonalElevation = 2.dp) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onOpenDrawer) {
@@ -55,7 +55,7 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
 
             // ── Emergency Lock ─────────────────────────────────────────────
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+                Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                     shape = RoundedCornerShape(16.dp)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -97,7 +97,7 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
 
             // ── Current Privacy Status ─────────────────────────────────────
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+                Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                     shape = RoundedCornerShape(16.dp)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -129,7 +129,7 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
 
             // ── Privacy Audit Checklist ────────────────────────────────────
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+                Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                     shape = RoundedCornerShape(16.dp)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -152,7 +152,7 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
 
             // ── Network Transparency ───────────────────────────────────────
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+                Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                     shape = RoundedCornerShape(16.dp)) {
                     Column(Modifier.padding(16.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

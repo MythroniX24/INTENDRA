@@ -71,10 +71,10 @@ fun TimelineScreen(
                         Icon(Icons.Default.CleaningServices, contentDescription = "Purge old", tint = TerminalWhite.copy(alpha = 0.5f))
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardSurface)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceCard)
             )
         },
-        containerColor = ChatBg
+        containerColor = Background800
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
 
@@ -115,7 +115,7 @@ fun TimelineScreen(
                         label    = { Text("All") },
                         colors   = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = TerminalBlue,
-                            selectedLabelColor     = ChatBg
+                            selectedLabelColor     = Background800
                         )
                     )
                 }
@@ -126,7 +126,7 @@ fun TimelineScreen(
                         label    = { Text("${type.emoji} ${type.label}") },
                         colors   = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = TerminalBlue,
-                            selectedLabelColor     = ChatBg,
+                            selectedLabelColor     = Background800,
                             labelColor             = TerminalWhite
                         )
                     )
@@ -229,7 +229,7 @@ private fun TimelineEventCard(entry: TimelineEntry) {
         // Event content
         Card(
             modifier = Modifier.weight(1f),
-            colors   = CardDefaults.cardColors(containerColor = CardSurface),
+            colors   = CardDefaults.cardColors(containerColor = SurfaceCard),
             shape    = RoundedCornerShape(10.dp)
         ) {
             Column(Modifier.padding(10.dp)) {

@@ -46,7 +46,7 @@ fun WorkspaceScreen(
     if (showCreateDialog) {
         AlertDialog(
             onDismissRequest = { showCreateDialog = false },
-            containerColor   = CardSurface,
+            containerColor   = SurfaceCard,
             title            = { Text("New Workspace", color = TerminalWhite) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -113,7 +113,7 @@ fun WorkspaceScreen(
     editTarget?.let { ws ->
         AlertDialog(
             onDismissRequest = { editTarget = null },
-            containerColor   = CardSurface,
+            containerColor   = SurfaceCard,
             title            = { Text("Rename Workspace", color = TerminalWhite) },
             text = {
                 OutlinedTextField(
@@ -149,9 +149,9 @@ fun WorkspaceScreen(
         )
     }
 
-    Column(Modifier.fillMaxSize().background(ChatBg)) {
+    Column(Modifier.fillMaxSize().background(Background800)) {
 
-        Surface(color = CardSurface, tonalElevation = 2.dp) {
+        Surface(color = SurfaceCard, tonalElevation = 2.dp) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onOpenDrawer) {
@@ -168,7 +168,7 @@ fun WorkspaceScreen(
 
         // General workspace button
         Card(
-            colors   = CardDefaults.cardColors(containerColor = if (uiState.activeWorkspaceId == 0L) Accent.copy(0.15f) else CardSurface),
+            colors   = CardDefaults.cardColors(containerColor = if (uiState.activeWorkspaceId == 0L) Accent.copy(0.15f) else SurfaceCard),
             shape    = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             onClick  = { onWorkspaceSelected(Workspace(id = 0, name = "General", emoji = "💬")) }
@@ -238,7 +238,7 @@ private fun WorkspaceCard(
     var menuExpanded by remember { mutableStateOf(false) }
 
     Card(
-        colors   = CardDefaults.cardColors(containerColor = if (isActive) Accent.copy(0.12f) else CardSurface),
+        colors   = CardDefaults.cardColors(containerColor = if (isActive) Accent.copy(0.12f) else SurfaceCard),
         shape    = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth(),
         onClick  = onSelect
@@ -271,7 +271,7 @@ private fun WorkspaceCard(
                     Icon(Icons.Default.MoreVert, "More", tint = TerminalWhite.copy(0.5f), modifier = Modifier.size(18.dp))
                 }
                 DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false },
-                    modifier = Modifier.background(CardSurface)) {
+                    modifier = Modifier.background(SurfaceCard)) {
                     DropdownMenuItem(
                         text = { Text(if (workspace.isPinned) "Unpin" else "Pin", color = TerminalWhite) },
                         onClick = { onPin(); menuExpanded = false }

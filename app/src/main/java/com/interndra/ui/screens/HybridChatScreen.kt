@@ -150,10 +150,7 @@ fun HybridChatScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Color(0xFF0F0F0F)).imePadding()) {
-
-        // ── Simple top bar ─────────────────────────────────────────────
-        SimpleTopBar(onOpenDrawer)
+    Column(Modifier.fillMaxSize().background(Background800).imePadding()) {
 
         // ── Emergency lock banner ─────────────────────────────────────────
         AnimatedVisibility(visible = uiState.emergencyLockActive) {
@@ -204,7 +201,7 @@ fun HybridChatScreen(
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             if (messages.isEmpty()) {
-                item { SimpleWelcomeScreen { text -> inputText = text } }
+                item { PremiumWelcomeScreen { text -> inputText = text } }
             } else {
                 // Render grouped messages
                 itemsIndexed(groupedMessages, key = { idx, _ -> "group_${idx}_${messages.size}" }) { _, (role, msgs) ->
@@ -317,7 +314,7 @@ private fun MessageGroup(
                 if (showAvatar) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = ChatBg,
+                        color = Background800,
                         border = BorderStroke(1.dp, SurfaceLight),
                         modifier = Modifier
                             .padding(top = 8.dp, end = 10.dp)
@@ -364,9 +361,9 @@ private fun MessageGroup(
                         }
                     }
 
-                    // Simple message actions (only for last message in group)
+                    // Enhanced message actions (only for last message in group)
                     if (isLast && !msg.isLoading) {
-                        SimpleMessageActions(
+                        EnhancedMessageActions(
                             role = msg.role,
                             content = msg.content,
                             onCopy = onCopy,
@@ -379,36 +376,58 @@ private fun MessageGroup(
     }
 }
 
-// ── Simple Message Actions ────────────────────────────────────────────────
+// ── Enhanced Message Actions ──────────────────────────────────────────────
 @Composable
-private fun SimpleMessageActions(
+private fun EnhancedMessageActions(
     role: MessageRole,
     content: String,
     onCopy: (String) -> Unit,
     onRegenerate: () -> Unit
 ) {
     Row(
-        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+        modifier = Modifier
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .fillMaxWidth(),
+        horizontalArrangement = if (role == MessageRole.USER) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        SmallActionButton(Icons.Default.ContentCopy, "Copy", { onCopy(content) })
-        if (role == MessageRole.AI) {
-            SmallActionButton(Icons.Default.Refresh, "Regenerate", onRegenerate)
+        // Copy button
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = Color.Transparent,
+            modifier = Modifier
+                .size(28.dp)
+                .clickable { onCopy(content) }
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.ContentCopy,
+                    "Copy",
+                    tint = TerminalWhite.copy(alpha = 0.25f),
+                    modifier = Modifier.size(14.dp)
+                )
+            }
         }
-    }
-}
 
-@Composable
-private fun SmallActionButton(
-    icon: ImageVector,
-    description: String,
-    onClick: () -> Unit
-) {
-    IconButton(
-        onClick = onClick,
-        modifier = Modifier.size(24.dp)
-    ) {
-        Icon(icon, description, tint = TerminalWhite.copy(0.3f), modifier = Modifier.size(14.dp))
+        // Regenerate button (AI only)
+        if (role == MessageRole.AI) {
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = Color.Transparent,
+                modifier = Modifier
+                    .size(28.dp)
+                    .clickable { onRegenerate() }
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        "Regenerate",
+                        tint = TerminalWhite.copy(alpha = 0.25f),
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -576,9 +595,9 @@ private fun SimpleInputBar(
     }
 }
 
-// ── Simple Welcome Screen ───────────────────────────────────────────────────
+// ── Premium Welcome Screen ───────────────────────────────────────────────
 @Composable
-private fun SimpleWelcomeScreen(onTextChange: (String) -> Unit) {
+private fun PremiumWelcomeScreen(onTextChange: (String) -> Unit) {
     val suggestions = listOf(
         "📊 Check battery & storage",
         "🔍 Search the web",
@@ -592,43 +611,135 @@ private fun SimpleWelcomeScreen(onTextChange: (String) -> Unit) {
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
-            .padding(top = 32.dp),
+            .padding(top = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(48.dp))
 
-        Icon(Icons.Default.AutoAwesome, null, tint = Accent, modifier = Modifier.size(40.dp))
-        Spacer(Modifier.height(12.dp))
-        Text("INTERNDRA", color = TerminalWhite, fontSize = 24.sp,
-            fontWeight = FontWeight.Bold)
-        Text("Private AI Assistant", color = TerminalWhite.copy(0.4f), fontSize = 13.sp)
+        // Gradient icon background
+        Box(
+            modifier = Modifier
+                .size(80.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(
+                    Brush.linearGradient(
+                        listOf(Accent, VaultPurple),
+                        start = androidx.compose.ui.geometry.Offset(0f, 0f),
+                        end = androidx.compose.ui.geometry.Offset(80f, 80f)
+                    )
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.Chat,
+                null,
+                tint = Color.White,
+                modifier = Modifier.size(36.dp)
+            )
+        }
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(16.dp))
 
-        suggestions.chunked(2).forEach { row ->
+        Text(
+            "INTERNDRA",
+            color = TerminalWhite,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.ExtraBold
+        )
+        Text(
+            "Private AI OS for Android",
+            color = TerminalWhite.copy(alpha = 0.4f),
+            fontSize = 14.sp
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        // Feature badges
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FeatureBadge("🤖", "Local AI")
+            FeatureBadge("🔒", "Privacy")
+            FeatureBadge("⚡", "Shizuku")
+            FeatureBadge("🌐", "Web")
+        }
+
+        Spacer(Modifier.height(36.dp))
+
+        // Quick action cards
+        suggestions.chunked(2).forEachIndexed { rowIdx, row ->
             Row(
-                Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                row.forEach { suggestion ->
-                    OutlinedButton(
-                        onClick = { onTextChange(suggestion.substringAfter(" ").trim()) },
-                        border  = BorderStroke(1.dp, SurfaceLight.copy(0.3f)),
-                        shape   = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                        modifier = Modifier.weight(1f)
+                row.forEachIndexed { colIdx, suggestion ->
+                    val emoji = suggestion.substringBefore(" ")
+                    val text = suggestion.substringAfter(" ").trim()
+                    val colors = quickActionColors(rowIdx * 2 + colIdx)
+
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onTextChange(text) },
+                        colors = CardDefaults.cardColors(
+                            containerColor = colors.first.copy(alpha = 0.08f)
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, colors.first.copy(alpha = 0.15f))
                     ) {
-                        Text(
-                            suggestion,
-                            color = TerminalWhite.copy(0.6f),
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(emoji, fontSize = 18.sp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text,
+                                color = TerminalWhite.copy(alpha = 0.7f),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
                 if (row.size < 2) Spacer(Modifier.weight(1f))
             }
+        }
+    }
+}
+
+private fun quickActionColors(index: Int): Pair<Color, Color> = when (index) {
+    0 -> TerminalGreen to GradientTermEnd
+    1 -> Accent to VaultPurple
+    2 -> TerminalYellow to GradientVaultEnd
+    3 -> VaultPurple to VaultCyan
+    4 -> VaultCyan to Accent
+    5 -> TerminalBlue to GradientTermStart
+    else -> Accent to VaultPurple
+}
+
+@Composable
+private fun FeatureBadge(emoji: String, label: String) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = SurfaceCard
+    ) {
+        Row(
+            Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(emoji, fontSize = 11.sp)
+            Text(
+                label,
+                color = TerminalWhite.copy(alpha = 0.5f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }

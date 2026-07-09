@@ -1,7 +1,11 @@
 package com.interndra.ui.screens
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -10,30 +14,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.shape.CircleShape
 import kotlinx.coroutines.launch
 import com.interndra.data.model.Workspace
+import com.interndra.ui.components.AppShell
+import com.interndra.ui.components.AppTab
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 
-// Tab indices
-private const val TAB_CHAT      = 0
-private const val TAB_TERMINAL  = 1
-private const val TAB_MEMORY    = 2
-private const val TAB_SECURITY  = 3
-private const val TAB_WORKSPACE = 4
-private const val TAB_KNOWLEDGE = 5
-private const val TAB_RESEARCH  = 6
-private const val TAB_TIMELINE  = 7
-private const val TAB_SETTINGS  = 8
-
 @Composable
 fun MainScreen(viewModel: HybridAgentViewModel) {
-    var selectedTab = remember { mutableStateOf(TAB_CHAT) }
+    var selectedAppTab by remember { mutableStateOf(AppTab.CHAT) }
+    // Track sub-tab for DASHBOARDS tab
+    var selectedDashboard by remember { mutableStateOf(0) } // 0=Memory, 1=Vault, 2=Research, 3=Timeline, 4=Security, 5=Workspace
+
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope       = rememberCoroutineScope()
     val uiState     by viewModel.uiState.collectAsState()
@@ -41,8 +40,8 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
     val memCount    by remember { derivedStateOf { uiState.memoryCount } }
     val vaultCount  by remember { derivedStateOf { uiState.knowledgeCount } }
 
-    fun navigateTo(tab: Int) {
-        selectedTab.value = tab
+    fun navigateToTab(tab: AppTab) {
+        selectedAppTab = tab
         scope.launch { drawerState.close() }
     }
 
@@ -50,104 +49,196 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet(
-                drawerContainerColor = CardSurface,
+                drawerContainerColor = Background900,
                 modifier = Modifier.width(300.dp)
             ) {
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(32.dp))
 
-                // ── App title + emergency lock badge ──────────────────────
+                // ── App Branding ──────────────────────────────────────────
                 Row(
                     Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        "INTERNDRA",
-                        color      = TerminalWhite,
-                        fontSize   = 18.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        modifier   = Modifier.weight(1f)
-                    )
+                    Box(
+                        Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(Accent, VaultPurple)
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Chat,
+                            null,
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            "INTERNDRA",
+                            color = TerminalWhite,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            "AI OS v2.1",
+                            color = TerminalWhite.copy(alpha = 0.4f),
+                            fontSize = 10.sp
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
                     if (uiState.emergencyLockActive) {
-                        Surface(shape = RoundedCornerShape(50), color = TerminalRed.copy(alpha = 0.2f)) {
-                            Text("🔒 LOCKED", color = TerminalRed, fontSize = 10.sp,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
-                        }
+                        Box(
+                            Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(TerminalRed)
+                        )
                     }
                 }
 
-                // AI OS mode indicator
+                Spacer(Modifier.height(8.dp))
+
+                // ── Privacy Mode indicator ────────────────────────────────
                 Surface(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
-                    shape    = RoundedCornerShape(8.dp),
-                    color    = SurfaceLight
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    color = SurfaceCard
                 ) {
-                    Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(uiState.privacyMode.emoji, fontSize = 14.sp)
-                        Spacer(Modifier.width(6.dp))
+                    Row(
+                        Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        uiState.emergencyLockActive -> TerminalRed
+                                        uiState.localModelReady -> TerminalGreen
+                                        else -> TerminalYellow
+                                    }
+                                )
+                        )
+                        Spacer(Modifier.width(8.dp))
                         Column {
-                            Text(uiState.privacyMode.label, color = TerminalWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             Text(
-                                if (uiState.localModelReady) "Local AI ready" else "Cloud only",
-                                color = if (uiState.localModelReady) TerminalGreen else TerminalYellow,
+                                uiState.privacyMode.label,
+                                color = TerminalWhite,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                if (uiState.localModelReady) "Local AI ready"
+                                else if (uiState.emergencyLockActive) "Locked"
+                                else "Cloud only",
+                                color = TerminalWhite.copy(alpha = 0.5f),
                                 fontSize = 10.sp
                             )
                         }
                     }
                 }
 
-                // ── Workspace section ─────────────────────────────────────
+                Spacer(Modifier.height(8.dp))
+
+                // ── Quick-access navigation ───────────────────────────────
+                DrawerSectionLabel("QUICK ACCESS")
+
+                DrawerItem(
+                    icon = Icons.AutoMirrored.Filled.Chat,
+                    label = "Chat",
+                    selected = selectedAppTab == AppTab.CHAT
+                ) { navigateToTab(AppTab.CHAT) }
+
+                DrawerItem(
+                    icon = Icons.Default.Terminal,
+                    label = "Terminal",
+                    selected = selectedAppTab == AppTab.TERMINAL
+                ) { navigateToTab(AppTab.TERMINAL) }
+
+                // ── Dashboards sub-navigation ──────────────────────────
+                DrawerSectionLabel("DASHBOARDS")
+
+                DrawerItem(
+                    icon = Icons.Default.Psychology,
+                    label = "Memory ($memCount)",
+                    selected = selectedAppTab == AppTab.DASHBOARDS && selectedDashboard == 0
+                ) { selectedDashboard = 0; navigateToTab(AppTab.DASHBOARDS) }
+
+                DrawerItem(
+                    icon = Icons.Default.Book,
+                    label = "Knowledge Vault ($vaultCount)",
+                    selected = selectedAppTab == AppTab.DASHBOARDS && selectedDashboard == 1
+                ) { selectedDashboard = 1; navigateToTab(AppTab.DASHBOARDS) }
+
+                DrawerItem(
+                    icon = Icons.Default.Science,
+                    label = "Research",
+                    selected = selectedAppTab == AppTab.DASHBOARDS && selectedDashboard == 2
+                ) { selectedDashboard = 2; navigateToTab(AppTab.DASHBOARDS) }
+
+                DrawerItem(
+                    icon = Icons.Default.Timeline,
+                    label = "Timeline",
+                    selected = selectedAppTab == AppTab.DASHBOARDS && selectedDashboard == 3
+                ) { selectedDashboard = 3; navigateToTab(AppTab.DASHBOARDS) }
+
+                // ── System ────────────────────────────────────────────────
+                DrawerSectionLabel("SYSTEM")
+
+                DrawerItem(
+                    icon = Icons.Default.Security,
+                    label = "Security & Privacy",
+                    selected = selectedAppTab == AppTab.DASHBOARDS && selectedDashboard == 4
+                ) { selectedDashboard = 4; navigateToTab(AppTab.DASHBOARDS) }
+
+                DrawerItem(
+                    icon = Icons.Default.Workspaces,
+                    label = "Workspaces",
+                    selected = selectedAppTab == AppTab.DASHBOARDS && selectedDashboard == 5
+                ) { selectedDashboard = 5; navigateToTab(AppTab.DASHBOARDS) }
+
+                // ── Workspace list ────────────────────────────────────────
                 if (workspaces.isNotEmpty()) {
-                    HorizontalDivider(color = SurfaceLight, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-                    SectionHeader("WORKSPACES")
+                    Spacer(Modifier.height(8.dp))
+                    DrawerSectionLabel("WORKSPACES")
                     workspaces.take(5).forEach { ws ->
-                        DrawerWorkspaceItem(ws, uiState.activeWorkspaceId == ws.id) {
+                        DrawerWorkspaceItem(
+                            workspace = ws,
+                            selected = uiState.activeWorkspaceId == ws.id
+                        ) {
                             viewModel.switchWorkspace(ws.id, ws.name)
-                            selectedTab.value = TAB_CHAT
-                            scope.launch { drawerState.close() }
+                            navigateToTab(AppTab.CHAT)
                         }
+                    }
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { selectedDashboard = 5; navigateToTab(AppTab.DASHBOARDS) }
+                            .padding(vertical = 6.dp)
+                    ) {
+                        Text(
+                            "+ Manage Workspaces",
+                            color = Accent,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
                 }
 
-                Button(
-                    onClick = { navigateTo(TAB_WORKSPACE) },
-                    colors  = ButtonDefaults.buttonColors(containerColor = SurfaceLight),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, tint = Accent, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Manage Workspaces", color = TerminalWhite, fontSize = 13.sp)
-                }
+                Spacer(Modifier.weight(1f))
 
-                // ── Core navigation ───────────────────────────────────────
-                HorizontalDivider(color = SurfaceLight, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-                SectionHeader("CORE")
-
-                DrawerItem(icon = Icons.AutoMirrored.Filled.Chat, label = "Chat", selected = selectedTab.value == TAB_CHAT)
-                    { navigateTo(TAB_CHAT) }
-                DrawerItem(icon = Icons.Default.Terminal, label = "Terminal Logs", selected = selectedTab.value == TAB_TERMINAL)
-                    { navigateTo(TAB_TERMINAL) }
-                DrawerItem(icon = Icons.Default.Psychology, label = "Memory ($memCount)", selected = selectedTab.value == TAB_MEMORY)
-                    { navigateTo(TAB_MEMORY) }
-
-                // ── Knowledge OS section ──────────────────────────────────
-                HorizontalDivider(color = SurfaceLight, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-                SectionHeader("KNOWLEDGE OS")
-
-                DrawerItem(icon = Icons.Default.Book, label = "Knowledge Vault ($vaultCount)", selected = selectedTab.value == TAB_KNOWLEDGE)
-                    { navigateTo(TAB_KNOWLEDGE) }
-                DrawerItem(icon = Icons.Default.Science, label = "Research Dashboard", selected = selectedTab.value == TAB_RESEARCH)
-                    { navigateTo(TAB_RESEARCH) }
-                DrawerItem(icon = Icons.Default.Timeline, label = "Timeline", selected = selectedTab.value == TAB_TIMELINE)
-                    { navigateTo(TAB_TIMELINE) }
-
-                // ── System section ────────────────────────────────────────
-                HorizontalDivider(color = SurfaceLight, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-                SectionHeader("SYSTEM")
-
-                DrawerItem(icon = Icons.Default.Security, label = "Security & Privacy", selected = selectedTab.value == TAB_SECURITY)
-                    { navigateTo(TAB_SECURITY) }
-
-                // ── Shizuku status (elevated shell) ─────────────────────────
+                // ── Shizuku status ────────────────────────────────────────
                 val shizukuAuth by viewModel.shizukuAuthorized.collectAsState()
                 val shizukuAvail by viewModel.shizukuAvailable.collectAsState()
                 val shizukuPriv = viewModel.shizukuPrivilegeLevel
@@ -161,41 +252,278 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
                     onRefresh = { viewModel.refreshShizukuStatus() }
                 )
 
-                Spacer(Modifier.weight(1f))
-                HorizontalDivider(color = SurfaceLight, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-
-                DrawerItem(icon = Icons.Default.Settings, label = "Settings", selected = selectedTab.value == TAB_SETTINGS)
-                    { navigateTo(TAB_SETTINGS) }
-
                 Spacer(Modifier.height(12.dp))
+
+                // ── Settings footer ────────────────────────────────────────
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = SurfaceCard,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .clickable { navigateToTab(AppTab.SETTINGS) }
+                ) {
+                    Row(
+                        Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Settings,
+                            null,
+                            tint = TerminalWhite.copy(alpha = 0.6f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            "Settings",
+                            color = TerminalWhite.copy(alpha = 0.6f),
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
             }
         }
     ) {
-        Surface(modifier = Modifier.fillMaxSize(), color = ChatBg) {
-            Crossfade(targetState = selectedTab.value, label = "Tab") { tab ->
-                when (tab) {
-                    TAB_CHAT      -> HybridChatScreen(
-                        vm                   = viewModel,
-                        onOpenDrawer         = { scope.launch { drawerState.open() } },
-                        onNavigateToTerminal = { selectedTab.value = TAB_TERMINAL }
-                    )
-                    TAB_TERMINAL  -> TerminalScreen(vm = viewModel, onOpenDrawer = { scope.launch { drawerState.open() } })
-                    TAB_MEMORY    -> MemoryDashboardScreen(vm = viewModel, onOpenDrawer = { scope.launch { drawerState.open() } })
-                    TAB_SECURITY  -> SecurityDashboardScreen(vm = viewModel, onOpenDrawer = { scope.launch { drawerState.open() } })
-                    TAB_WORKSPACE -> WorkspaceScreen(
-                        vm = viewModel,
-                        onOpenDrawer = { scope.launch { drawerState.open() } },
-                        onWorkspaceSelected = { ws ->
-                            viewModel.switchWorkspace(ws.id, ws.name)
-                            selectedTab.value = TAB_CHAT
+        AppShell(
+            vm = viewModel,
+            selectedTab = selectedAppTab,
+            onTabSelected = { tab ->
+                if (tab == AppTab.DASHBOARDS) {
+                    // Keep current dashboard sub-tab
+                }
+                selectedAppTab = tab
+            },
+            onOpenDrawer = { scope.launch { drawerState.open() } },
+            onOpenTerminal = { selectedAppTab = AppTab.TERMINAL }
+        ) { paddingValues ->
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues),
+                color = Background800
+            ) {
+                Crossfade(
+                    targetState = selectedAppTab,
+                    label = "Tab"
+                ) { tab ->
+                    when (tab) {
+                        AppTab.CHAT -> HybridChatScreen(
+                            vm = viewModel,
+                            onOpenDrawer = { scope.launch { drawerState.open() } },
+                            onNavigateToTerminal = { selectedAppTab = AppTab.TERMINAL }
+                        )
+                        AppTab.TERMINAL -> TerminalScreen(
+                            vm = viewModel,
+                            onOpenDrawer = { scope.launch { drawerState.open() } }
+                        )
+                        AppTab.VAULT -> KnowledgeVaultScreen(
+                            vm = viewModel,
+                            onOpenDrawer = { scope.launch { drawerState.open() } }
+                        )
+                        AppTab.DASHBOARDS -> when (selectedDashboard) {
+                            0 -> MemoryDashboardScreen(
+                                vm = viewModel,
+                                onOpenDrawer = { scope.launch { drawerState.open() } }
+                            )
+                            1 -> KnowledgeVaultScreen(
+                                vm = viewModel,
+                                onOpenDrawer = { scope.launch { drawerState.open() } }
+                            )
+                            2 -> ResearchDashboardScreen(
+                                vm = viewModel,
+                                onOpenDrawer = { scope.launch { drawerState.open() } }
+                            )
+                            3 -> TimelineScreen(
+                                vm = viewModel,
+                                onOpenDrawer = { scope.launch { drawerState.open() } }
+                            )
+                            4 -> SecurityDashboardScreen(
+                                vm = viewModel,
+                                onOpenDrawer = { scope.launch { drawerState.open() } }
+                            )
+                            5 -> WorkspaceScreen(
+                                vm = viewModel,
+                                onOpenDrawer = { scope.launch { drawerState.open() } },
+                                onWorkspaceSelected = { ws ->
+                                    viewModel.switchWorkspace(ws.id, ws.name)
+                                    selectedAppTab = AppTab.CHAT
+                                }
+                            )
+                            else -> MemoryDashboardScreen(
+                                vm = viewModel,
+                                onOpenDrawer = { scope.launch { drawerState.open() } }
+                            )
                         }
-                    )
-                    TAB_KNOWLEDGE -> KnowledgeVaultScreen(vm = viewModel, onOpenDrawer = { scope.launch { drawerState.open() } })
-                    TAB_RESEARCH  -> ResearchDashboardScreen(vm = viewModel, onOpenDrawer = { scope.launch { drawerState.open() } })
-                    TAB_TIMELINE  -> TimelineScreen(vm = viewModel, onOpenDrawer = { scope.launch { drawerState.open() } })
-                    TAB_SETTINGS  -> SettingsScreen(vm = viewModel, onOpenDrawer = { scope.launch { drawerState.open() } })
+                        AppTab.SETTINGS -> SettingsScreen(
+                            vm = viewModel,
+                            onOpenDrawer = { scope.launch { drawerState.open() } }
+                        )
+                    }
                 }
             }
+        }
+    }
+}
+
+// ── Shared drawer composables ──────────────────────────────────────────────
+
+@Composable
+private fun DrawerSectionLabel(text: String) {
+    Text(
+        text,
+        color = TerminalWhite.copy(alpha = 0.3f),
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.sp,
+        modifier = Modifier.padding(
+            start = 24.dp,
+            top = 12.dp,
+            bottom = 4.dp
+        )
+    )
+}
+
+@Composable
+private fun DrawerItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        color = if (selected) Accent.copy(alpha = 0.12f) else Color.Transparent,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 1.dp)
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                icon,
+                null,
+                tint = if (selected) AccentGlow else TerminalWhite.copy(alpha = 0.55f),
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                label,
+                color = if (selected) TerminalWhite else TerminalWhite.copy(alpha = 0.7f),
+                fontSize = 14.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+            )
+        }
+    }
+}
+
+// ── Shizuku Status Row ───────────────────────────────────────────────────
+@Composable
+private fun ShizukuStatusRow(
+    isAvailable: Boolean,
+    isAuthorized: Boolean,
+    privilegeLevel: String,
+    backendDesc: String,
+    onRequestPermission: () -> Unit,
+    onRefresh: () -> Unit
+) {
+    val statusColor = when {
+        !isAvailable -> TerminalWhite.copy(0.3f)
+        isAuthorized -> TerminalGreen
+        else -> TerminalYellow
+    }
+    val statusText = when {
+        !isAvailable -> "Shizuku not running"
+        isAuthorized -> "Shizuku Active"
+        else -> "Shizuku — Tap to authorize"
+    }
+    val isClickable = isAvailable && !isAuthorized
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .then(if (isClickable) Modifier.clickable { onRequestPermission() } else Modifier),
+        shape = RoundedCornerShape(10.dp),
+        color = if (isAuthorized) TerminalGreen.copy(0.08f) else Color.Transparent
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(statusColor, CircleShape)
+            )
+            Spacer(Modifier.width(10.dp))
+
+            Column(Modifier.weight(1f)) {
+                Text(
+                    statusText,
+                    color = TerminalWhite,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                if (isAuthorized) {
+                    Text(privilegeLevel, color = TerminalGreen, fontSize = 10.sp)
+                }
+                Text(
+                    "Backend: $backendDesc",
+                    color = TerminalWhite.copy(0.4f),
+                    fontSize = 9.sp
+                )
+            }
+
+            if (isClickable) {
+                Icon(
+                    Icons.Default.PowerSettingsNew,
+                    "Authorize",
+                    tint = TerminalYellow,
+                    modifier = Modifier.size(18.dp)
+                )
+            } else if (isAuthorized) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    "Connected",
+                    tint = TerminalGreen,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DrawerWorkspaceItem(
+    workspace: Workspace,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        color = if (selected) Accent.copy(alpha = 0.1f) else Color.Transparent,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 1.dp)
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(workspace.emoji, fontSize = 16.sp)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                workspace.name,
+                color = if (selected) TerminalWhite else TerminalWhite.copy(alpha = 0.7f),
+                fontSize = 13.sp,
+                maxLines = 1
+            )
         }
     }
 }

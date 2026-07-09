@@ -67,19 +67,19 @@ fun KnowledgeVaultScreen(
                         Icon(Icons.Default.Add, contentDescription = "Add", tint = VaultGold)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardSurface)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceCard)
             )
         },
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { showAddDialog = true },
                 containerColor = VaultGold,
-                contentColor = ChatBg
+                contentColor = Background800
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Add knowledge")
             }
         },
-        containerColor = ChatBg
+        containerColor = Background800
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
 
@@ -120,7 +120,7 @@ fun KnowledgeVaultScreen(
                         label = { Text("All") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = VaultGold,
-                            selectedLabelColor     = ChatBg
+                            selectedLabelColor     = Background800
                         )
                     )
                 }
@@ -131,7 +131,7 @@ fun KnowledgeVaultScreen(
                         label    = { Text("${type.emoji} ${type.label}") },
                         colors   = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = VaultGold,
-                            selectedLabelColor     = ChatBg,
+                            selectedLabelColor     = Background800,
                             labelColor             = TerminalWhite
                         )
                     )
@@ -194,7 +194,7 @@ private fun KnowledgeCard(
 
     Card(
         modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
-        colors   = CardDefaults.cardColors(containerColor = CardSurface),
+        colors   = CardDefaults.cardColors(containerColor = SurfaceCard),
         shape    = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
@@ -274,7 +274,7 @@ private fun AddKnowledgeDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor   = CardSurface,
+        containerColor   = SurfaceCard,
         title = { Text("Add to Knowledge Vault", color = TerminalWhite, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -299,7 +299,7 @@ private fun AddKnowledgeDialog(
                     DropdownMenu(
                         expanded  = typeDropdownExpanded,
                         onDismissRequest = { typeDropdownExpanded = false },
-                        containerColor = CardSurface
+                        containerColor = SurfaceCard
                     ) {
                         KnowledgeType.entries.forEach { t ->
                             DropdownMenuItem(

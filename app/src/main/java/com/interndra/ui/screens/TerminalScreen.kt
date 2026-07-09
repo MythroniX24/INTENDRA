@@ -630,49 +630,6 @@ private fun AnsiTerminalLine(
     )
 }
 
-// ── Background Job Row ──────────────────────────────────────────────────
-@Composable
-private fun BackgroundJobRow(
-    job: TerminalAgent.SessionJob,
-    onCancel: () -> Unit
-) {
-    val duration = remember(job.startedAt) {
-        val secs = (System.currentTimeMillis() - job.startedAt) / 1000
-        when {
-            secs < 60 -> "${secs}s"
-            secs < 3600 -> "${secs / 60}m ${secs % 60}s"
-            else -> "${secs / 3600}h ${(secs % 3600) / 60}m"
-        }
-    }
-
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 1.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            Modifier.size(6.dp).clip(CircleShape)
-                .background(when (job.status) {
-                    TerminalAgent.BackgroundJobStatus.RUNNING -> TerminalGreen
-                    TerminalAgent.BackgroundJobStatus.COMPLETED -> Accent
-                    TerminalAgent.BackgroundJobStatus.CANCELLED -> TerminalYellow
-                    TerminalAgent.BackgroundJobStatus.FAILED -> TerminalRed
-                })
-        )
-        Spacer(Modifier.width(6.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text("#${job.id}: ${job.command.take(50)}",
-                color = TerminalWhite.copy(alpha = 0.7f), fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("⏱ $duration · ${job.outputLines.size} lines",
-                color = TerminalWhite.copy(alpha = 0.35f), fontSize = 8.sp,
-                fontFamily = FontFamily.Monospace)
-        }
-        IconButton(onClick = onCancel, modifier = Modifier.size(20.dp)) {
-            Icon(Icons.Default.Close, "Cancel", tint = TerminalRed.copy(alpha = 0.7f), modifier = Modifier.size(12.dp))
-        }
-    }
-}
-
 // ── Terminal Input Bar ──────────────────────────────────────────────────────
 @Composable
 private fun TerminalInputBar(

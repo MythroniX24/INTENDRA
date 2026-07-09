@@ -55,9 +55,9 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     var geminiTestResult by remember { mutableStateOf<String?>(null) }
     var isTesting by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize().background(ChatBg)) {
+    Column(Modifier.fillMaxSize().background(Background800)) {
 
-        Surface(color = CardSurface, tonalElevation = 2.dp) {
+        Surface(color = SurfaceCard, tonalElevation = 2.dp) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onOpenDrawer) {
@@ -74,7 +74,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
         ) {
 
             // ── AI Provider ────────────────────────────────────────────────
-            Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+            Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                 shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("AI Provider", color = Accent, fontSize = 16.sp,
@@ -107,7 +107,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
 
             // ── Cloud AI Model (OpenRouter) ────────────────────────────────
             if (provider == Constants.AiProvider.OPENROUTER) {
-                Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+                Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                     shape = RoundedCornerShape(16.dp)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("OpenRouter AI Model", color = Accent, fontSize = 16.sp,
@@ -129,7 +129,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                             )
                             Box(Modifier.matchParentSize().clickable { expanded = true })
                             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false },
-                                modifier = Modifier.background(CardSurface)) {
+                                modifier = Modifier.background(SurfaceCard)) {
                                 Constants.FREE_MODELS.forEach { (label, modelValue) ->
                                     DropdownMenuItem(
                                         text    = { Text(label, color = TerminalWhite, fontSize = 13.sp) },
@@ -142,7 +142,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                 }
 
                 // ── OpenRouter API Key ────────────────────────────────────────
-                Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+                Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                     shape = RoundedCornerShape(16.dp)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("OpenRouter API Key", color = Accent, fontSize = 16.sp,
@@ -174,7 +174,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
 
             // ── Gemini Section ────────────────────────────────────────────
             if (provider == Constants.AiProvider.GEMINI) {
-                Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+                Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                     shape = RoundedCornerShape(16.dp)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("Google Gemini Model 🟢", color = Accent, fontSize = 16.sp,
@@ -196,7 +196,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                             )
                             Box(Modifier.matchParentSize().clickable { geminiExpanded = true })
                             DropdownMenu(expanded = geminiExpanded, onDismissRequest = { geminiExpanded = false },
-                                modifier = Modifier.background(CardSurface)) {
+                                modifier = Modifier.background(SurfaceCard)) {
                                 Constants.GEMINI_MODELS.forEach { (label, modelValue) ->
                                     DropdownMenuItem(
                                         text    = { Text(label, color = TerminalWhite, fontSize = 13.sp) },
@@ -209,7 +209,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                 }
 
                 // ── Gemini API Key ────────────────────────────────────────────
-                Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+                Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                     shape = RoundedCornerShape(16.dp)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("Google Gemini API Key", color = Accent, fontSize = 16.sp,
@@ -291,7 +291,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
             }
 
             // ── JAILBREAK SECTION ──────────────────────────────────────────
-            Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+            Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                 shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -337,7 +337,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                         Spacer(Modifier.height(4.dp))
                         OutlinedCard(
                             colors = CardDefaults.outlinedCardColors(
-                                containerColor = ChatBg,
+                                containerColor = Background800,
                                 contentColor = TerminalWhite.copy(0.7f)
                             ),
                             border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceLight),
@@ -391,7 +391,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
             }
 
             // ── Privacy Mode ───────────────────────────────────────────────
-            Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+            Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                 shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Privacy Mode", color = Accent, fontSize = 16.sp,
@@ -428,7 +428,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
             }
 
             // ── Local AI Model ─────────────────────────────────────────────
-            Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+            Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                 shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Local AI Model", color = Accent, fontSize = 16.sp,
@@ -485,7 +485,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
             }
 
             // ── TTS (Text-to-Speech) ────────────────────────────────────────
-            Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+            Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                 shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -506,7 +506,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
             }
 
             // ── System & Actions ───────────────────────────────────────────
-            Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+            Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                 shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("System", color = Accent, fontSize = 16.sp,
@@ -565,7 +565,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
             }
 
             // ── About ──────────────────────────────────────────────────────
-            Card(colors = CardDefaults.cardColors(containerColor = CardSurface),
+            Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                 shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("About INTERNDRA", color = Accent, fontSize = 16.sp,

@@ -58,10 +58,10 @@ fun ResearchDashboardScreen(
                         Icon(Icons.Default.Menu, contentDescription = "Menu", tint = TerminalWhite)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardSurface)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceCard)
             )
         },
-        containerColor = ChatBg
+        containerColor = Background800
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
@@ -86,7 +86,7 @@ fun ResearchDashboardScreen(
             // ── RAG search ────────────────────────────────────────────
             item {
                 Card(
-                    colors    = CardDefaults.cardColors(containerColor = CardSurface),
+                    colors    = CardDefaults.cardColors(containerColor = SurfaceCard),
                     shape     = RoundedCornerShape(16.dp)
                 ) {
                     Column(Modifier.padding(16.dp)) {
@@ -153,7 +153,7 @@ fun ResearchDashboardScreen(
             if (topConcepts.isNotEmpty()) {
                 item {
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = CardSurface),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceCard),
                         shape  = RoundedCornerShape(16.dp)
                     ) {
                         Column(Modifier.padding(16.dp)) {
@@ -194,7 +194,7 @@ fun ResearchDashboardScreen(
 
 @Composable
 private fun StatCard(emoji: String, value: String, label: String, color: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier) {
-    Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = CardSurface), shape = RoundedCornerShape(12.dp)) {
+    Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = SurfaceCard), shape = RoundedCornerShape(12.dp)) {
         Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(emoji, fontSize = 20.sp)
             Spacer(Modifier.height(4.dp))
@@ -208,7 +208,7 @@ private fun StatCard(emoji: String, value: String, label: String, color: android
 private fun TypeBreakdownCard(knowledge: List<KnowledgeEntry>) {
     val counts = KnowledgeType.entries.associateWith { type -> knowledge.count { it.type == type } }
         .filter { it.value > 0 }
-    Card(colors = CardDefaults.cardColors(containerColor = CardSurface), shape = RoundedCornerShape(12.dp)) {
+    Card(colors = CardDefaults.cardColors(containerColor = SurfaceCard), shape = RoundedCornerShape(12.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text("📊 By Type", color = TerminalWhite, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
@@ -226,7 +226,7 @@ private fun TypeBreakdownCard(knowledge: List<KnowledgeEntry>) {
 private fun CompactKnowledgeCard(entry: KnowledgeEntry) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors   = CardDefaults.cardColors(containerColor = CardSurface),
+        colors   = CardDefaults.cardColors(containerColor = SurfaceCard),
         shape    = RoundedCornerShape(10.dp)
     ) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
