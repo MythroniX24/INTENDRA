@@ -129,7 +129,7 @@ fun SkeletonStatCard(modifier: Modifier = Modifier) {
  * Slides content in from the right/left and fades.
  */
 fun tabTransition(targetIndex: Int, currentIndex: Int): ContentTransform {
-    val offset = if (targetIndex > currentIndex) 150f else -150f
+    val offset = if (targetIndex > currentIndex) 150 else -150
     return slideInHorizontally(initialOffsetX = { offset }) + fadeIn(animationSpec = tween(250)) togetherWith
             slideOutHorizontally(targetOffsetX = { -offset }) + fadeOut(animationSpec = tween(200))
 }

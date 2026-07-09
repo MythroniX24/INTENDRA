@@ -480,11 +480,11 @@ class AiSystemHealthMonitor(private val context: Context) {
 
         return SystemReport(
             cacheHitRate = cacheHitRate,
-            totalQueries = totalQueries,
-            cacheHits = cacheHits,
-            cacheMisses = cacheMisses,
-            totalRetries = totalRetries,
-            successfulRetries = successfulRetries,
+            totalQueries = _totalQueries.get(),
+            cacheHits = _cacheHits.get(),
+            cacheMisses = _cacheMisses.get(),
+            totalRetries = _totalRetries.get(),
+            successfulRetries = _successfulRetries.get(),
             providerReports = providerReports,
             recommendedProvider = bestProvider,
             recommendedAction = action
@@ -534,9 +534,8 @@ class AiSystemHealthMonitor(private val context: Context) {
         sb.appendLine("| Metric | Value |")
         sb.appendLine("|--------|------:|")
         sb.appendLine("| Hit Rate | ${(cacheHitRate * 100).toInt()}% |")
-        sb.appendLine("| Cache Size | ${responseCache.size} / $MAX_CACHE_ENTRIES |")
-        sb.appendLine("| Total Queries | $totalQueries |")
-        sb.appendLine("| Retries | $totalRetries |")
+        sb.appendLine("| Cache Size | ${responseCache.size} / $MAX_CACHE_ENTRIES |")            sb.appendLine("| Total Queries | ${_totalQueries.get()} |")
+            sb.appendLine("| Retries | ${_totalRetries.get()} |")
         sb.appendLine()
         sb.appendLine("### Provider Stats")
         sb.appendLine("| Provider | Success Rate | Window Rate | Avg Latency | Requests | Circuit |")

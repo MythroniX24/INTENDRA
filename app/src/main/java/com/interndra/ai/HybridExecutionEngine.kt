@@ -118,8 +118,8 @@ class HybridExecutionEngine(
 
     private suspend fun executeShell(index: Int, cmd: ShellCommand): ExecutionResult =
         try {
-            val output = shell.runAsync(cmd.command)
-            ExecutionResult(stepIndex = index, success = true, output = output)
+            val shellResult = shell.runAsync(cmd.command)
+            ExecutionResult(stepIndex = index, success = shellResult.isSuccess, output = shellResult.stdout)
         } catch (e: Exception) {
             Log.e(TAG, "Shell error on step $index: ${e.message}")
             ExecutionResult(stepIndex = index, success = false, output = "", error = e.message ?: "Shell error")

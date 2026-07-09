@@ -210,12 +210,12 @@ class ShizukuManager(private val context: Context) {
 
         } catch (e: SecurityException) {
             isPermissionGranted = false
-            ShellExecutionResult("", "Permission denied: ${e.message}", -1, false,
+            return ShellExecutionResult("", "Permission denied: ${e.message}", -1, false,
                 backend = ExecutionBackend.SMART_SHELL,
                 durationMs = System.currentTimeMillis() - startMs)
         } catch (e: Exception) {
             Log.e(TAG, "Shizuku exec failed: ${e.message}")
-            ShellExecutionResult("", "Error: ${e.message}", -1, false,
+            return ShellExecutionResult("", "Error: ${e.message}", -1, false,
                 backend = ExecutionBackend.SMART_SHELL,
                 durationMs = System.currentTimeMillis() - startMs)
         }
@@ -277,7 +277,7 @@ class ShizukuManager(private val context: Context) {
                 durationMs = System.currentTimeMillis() - startMs)
         } catch (e: Exception) {
             Log.e(TAG, "Streaming error: ${e.message}")
-            ShellExecutionResult("", "Error: ${e.message}", -1, false,
+            return ShellExecutionResult("", "Error: ${e.message}", -1, false,
                 backend = ExecutionBackend.SMART_SHELL,
                 durationMs = System.currentTimeMillis() - startMs)
         }

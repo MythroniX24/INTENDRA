@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
 
         // ── Crash Recovery Screen ──────────────────────────────────────────
     @Composable
-    private fun CrashRecoveryScreen(crashInfo: String) {
+    fun CrashRecoveryScreen(crashInfo: String) {
         Box(
             modifier = Modifier.fillMaxSize().padding(32.dp),
             contentAlignment = Alignment.Center

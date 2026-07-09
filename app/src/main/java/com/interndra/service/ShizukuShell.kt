@@ -103,7 +103,7 @@ class ShizukuShell(private val context: Context) {
             val uid = shizukuManager.testConnection()
             if (uid != null) return@withContext uid
         }
-        val result = smartShell.run("echo \$USER && id -u")
+        val result: ShellExecutionResult = smartShell.run("echo \$USER && id -u")
         result.stdout.lines().firstOrNull { it.all { c -> c.isDigit() } }?.toIntOrNull() ?: Process.myUid()
     }
 }
