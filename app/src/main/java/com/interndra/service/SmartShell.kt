@@ -20,13 +20,14 @@ import java.util.concurrent.atomic.AtomicReference
  *  4. Output capped at TerminalConfig.MAX_OUTPUT_BYTES to prevent OOM.
  *  5. Process always destroyed in finally to prevent zombies.
  *  6. Default timeout from TerminalConfig.DEFAULT_TIMEOUT_MS.
+ *  7. **[NEW]** Background process spawning via [spawnBackground] — returns
+ *     a [BackgroundProcess] handle that can be cancelled and polled for output.
  */
 class SmartShell(private val context: Context) {
 
     companion object {
         private const val TAG = "SmartShell"
 
-        // Precompiled path-normalization patterns
         private val RE_DOWNLOADS = Regex("~/Downloads?\\b")
         private val RE_PICTURES   = Regex("~/Pictures\\b")
         private val RE_DCIM       = Regex("~/DCIM\\b")
@@ -40,6 +41,101 @@ class SmartShell(private val context: Context) {
             instance ?: synchronized(this) {
                 instance ?: SmartShell(context.applicationContext).also { instance = it }
             }
+    }
+
+    // ── Background Process Handle ───────────────────────────────────────
+
+    /**
+     * Represents a running background process spawned via [spawnBackground].
+     * Output is collected asynchronously via onOutput callbacks.
+     */
+    data class BackgroundProcess(
+        val process: java.lang.Process,
+        val command: String,
+        val startedAt: Long = System.currentTimeMillis(),
+        private val stdoutThread: Thread,
+        private val stderrThread: Thread
+    ) {
+        @Volatile var isRunning: Boolean = true
+            private set
+        @Volatile var exitCode: Int? = null
+            private set
+
+        /** Kill the background process. */
+        fun cancel() {
+            isRunning = false
+            runCatching { process.destroyForcibly() }
+        }
+
+        /** Wait for the process to complete (blocking) with timeout. */
+        fun waitFor(timeoutMs: Long): Boolean {
+            val done = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+            if (done) {
+                exitCode = process.exitValue()
+                isRunning = false
+                runCatching { stdoutThread.join(2000) }
+                runCatching { stderrThread.join(2000) }
+            }
+            return done
+        }
+
+        /** Check if the process has exited (non-blocking). */
+        fun hasExited(): Boolean {
+            if (!isRunning) return true
+            return try {
+                exitCode = process.exitValue()
+                isRunning = false
+                true
+            } catch (_: IllegalThreadStateException) {
+                false
+            }
+        }
+    }
+
+    // ── Background Process Spawning ─────────────────────────────────────
+
+    /**
+     * Spawn a command in the background WITHOUT waiting for it to finish.
+     * Returns a [BackgroundProcess] handle for cancellation and output polling.
+     *
+     * Use this for long-running commands (servers, watchers, daemons) where
+     * you don't want to block the terminal.
+     */
+    fun spawnBackground(
+        cmd: String,
+        onOutput: ((String) -> Unit)? = null
+    ): BackgroundProcess {
+        val normalizedCmd = normalizePaths(cmd)
+        Log.d(TAG, "Spawning background: ${normalizedCmd.take(100)}")
+
+        val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", normalizedCmd))
+
+        val stdoutThread = Thread {
+            try {
+                process.inputStream.bufferedReader().use { reader ->
+                    reader.lines().forEach { line ->
+                        val l = "$line\n"
+                        onOutput?.invoke(l)
+                    }
+                }
+            } catch (_: Exception) {}
+        }.apply { isDaemon = true; name = "bg-stdout" }
+
+        val stderrThread = Thread {
+            try {
+                process.errorStream.bufferedReader().use { reader ->
+                    reader.lines().forEach { line ->
+                        val l = "$line\n"
+                        onOutput?.invoke("\u001b[31m$l\u001b[0m")
+                    }
+                }
+            } catch (_: Exception) {}
+        }.apply { isDaemon = true; name = "bg-stderr" }
+
+        stdoutThread.start()
+        stderrThread.start()
+
+        return BackgroundProcess(process, normalizedCmd, stdoutThread = stdoutThread, stderrThread = stderrThread)
     }
 
     /**

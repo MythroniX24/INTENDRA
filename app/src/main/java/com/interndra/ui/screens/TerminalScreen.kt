@@ -202,12 +202,51 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
         }
 
         // ── Terminal Output Area ─────────────────────────────────────────
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .background(TerminalBg)
-        ) {
+        Column(Modifier.weight(1f).fillMaxWidth().background(TerminalBg)) {
+            // ── Background Jobs Panel ──────────────────────────────────
+            val bgJobs = remember(refreshTick) {
+                vm.terminalAgent.listJobsForSession(activeSession)
+                    .filter { it.isActive }
+            }
+            AnimatedVisibility(visible = bgJobs.isNotEmpty()) {
+                Surface(
+                    color = TerminalYellow.copy(alpha = 0.08f),
+                    border = BorderStroke(1.dp, TerminalYellow.copy(alpha = 0.2f)),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(bottom = 2.dp)) {
+                            Icon(Icons.Default.PlayArrow, null,
+                                tint = TerminalGreen, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Background Jobs (${bgJobs.size})",
+                                color = TerminalYellow, fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.weight(1f))
+                            TextButton(
+                                onClick = { vm.terminalAgent.cancelAllJobs(activeSession) },
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                modifier = Modifier.height(20.dp)
+                            ) {
+                                Text("Cancel All", color = TerminalRed, fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace)
+                            }
+                        }
+                        bgJobs.forEach { job ->
+                            BackgroundJobRow(
+                                job = job,
+                                onCancel = { vm.terminalAgent.cancelJob(job.id) }
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(2.dp))
+            }
+
+            // ── Terminal Output ────────────────────────────────────────
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().background(TerminalBg)) {
             if (terminalLines.isEmpty()) {
                 // Empty state
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -252,10 +291,54 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                         )
                     }
                 }
-            }
-        }
+            } // end if/else
+            } // end Box (terminal output)
+        } // end Column (output area + jobs panel)
 
-        // ── Terminal Input Bar ───────────────────────────────────────────
+        // ── Background Job Row ──────────────────────────────────────────────────
+@Composable
+private fun BackgroundJobRow(
+    job: TerminalAgent.SessionJob,
+    onCancel: () -> Unit
+) {
+    val duration = remember(job.startedAt) {
+        val secs = (System.currentTimeMillis() - job.startedAt) / 1000
+        when {
+            secs < 60 -> "${secs}s"
+            secs < 3600 -> "${secs / 60}m ${secs % 60}s"
+            else -> "${secs / 3600}h ${(secs % 3600) / 60}m"
+        }
+    }
+
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.size(6.dp).clip(CircleShape)
+                .background(when (job.status) {
+                    TerminalAgent.BackgroundJobStatus.RUNNING -> TerminalGreen
+                    TerminalAgent.BackgroundJobStatus.COMPLETED -> Accent
+                    TerminalAgent.BackgroundJobStatus.CANCELLED -> TerminalYellow
+                    TerminalAgent.BackgroundJobStatus.FAILED -> TerminalRed
+                })
+        )
+        Spacer(Modifier.width(6.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text("#${job.id}: ${job.command.take(50)}",
+                color = TerminalWhite.copy(alpha = 0.7f), fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("⏱ $duration · ${job.outputLines.size} lines",
+                color = TerminalWhite.copy(alpha = 0.35f), fontSize = 8.sp,
+                fontFamily = FontFamily.Monospace)
+        }
+        IconButton(onClick = onCancel, modifier = Modifier.size(20.dp)) {
+            Icon(Icons.Default.Close, "Cancel", tint = TerminalRed.copy(alpha = 0.7f), modifier = Modifier.size(12.dp))
+        }
+    }
+}
+
+// ── Terminal Input Bar ───────────────────────────────────────────
         TerminalInputBar(
             text = inputText,
             onTextChange = { inputText = it },
@@ -545,6 +628,49 @@ private fun AnsiTerminalLine(
         softWrap = true,
         modifier = Modifier.padding(vertical = 1.dp)
     )
+}
+
+// ── Background Job Row ──────────────────────────────────────────────────
+@Composable
+private fun BackgroundJobRow(
+    job: TerminalAgent.SessionJob,
+    onCancel: () -> Unit
+) {
+    val duration = remember(job.startedAt) {
+        val secs = (System.currentTimeMillis() - job.startedAt) / 1000
+        when {
+            secs < 60 -> "${secs}s"
+            secs < 3600 -> "${secs / 60}m ${secs % 60}s"
+            else -> "${secs / 3600}h ${(secs % 3600) / 60}m"
+        }
+    }
+
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.size(6.dp).clip(CircleShape)
+                .background(when (job.status) {
+                    TerminalAgent.BackgroundJobStatus.RUNNING -> TerminalGreen
+                    TerminalAgent.BackgroundJobStatus.COMPLETED -> Accent
+                    TerminalAgent.BackgroundJobStatus.CANCELLED -> TerminalYellow
+                    TerminalAgent.BackgroundJobStatus.FAILED -> TerminalRed
+                })
+        )
+        Spacer(Modifier.width(6.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text("#${job.id}: ${job.command.take(50)}",
+                color = TerminalWhite.copy(alpha = 0.7f), fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("⏱ $duration · ${job.outputLines.size} lines",
+                color = TerminalWhite.copy(alpha = 0.35f), fontSize = 8.sp,
+                fontFamily = FontFamily.Monospace)
+        }
+        IconButton(onClick = onCancel, modifier = Modifier.size(20.dp)) {
+            Icon(Icons.Default.Close, "Cancel", tint = TerminalRed.copy(alpha = 0.7f), modifier = Modifier.size(12.dp))
+        }
+    }
 }
 
 // ── Terminal Input Bar ──────────────────────────────────────────────────────
