@@ -154,7 +154,6 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
             }
         }
     }
-}
 
 @Composable
 private fun StatusRow(label: String, value: String, valueColor: Color) {
