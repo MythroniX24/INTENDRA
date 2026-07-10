@@ -174,14 +174,25 @@ class TerminalBuffer {
     // ── Private helpers ─────────────────────────────────────────────────
 
     private fun appendText(text: String) {
-        val start = currentLine.length
-        currentLine.append(text)
+        val start = cursorCol
+        // Handle carriage-return overwrite at cursor position
+        if (cursorCol <= currentLine.length) {
+            // Insert/replace at cursor position
+            val before = currentLine.substring(0, cursorCol)
+            val after = currentLine.substring((cursorCol + text.length).coerceAtMost(currentLine.length))
+            currentLine.clear()
+            currentLine.append(before)
+            currentLine.append(text)
+            currentLine.append(after)
+        } else {
+            currentLine.append(text)
+        }
         cursorCol += text.length
 
         // Record color span if any styling is active
         if (currentFg != null || currentBg != null || currentBold || currentDim || currentUnderline) {
             currentSpans.add(ColorSpan(
-                start = start, end = currentLine.length,
+                start = start, end = cursorCol,
                 fgColor = currentFg, bgColor = currentBg,
                 bold = currentBold, dim = currentDim, underline = currentUnderline
             ))
