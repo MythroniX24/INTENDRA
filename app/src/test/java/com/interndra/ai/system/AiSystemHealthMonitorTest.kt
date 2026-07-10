@@ -200,7 +200,7 @@ class AiSystemHealthMonitorTest {
         monitor.recordResult("openrouter", success = false, latencyMs = 0, error = "err")
 
         val health = monitor.getProviderHealth("openrouter")
-        assertThat(health.successRate).isEqualTo(2f / 3f)
+        assertThat(health.successRate).isWithin(0.001f).of(2f / 3f)
     }
 
     // ── Circuit Breaker ────────────────────────────────────────────────

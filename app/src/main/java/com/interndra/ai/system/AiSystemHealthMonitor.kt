@@ -369,7 +369,6 @@ class AiSystemHealthMonitor(private val context: Context) {
                 kotlinx.coroutines.delay(delay)
                 attempt++
             }
-            attempt++ // ensure increment even on success path (we throw on fail)
         }
 
         // This should never be reached (exception thrown above)
