@@ -93,18 +93,12 @@ class TerminalBuffer {
 
             if (inEscape) {
                 escapeBuffer.append(ch)
-                when {
-                    // ESC [ ... final byte
-                    ch in 'A'..'Z' || ch in 'a'..'z' || ch == '@' || ch == '`' || ch == '{' || ch == '}' || ch == '~' -> {
-                        handleEscapeSequence(escapeBuffer.toString())
-                        escapeBuffer.clear()
-                        escapeParams.clear()
-                        inEscape = false
-                    }
-                    // semicolons separate params
-                    ch == ';' -> {
-                        escapeParams.add(escapeBuffer.drop(1).trimEnd(';').split(';').last().toIntOrNull() ?: 0)
-                    }
+                if (ch in 'A'..'Z' || ch in 'a'..'z' || ch == '@' || ch == '`' || ch == '{' || ch == '}' || ch == '~') {
+                    // ESC [ ... final byte — parse params from the full sequence
+                    handleEscapeSequence(escapeBuffer.toString())
+                    escapeBuffer.clear()
+                    escapeParams.clear()
+                    inEscape = false
                 }
             } else if (ch == '\u001b') {
                 inEscape = true
