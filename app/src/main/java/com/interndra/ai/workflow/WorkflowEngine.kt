@@ -212,7 +212,7 @@ class WorkflowEngine(
                 if (result.success) {
                     if (attempt > 1) {
                         narration(NarrationLevel.DONE,
-                            "Step ${stepIndex + 1} '$label' recovered on attempt $attempt")
+                            "Step ${stepIndex + 1} '${step.label}' recovered on attempt $attempt")
                     }
                     return result
                 }
@@ -284,11 +284,6 @@ class WorkflowEngine(
                 "Step ${stepIndex + 1} '${step.label}' failed: ${result.error.take(120)}")
         }
 
-        // Abort chain on critical step failure
-        if (!result.success && step.command.critical) {
-            throw CriticalStepException("Critical step $stepIndex failed: ${result.error}")
-        }
-
         return result
     }
 
@@ -336,9 +331,6 @@ class WorkflowEngine(
         // If any step has no dependencies, it can run in parallel with others
         return deps.any { it.isEmpty() } && deps.size > 1
     }
-
-    /** Custom exception for critical step failures to abort the workflow. */
-    private class CriticalStepException(message: String) : Exception(message)
 
     /**
      * Returns a human-readable permission issue string, or null if all good.

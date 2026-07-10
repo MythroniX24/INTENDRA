@@ -331,7 +331,8 @@ class WorkflowPlanner {
      * detectEmail — "send email to John about meeting", "email report to boss"
      */
     private fun detectEmail(lower: String, raw: String): DetectedIntent? {
-        if (!lower.contains("email") && !lower.contains("mail to") && !lower.contains("send.*mail")) return null
+        if (!lower.contains("email") && !lower.contains("mail to") &&
+            !lower.contains("send mail") && !lower.contains("send email")) return null
 
         val to = extractEmailRecipient(lower, raw)
         val subject = extractEmailSubject(lower, raw)
