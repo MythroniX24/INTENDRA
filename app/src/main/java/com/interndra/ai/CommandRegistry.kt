@@ -1,5 +1,7 @@
 package com.interndra.ai
 
+import com.interndra.ai.tools.ToolRegistry
+import com.interndra.ai.tools.ShellToolDescriptor
 import com.interndra.data.model.AiIntent
 import com.interndra.data.model.CommandType
 import com.interndra.data.model.ShellCommand
@@ -8,7 +10,9 @@ import com.interndra.data.model.ShellCommand
  * CommandRegistry — a lookup table of common one-liner commands.
  * Used as a local fallback when the AI returns an unknown/empty action.
  *
- * FIX: original returned emptyList() and null everywhere — completely non-functional.
+ * Now delegates its template list to an OpenClaw-inspired [ToolRegistry]
+ * via [toToolRegistry], so the rest of the app can use a unified tool
+ * discovery surface that also includes plugins and AI agents.
  */
 object CommandRegistry {
 
@@ -177,6 +181,25 @@ object CommandRegistry {
     fun getAvailableCommands(): List<String> =
         templates.map { "${it.action}: ${it.keywords.first()}" }
 
+    /**
+     * Convert the legacy template list into an [ToolRegistry] that
+     * ToolRegistry-aware consumers can use alongside plugin and AI tools.
+     */
+    fun toToolRegistry(): ToolRegistry {
+        val registry = ToolRegistry()
+        for (tmpl in templates) {
+            registry.register(
+                ShellToolDescriptor(
+                    name = tmpl.action,
+                    description = tmpl.commands.firstOrNull()?.description ?: tmpl.action,
+                    keywords = tmpl.keywords,
+                    commands = tmpl.commands
+                )
+            )
+        }
+        return registry
+    }
+
     fun findBestMatch(input: String): AiIntent? {
         val lower = input.lowercase()
         val match = templates.firstOrNull { tmpl ->
@@ -193,10 +216,6 @@ object CommandRegistry {
     /**
      * Multi-intent fallback — scans ALL templates and merges commands from
      * EVERY template whose keyword appears in the input.
-     *
-     * Fixes: "battery status and storage status batao" previously matched
-     * ONLY battery_info (first match wins) and silently dropped storage.
-     * Now both battery_info AND storage_info commands are returned together.
      */
     fun findAllMatches(input: String): List<ShellCommand> {
         val lower = input.lowercase()

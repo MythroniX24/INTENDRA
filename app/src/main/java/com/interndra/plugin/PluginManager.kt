@@ -2,6 +2,8 @@ package com.interndra.plugin
 
 import android.content.Context
 import android.util.Log
+import com.interndra.ai.tools.PluginToolDescriptor
+import com.interndra.ai.tools.ToolRegistry
 import com.interndra.data.model.PluginEntry
 import com.interndra.data.model.PluginStatus
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +22,10 @@ import kotlinx.coroutines.withContext
  * This is a local-first plugin system: plugins are Kotlin interfaces loaded
  * from the same APK (no dynamic class loading / reflection from external APKs
  * — that would create a security surface).
+ *
+ * ENHANCED with [ToolRegistry] integration — every registered plugin
+ * automatically registers its commands into the unified tool registry,
+ * making them discoverable alongside shell and AI tools.
  *
  * To add a plugin: implement IPlugin, annotate it, and register it in
  * InterndraApplication via pluginManager.register(MyPlugin(context)).
@@ -55,6 +61,13 @@ class PluginManager(private val context: Context) {
     private val _plugins = MutableStateFlow<List<PluginEntry>>(emptyList())
     val plugins: StateFlow<List<PluginEntry>> = _plugins.asStateFlow()
 
+    /**
+     * Optional ToolRegistry to auto-register plugin commands into.
+     * When set, every call to [register] will also register each
+     * plugin command as a [PluginToolDescriptor] in the tool registry.
+     */
+    var toolRegistry: ToolRegistry? = null
+
     // ── Register ──────────────────────────────────────────────────────────
     suspend fun register(plugin: IPlugin): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -64,6 +77,13 @@ class PluginManager(private val context: Context) {
                 return@withContext false
             }
             registry[plugin.id] = plugin
+            // Auto-register each plugin command into the ToolRegistry
+            toolRegistry?.let { reg ->
+                for (cmd in plugin.getSupportedCommands()) {
+                    reg.register(PluginToolDescriptor(plugin, cmd))
+                }
+                Log.d(TAG, "Registered ${plugin.getSupportedCommands().size} tools for plugin ${plugin.id}")
+            }
             refreshPluginList()
             Log.d(TAG, "Plugin registered: ${plugin.name} v${plugin.version}")
             true
@@ -74,6 +94,15 @@ class PluginManager(private val context: Context) {
     }
 
     fun unregister(pluginId: String) {
+        val plugin = registry[pluginId]
+        if (plugin != null) {
+            // Unregister all plugin commands from ToolRegistry
+            toolRegistry?.let { reg ->
+                for (cmd in plugin.getSupportedCommands()) {
+                    reg.unregister(cmd)
+                }
+            }
+        }
         registry[pluginId]?.teardown()
         registry.remove(pluginId)
         refreshPluginList()
@@ -133,4 +162,18 @@ class PluginManager(private val context: Context) {
     fun getAll(): List<IPlugin> = registry.values.toList()
     fun count(): Int = registry.size
     fun isRegistered(id: String): Boolean = registry.containsKey(id)
+
+    /**
+     * Build a [ToolRegistry] pre-populated with ALL registered plugin commands.
+     * Convenience method when you need a registry without setting [toolRegistry].
+     */
+    fun toToolRegistry(): ToolRegistry {
+        val reg = ToolRegistry()
+        for (plugin in registry.values) {
+            for (cmd in plugin.getSupportedCommands()) {
+                reg.register(PluginToolDescriptor(plugin, cmd))
+            }
+        }
+        return reg
+    }
 }
