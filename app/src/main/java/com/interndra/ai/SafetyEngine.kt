@@ -64,7 +64,7 @@ class SafetyEngine {
         Regex("""\bsu\s+-c\s+rm\b""") to "su -c rm",
         Regex("""\bsudo\s+rm\b""") to "sudo rm",
         Regex("""\bchmod\s+777\s+/(system|sdcard|storage|data|cache)(\s|$)""") to "chmod 777 on system path",
-        Regex("""\bmount\s+-o\s+rw\s+/(system|sdcard|data)""") to "remount system path read-write",
+        Regex("""\bmount\s+-o\s+rw[,\s]+/(system|sdcard|data)""") to "remount system path read-write",
         Regex("""\bsetenforce\s+0\b""") to "disable SELinux",
         Regex("""\bstop\s+(zygote|servicemanager|surfaceflinger)""") to "stop critical Android service",
 
