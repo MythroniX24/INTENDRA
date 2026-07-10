@@ -88,6 +88,7 @@ class TerminalAgentTest {
 
     @Test
     fun `getSessionNames returns all session names`() {
+        agent.getDefaultSession()
         agent.createSession("a")
         agent.createSession("b")
         val names = agent.getSessionNames()
@@ -121,6 +122,7 @@ class TerminalAgentTest {
 
     @Test
     fun `getAllSessions returns all sessions`() {
+        agent.getDefaultSession()
         agent.createSession("s1")
         agent.createSession("s2")
         assertEquals(3, agent.getAllSessions().size) // default + s1 + s2
@@ -306,11 +308,12 @@ class TerminalAgentTest {
 
     @Test
     fun `outputFlow emits events`() = runTest {
-        agent.createSession("stream-test")
         val events = mutableListOf<TerminalAgent.StreamEvent>()
         val job = launch {
             agent.outputFlow.collect { events.add(it) }
         }
+        // Create session AFTER collector is registered (replay=0 on SharedFlow)
+        agent.createSession("stream-test")
         advanceUntilIdle()
         job.cancel()
         // Should have at least session creation event

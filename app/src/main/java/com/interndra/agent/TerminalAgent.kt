@@ -149,7 +149,7 @@ class TerminalAgent(
     fun getAllSessions(): List<TerminalSession> = sessions.values.toList()
     fun getSessionNames(): List<String> = sessions.keys.toList()
     fun getOutputLines(sessionName: String): List<String> =
-        sessions[sessionName]?.outputLines?.toList() ?: emptyList()
+        getOrCreateSession(sessionName).outputLines.toList()
     fun removeSession(name: String) {
         sessions.remove(name); sessionMutexes.remove(name); scheduleAutoSave()
     }
@@ -157,9 +157,9 @@ class TerminalAgent(
         val s = sessions.remove(oldName) ?: return false
         sessions[newName] = s.copy(name = newName); scheduleAutoSave(); return true
     }
-    fun getWorkdir(sessionName: String): String = sessions[sessionName]?.workdir ?: TERMUX_HOME
+    fun getWorkdir(sessionName: String): String = getOrCreateSession(sessionName).workdir
     fun changeWorkdir(sessionName: String, target: String): String {
-        val session = sessions[sessionName] ?: return target
+        val session = getOrCreateSession(sessionName)
         synchronized(session) {
             val resolved = resolvePath(session.workdir, target)
             session.workdir = resolved; session.envVars["PWD"] = resolved
@@ -178,12 +178,12 @@ class TerminalAgent(
         sessionMutex(sessionName).withLock { sessions[sessionName]?.aliases?.remove(name) }
         scheduleAutoSave()
     }
-    fun getAliases(sessionName: String): Map<String, String> = sessions[sessionName]?.aliases?.toMap() ?: emptyMap()
+    fun getAliases(sessionName: String): Map<String, String> = getOrCreateSession(sessionName).aliases.toMap()
     suspend fun setEnv(sessionName: String, key: String, value: String) {
         sessionMutex(sessionName).withLock { getOrCreateSession(sessionName).envVars[key] = value }
         scheduleAutoSave()
     }
-    fun getEnv(sessionName: String, key: String): String? = sessions[sessionName]?.envVars?.get(key)
+    fun getEnv(sessionName: String, key: String): String? = getOrCreateSession(sessionName).envVars[key]
     private fun expandAliases(sessionName: String, command: String): String {
         val trimmed = command.trim()
         val firstWord = trimmed.split(" ").firstOrNull() ?: return trimmed
@@ -192,7 +192,7 @@ class TerminalAgent(
         return if (rest.isNotEmpty()) "$expansion $rest" else expansion
     }
     fun getHistory(sessionName: String, limit: Int = 50): List<HistoryEntry> =
-        sessions[sessionName]?.history?.takeLast(limit)?.reversed() ?: emptyList()
+        getOrCreateSession(sessionName).history.takeLast(limit).reversed()
     fun clearHistory(sessionName: String) {
         sessions[sessionName]?.let { s ->
             synchronized(s) { s.history.clear(); s.outputLines.clear() }

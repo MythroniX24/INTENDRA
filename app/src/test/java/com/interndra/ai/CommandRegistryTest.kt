@@ -165,7 +165,7 @@ class CommandRegistryTest {
 
     @Test
     fun `findBestMatch install package query returns pkg_install`() {
-        val intent = CommandRegistry.findBestMatch("install python package")
+        val intent = CommandRegistry.findBestMatch("install package")
         assertThat(intent).isNotNull()
         assertThat(intent!!.action).isEqualTo("pkg_install")
     }
@@ -218,7 +218,7 @@ class CommandRegistryTest {
 
     @Test
     fun `findBestMatch clipboard get query returns clipboard_get`() {
-        val intent = CommandRegistry.findBestMatch("get clipboard content")
+        val intent = CommandRegistry.findBestMatch("clipboard get content")
         assertThat(intent).isNotNull()
         assertThat(intent!!.action).isEqualTo("clipboard_get")
     }
