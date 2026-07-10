@@ -152,18 +152,18 @@ class TermuxBridge(private val context: Context) {
                     stdoutSb.toString().trim(),
                     stderrSb.toString().trim() + "\n⏱ Timed out after ${timeoutMs}ms",
                     -1, false,
-                    backend = ExecutionBackend.SMART_SHELL,
+                    backend = ExecutionBackend.SHELL_EXECUTOR,
                     durationMs = System.currentTimeMillis() - startMs
                 )
             }
 
             runCatching { outThread.join(2000) }; runCatching { errThread.join(2000) }
             ShellExecutionResult(stdoutSb.toString().trim(), stderrSb.toString().trim(), process.exitValue(),
-                backend = ExecutionBackend.SMART_SHELL,
+                backend = ExecutionBackend.SHELL_EXECUTOR,
                 durationMs = System.currentTimeMillis() - startMs)
         } catch (e: Exception) {
             ShellExecutionResult("", "Error: ${e.message}", -1, false,
-                backend = ExecutionBackend.SMART_SHELL,
+                backend = ExecutionBackend.SHELL_EXECUTOR,
                 durationMs = System.currentTimeMillis() - startMs)
         }
     }
@@ -197,7 +197,7 @@ class TermuxBridge(private val context: Context) {
     ): ShellExecutionResult = withContext(Dispatchers.IO) {
         if (!isTermuxInstalled()) {
             return@withContext ShellExecutionResult("", "Termux is not installed.", -1, false,
-                backend = ExecutionBackend.SMART_SHELL)
+                backend = ExecutionBackend.SHELL_EXECUTOR)
         }
 
         if (!receiverRegistered.get()) {

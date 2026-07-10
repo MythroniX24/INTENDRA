@@ -41,7 +41,7 @@ import java.io.File
 class HybridExecutionEngine(
     private val context: Context,
     private val repo: AgentRepository,
-    private val shell: ShellExecutor? = null,
+    private val shell: ShellExecutor = ShellExecutor,
     private val safety: SafetyEngine,
     private val termuxBridge: TermuxBridge = TermuxBridge(context),
     private val terminalAgent: TerminalAgent? = null
@@ -118,7 +118,7 @@ class HybridExecutionEngine(
 
     private suspend fun executeShell(index: Int, cmd: ShellCommand): ExecutionResult =
         try {
-            val shellResult = (shell ?: ShellExecutor).runAsync(cmd.command)
+            val shellResult = shell.runAsync(cmd.command)
             ExecutionResult(stepIndex = index, success = shellResult.isSuccess, output = shellResult.stdout)
         } catch (e: Exception) {
             Log.e(TAG, "Shell error on step $index: ${e.message}")

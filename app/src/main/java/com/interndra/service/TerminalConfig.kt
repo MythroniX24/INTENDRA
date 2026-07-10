@@ -88,6 +88,6 @@ enum class ExecutionBackend(val displayName: String) {
     SHIZUKU_ROOT("🛡️ Shizuku Root"),
     SHIZUKU_ADB("🔑 Shizuku ADB"),
     TERMUX("📦 Termux"),
-    SMART_SHELL("⚙️ SmartShell"),
+    SHELL_EXECUTOR("⚙️ ShellExecutor"),
     UNKNOWN("❓ Unknown")
 }

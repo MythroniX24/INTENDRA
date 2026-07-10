@@ -191,7 +191,7 @@ object ShellExecutor {
                 runCatching { stdoutThread.join(500) }; runCatching { stderrThread.join(500) }
                 return ShellExecutionResult(
                     stdoutRef.get().trim(), "⏱ Timed out after ${timeoutMs}ms",
-                    -1, false, backend = ExecutionBackend.SMART_SHELL,
+                    -1, false, backend = ExecutionBackend.SHELL_EXECUTOR,
                     durationMs = System.currentTimeMillis() - startMs
                 )
             }
@@ -202,11 +202,11 @@ object ShellExecutor {
                 "$stdout\n…(output truncated at ${TerminalConfig.MAX_OUTPUT_BYTES / 1024} KB)" else stdout
 
             ShellExecutionResult(finalStdout, stderr, process.exitValue(),
-                durationMs = System.currentTimeMillis() - startMs, backend = ExecutionBackend.SMART_SHELL)
+                durationMs = System.currentTimeMillis() - startMs, backend = ExecutionBackend.SHELL_EXECUTOR)
         } catch (e: Exception) {
             Log.e(TAG, "Shell exec failed: ${e.message}")
             ShellExecutionResult("", "Execution failed: ${e.message}", -1, false,
-                backend = ExecutionBackend.SMART_SHELL, durationMs = System.currentTimeMillis() - startMs)
+                backend = ExecutionBackend.SHELL_EXECUTOR, durationMs = System.currentTimeMillis() - startMs)
         }
     }
 
@@ -243,16 +243,16 @@ object ShellExecutor {
                 runCatching { stdoutThread.join(1000) }; runCatching { stderrThread.join(1000) }
                 return ShellExecutionResult(stdoutSb.toString().trim(),
                     "⏱ Timed out after ${timeoutMs}ms", -1, false,
-                    backend = ExecutionBackend.SMART_SHELL, durationMs = System.currentTimeMillis() - startMs)
+                    backend = ExecutionBackend.SHELL_EXECUTOR, durationMs = System.currentTimeMillis() - startMs)
             }
 
             runCatching { stdoutThread.join(2000) }; runCatching { stderrThread.join(2000) }
             ShellExecutionResult(stdoutSb.toString().trim(), stderrSb.toString().trim(),
                 process.exitValue(), durationMs = System.currentTimeMillis() - startMs,
-                backend = ExecutionBackend.SMART_SHELL)
+                backend = ExecutionBackend.SHELL_EXECUTOR)
         } catch (e: Exception) {
             ShellExecutionResult("", "Error: ${e.message}", -1, false,
-                backend = ExecutionBackend.SMART_SHELL, durationMs = System.currentTimeMillis() - startMs)
+                backend = ExecutionBackend.SHELL_EXECUTOR, durationMs = System.currentTimeMillis() - startMs)
         }
     }
 

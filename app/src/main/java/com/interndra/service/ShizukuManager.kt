@@ -147,7 +147,7 @@ class ShizukuManager(private val context: Context) {
     ): ShellExecutionResult {
         if (!isAuthorized()) {
             return ShellExecutionResult("", "Shizuku not authorized.", -1, false,
-                backend = ExecutionBackend.SMART_SHELL)
+                backend = ExecutionBackend.SHELL_EXECUTOR)
         }
 
         val startMs = System.currentTimeMillis()
@@ -229,12 +229,12 @@ class ShizukuManager(private val context: Context) {
         } catch (e: SecurityException) {
             isPermissionGranted = false
             return ShellExecutionResult("", "Permission denied: ${e.message}", -1, false,
-                backend = ExecutionBackend.SMART_SHELL,
+                backend = ExecutionBackend.SHELL_EXECUTOR,
                 durationMs = System.currentTimeMillis() - startMs)
         } catch (e: Exception) {
             Log.e(TAG, "Shizuku exec failed: ${e.message}")
             return ShellExecutionResult("", "Error: ${e.message}", -1, false,
-                backend = ExecutionBackend.SMART_SHELL,
+                backend = ExecutionBackend.SHELL_EXECUTOR,
                 durationMs = System.currentTimeMillis() - startMs)
         }
     }
@@ -249,7 +249,7 @@ class ShizukuManager(private val context: Context) {
     ): ShellExecutionResult {
         if (!isAuthorized()) {
             return ShellExecutionResult("", "Shizuku not authorized.", -1, false,
-                backend = ExecutionBackend.SMART_SHELL)
+                backend = ExecutionBackend.SHELL_EXECUTOR)
         }
 
         val startMs = System.currentTimeMillis()
@@ -300,7 +300,7 @@ class ShizukuManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Streaming error: ${e.message}")
             return ShellExecutionResult("", "Error: ${e.message}", -1, false,
-                backend = ExecutionBackend.SMART_SHELL,
+                backend = ExecutionBackend.SHELL_EXECUTOR,
                 durationMs = System.currentTimeMillis() - startMs)
         }
     }

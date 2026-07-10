@@ -71,9 +71,9 @@ class TerminalConfigTest {
 
     @Test
     fun `ShellExecutionResult can explicitly set isSuccess`() {
-        val result = ShellExecutionResult("", "timeout", -1, false, backend = ExecutionBackend.SMART_SHELL)
+        val result = ShellExecutionResult("", "timeout", -1, false, backend = ExecutionBackend.SHELL_EXECUTOR)
         assertFalse(result.isSuccess)
-        assertEquals(ExecutionBackend.SMART_SHELL, result.backend)
+        assertEquals(ExecutionBackend.SHELL_EXECUTOR, result.backend)
     }
 
     @Test
@@ -94,6 +94,6 @@ class TerminalConfigTest {
         // SHIZUKU_ROOT and SHIZUKU_ADB are elevated
         assertTrue(ExecutionBackend.SHIZUKU_ROOT.displayName.contains("Shizuku"))
         assertTrue(ExecutionBackend.SHIZUKU_ADB.displayName.contains("Shizuku"))
-        assertFalse(ExecutionBackend.SMART_SHELL.displayName.contains("Shizuku"))
+        assertFalse(ExecutionBackend.SHELL_EXECUTOR.displayName.contains("Shizuku"))
     }
 }

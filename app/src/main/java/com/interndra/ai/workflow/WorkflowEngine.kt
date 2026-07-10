@@ -32,7 +32,7 @@ import java.util.concurrent.ConcurrentHashMap
 class WorkflowEngine(
     private val context: Context,
     private val repo: AgentRepository,
-    private val shell: ShellExecutor? = null,
+    private val shell: ShellExecutor = ShellExecutor,
     private val safety: SafetyEngine
 ) {
     companion object {
