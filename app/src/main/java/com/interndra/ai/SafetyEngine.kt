@@ -84,7 +84,7 @@ class SafetyEngine {
         // Credential / key theft
         Regex("""\bcat\s+/(data|system)/.*/(passwords|keys|wallet|keystore)""") to "credential file access",
         Regex("""\bscp\s+.*\.keystore\b""") to "keystore exfiltration via scp",
-        Regex("""\bcat\s+.*/WhatsApp/Messages\.db""") to "WhatsApp database read",
+        Regex("""\bcat\s+.*/whatsapp/messages\.db""") to "WhatsApp database read",
 
         // Cryptocurrency / wallet
         Regex("""\brm\s+(-[a-z]*r[a-z]*f[a-z]*)?\s+.*/\.bitcoin/.*wallet""") to "bitcoin wallet deletion",

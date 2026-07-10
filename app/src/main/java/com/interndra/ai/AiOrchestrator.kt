@@ -287,9 +287,11 @@ class AiOrchestrator(
     }
 
     private fun isInternetAvailable(): Boolean {
-        val cm  = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val net = cm.activeNetwork ?: return false
-        val cap = cm.getNetworkCapabilities(net) ?: return false
+        val cm  = runCatching {
+            context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        }.getOrNull() ?: return true // assume connected when system service unavailable
+        val net = cm.activeNetwork ?: return true
+        val cap = cm.getNetworkCapabilities(net) ?: return true
         // Use INTERNET capability only — VALIDATED can be false on devices with
         // custom ROMs, VPNs, captive portals, or aggressive power saving.
         // The API call itself will timeout if there's genuinely no connectivity.

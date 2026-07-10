@@ -227,7 +227,7 @@ class LocalAiEngine(private val context: Context) {
                 """{"action":"volume_up","reply":"Increasing volume...","commands":[{"type":"ADB_SHELL","command":"input keyevent 24","description":"Volume up"}]}"""
             lo.contains("volume down") ->
                 """{"action":"volume_down","reply":"Decreasing volume...","commands":[{"type":"ADB_SHELL","command":"input keyevent 25","description":"Volume down"}]}"""
-            lo.contains("list files") || lo.contains("ls ") ->
+            lo.contains("list files") || lo == "ls" || lo.startsWith("ls ") ->
                 """{"action":"list_files","reply":"Listing files...","commands":[{"type":"ADB_SHELL","command":"ls -la /sdcard/Download/","description":"List Downloads"}]}"""
             lo.contains("time") || lo.contains("date") ->
                 """{"action":"get_time","reply":"Checking time...","commands":[{"type":"ADB_SHELL","command":"date","description":"Current date/time"}]}"""
