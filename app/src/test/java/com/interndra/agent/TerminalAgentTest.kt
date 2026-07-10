@@ -21,7 +21,6 @@ class TerminalAgentTest {
     private lateinit var context: Context
     private lateinit var termuxBridge: TermuxBridge
     private lateinit var shizukuShell: ShizukuShell
-    private lateinit var mockSmartShell: SmartShell
     private lateinit var agent: TerminalAgent
     private lateinit var testScope: CoroutineScope
 
@@ -30,11 +29,6 @@ class TerminalAgentTest {
         context = mockk(relaxed = true)
         termuxBridge = mockk(relaxed = true)
         shizukuShell = mockk(relaxed = true)
-        mockSmartShell = mockk(relaxed = true)
-
-        // Mock SmartShell.get() to prevent real Runtime.exec() calls
-        mockkObject(SmartShell.Companion)
-        every { SmartShell.get(any()) } returns mockSmartShell
 
         // Default: Termux NOT available, Shizuku NOT elevated
         every { termuxBridge.isTermuxInstalled() } returns false
@@ -54,7 +48,6 @@ class TerminalAgentTest {
     fun tearDown() {
         agent.shutdown()
         testScope.cancel()
-        unmockkObject(SmartShell.Companion)
     }
 
     // ── Session Management ──────────────────────────────────────────────

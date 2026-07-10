@@ -5,7 +5,9 @@ import android.util.Log
 import com.interndra.service.ExecutionBackend
 import com.interndra.service.ShellExecutionResult
 import com.interndra.service.ShizukuShell
-import com.interndra.service.SmartShell
+import com.interndra.service.ExecutionBackend
+import com.interndra.service.ShellExecutionResult
+import com.interndra.service.ShellExecutor
 import com.interndra.service.TerminalConfig
 import com.interndra.service.TermuxBridge
 import com.google.gson.Gson
@@ -57,7 +59,6 @@ class TerminalAgent(
     // ── Background Jobs ─────────────────────────────────────────────────
     private val backgroundJobs = ConcurrentHashMap<Int, SessionJob>()
     private val jobIdCounter = java.util.concurrent.atomic.AtomicInteger(0)
-    private val smartShell = SmartShell.get(context)
 
     // ── Session ────────────────────────────────────────────────────────────
     data class TerminalSession(
@@ -100,7 +101,7 @@ class TerminalAgent(
         @Volatile var status: BackgroundJobStatus = BackgroundJobStatus.RUNNING,
         @Volatile var exitCode: Int? = null,
         @Volatile var outputLines: java.util.concurrent.CopyOnWriteArrayList<String> = java.util.concurrent.CopyOnWriteArrayList(),
-        internal var bgProcess: SmartShell.BackgroundProcess? = null
+        internal var bgProcess: ShellExecutor.BackgroundProcess? = null
     ) {
         val isActive: Boolean get() = status == BackgroundJobStatus.RUNNING
         val output: String get() = outputLines.joinToString("")
@@ -132,7 +133,7 @@ class TerminalAgent(
         get() = when {
             shizukuShell.isElevatedAvailable -> "Shizuku (${shizukuShell.privilegeDescription})"
             termuxBridge.isTermuxInstalled() && termuxBridge.hasPermission() -> "Termux"
-            else -> "Sandboxed (SmartShell)"
+            else -> "Sandboxed (ShellExecutor)"
         }
     val isElevated: Boolean get() = shizukuShell.isElevatedAvailable
 
@@ -230,7 +231,7 @@ class TerminalAgent(
         // Spawn the process in a background thread
         Thread {
             try {
-                val bgProcess = smartShell.spawnBackground(
+                val bgProcess = ShellExecutor.spawnBackground(
                     cmd = expanded,
                     onOutput = { line ->
                         job.outputLines.add(line)
@@ -367,7 +368,7 @@ class TerminalAgent(
             ExecutionBackend.SHIZUKU_ROOT -> "\u001b[90m[🛡️ Shizuku Root]\u001b[0m\n"
             ExecutionBackend.SHIZUKU_ADB -> "\u001b[90m[🔑 Shizuku ADB]\u001b[0m\n"
             ExecutionBackend.TERMUX -> "\u001b[90m[📦 Termux]\u001b[0m\n"
-            else -> "\u001b[90m[⚙️ SmartShell]\u001b[0m\n"
+            else -> "\u001b[90m[⚙️ ShellExecutor]\u001b[0m\n"
         }
         session.outputLines.add(indicator)
         _outputFlow.tryEmit(StreamEvent.Output(sessionName, indicator))

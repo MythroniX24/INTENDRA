@@ -7,7 +7,7 @@ import com.interndra.ai.HybridExecutionEngine
 import com.interndra.ai.SafetyEngine
 import com.interndra.data.local.AgentRepository
 import com.interndra.data.model.*
-import com.interndra.service.SmartShell
+import com.interndra.service.ShellExecutor
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -32,7 +32,7 @@ import java.util.concurrent.ConcurrentHashMap
 class WorkflowEngine(
     private val context: Context,
     private val repo: AgentRepository,
-    private val shell: SmartShell,
+    private val shell: ShellExecutor? = null,
     private val safety: SafetyEngine
 ) {
     companion object {

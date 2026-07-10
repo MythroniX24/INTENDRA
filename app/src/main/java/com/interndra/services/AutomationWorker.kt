@@ -5,7 +5,7 @@ import android.util.Log
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import com.interndra.ai.SafetyEngine
-import com.interndra.service.SmartShell
+import com.interndra.service.ShellExecutor
 
 /**
  * AutomationWorker — executes scheduled shell commands via WorkManager.
@@ -39,10 +39,15 @@ class AutomationWorker(context: Context, params: WorkerParameters) : Worker(cont
         }
 
         return try {
-            val shell = SmartShell(applicationContext)
             val output = when (type) {
-                "ADB_SHELL" -> shell.run(command)
-                "ANDROID_INTENT" -> shell.run("am start -a android.intent.action.VIEW -d \"$command\"")
+                "ADB_SHELL" -> {
+                    val r = ShellExecutor.run(command)
+                    if (r.isSuccess) r.stdout.ifEmpty { "(completed)" } else r.stderr
+                }
+                "ANDROID_INTENT" -> {
+                    val r = ShellExecutor.run("am start -a android.intent.action.VIEW -d \"$command\"")
+                    if (r.isSuccess) r.stdout.ifEmpty { "(completed)" } else r.stderr
+                }
                 else -> {
                     Log.w(TAG, "Unknown command type: $type")
                     return Result.failure()

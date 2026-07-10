@@ -31,7 +31,6 @@ class ShizukuShell(private val context: Context) {
             }
     }
 
-    private val smartShell = SmartShell.get(context)
     private val shizukuManager by lazy { ShizukuManager(context) }
 
     /** Whether Shizuku is currently available and authorized. */
@@ -44,7 +43,7 @@ class ShizukuShell(private val context: Context) {
 
     /**
      * Execute a shell command using the best available backend.
-     * Tries Shizuku first (elevated), falls back to SmartShell (sandboxed).
+     * Tries Shizuku first (elevated), falls back to ShellExecutor (sandboxed).
      */
     suspend fun execute(
         command: String,
@@ -65,15 +64,15 @@ class ShizukuShell(private val context: Context) {
                 result.backend == ExecutionBackend.SHIZUKU_ADB) {
                 return@withContext result
             }
-            Log.w(TAG, "Shizuku failed (backend=${result.backend}), falling back to SmartShell")
+            Log.w(TAG, "Shizuku failed (backend=${result.backend}), falling back to ShellExecutor")
         }
 
-        // Fall back to SmartShell
-        Log.d(TAG, "Using SmartShell backend (sandboxed)")
+        // Fall back to ShellExecutor (sandboxed)
+        Log.d(TAG, "Using ShellExecutor backend (sandboxed)")
         if (onOutput != null) {
-            smartShell.runStreaming(command, timeoutMs, onOutput)
+            ShellExecutor.runStreaming(command, timeoutMs, onOutput)
         } else {
-            smartShell.runAsync(command, timeoutMs)
+            ShellExecutor.runAsync(command, timeoutMs)
         }
     }
 
@@ -92,7 +91,7 @@ class ShizukuShell(private val context: Context) {
                 return result
             }
         }
-        return smartShell.run(command, timeoutMs)
+        return ShellExecutor.run(command, timeoutMs)
     }
 
     /**
@@ -103,7 +102,7 @@ class ShizukuShell(private val context: Context) {
             val uid = shizukuManager.testConnection()
             if (uid != null) return@withContext uid
         }
-        val result: ShellExecutionResult = smartShell.runAsync("echo \$USER && id -u", TerminalConfig.DEFAULT_TIMEOUT_MS)
+        val result = ShellExecutor.runAsync("echo \$USER && id -u", TerminalConfig.DEFAULT_TIMEOUT_MS)
         result.stdout.lines().firstOrNull { it.all { c -> c.isDigit() } }?.toIntOrNull() ?: Process.myUid()
     }
 }

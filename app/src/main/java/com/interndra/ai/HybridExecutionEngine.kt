@@ -8,7 +8,7 @@ import androidx.core.content.FileProvider
 import com.interndra.agent.TerminalAgent
 import com.interndra.data.local.AgentRepository
 import com.interndra.data.model.*
-import com.interndra.service.SmartShell
+import com.interndra.service.ShellExecutor
 import com.interndra.service.TermuxBridge
 import java.io.File
 
@@ -41,7 +41,7 @@ import java.io.File
 class HybridExecutionEngine(
     private val context: Context,
     private val repo: AgentRepository,
-    private val shell: SmartShell,
+    private val shell: ShellExecutor? = null,
     private val safety: SafetyEngine,
     private val termuxBridge: TermuxBridge = TermuxBridge(context),
     private val terminalAgent: TerminalAgent? = null
@@ -118,7 +118,7 @@ class HybridExecutionEngine(
 
     private suspend fun executeShell(index: Int, cmd: ShellCommand): ExecutionResult =
         try {
-            val shellResult = shell.runAsync(cmd.command)
+            val shellResult = (shell ?: ShellExecutor).runAsync(cmd.command)
             ExecutionResult(stepIndex = index, success = shellResult.isSuccess, output = shellResult.stdout)
         } catch (e: Exception) {
             Log.e(TAG, "Shell error on step $index: ${e.message}")

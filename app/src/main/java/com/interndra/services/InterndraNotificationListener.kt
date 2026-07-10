@@ -4,7 +4,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.interndra.ai.SafetyEngine
-import com.interndra.service.SmartShell
+import com.interndra.service.ShellExecutor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -81,8 +81,7 @@ class InterndraNotificationListener : NotificationListenerService() {
                             triggers.remove(triggerKey)
                             return@launch
                         }
-                        val shell = SmartShell(applicationContext)
-                        shell.run(matchedCommand)
+                        ShellExecutor.run(matchedCommand)
                         triggers.remove(triggerKey)
                     } catch (e: Exception) {
                         Log.e(TAG, "Trigger execution failed: ${e.message}")

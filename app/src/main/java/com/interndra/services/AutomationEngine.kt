@@ -5,7 +5,7 @@ import android.util.Log
 import androidx.work.*
 import com.interndra.data.model.AutomationRule
 import com.interndra.data.model.AutomationTriggerType
-import com.interndra.service.SmartShell
+import com.interndra.service.ShellExecutor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -75,10 +75,13 @@ class AutomationEngine(private val context: Context) {
 
     // ── Execute immediately ────────────────────────────────────────────────
     suspend fun executeNow(rule: AutomationRule): String = withContext(Dispatchers.IO) {
-        val shell = SmartShell(context)
         try {
             val result = when (rule.commandType) {
-                "ADB_SHELL"      -> shell.run(rule.command)
+                "ADB_SHELL"      -> {
+                    val r = ShellExecutor.runAsync(rule.command)
+                    if (r.isSuccess) r.stdout.ifEmpty { "(completed)" }
+                    else "Error: ${r.stderr}"
+                }
                 "ANDROID_INTENT" -> {
                     val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
                         .setData(android.net.Uri.parse(rule.command))
@@ -88,7 +91,7 @@ class AutomationEngine(private val context: Context) {
                 }
                 else -> "Unknown command type: ${rule.commandType}"
             }
-            Log.d(TAG, "Rule ${rule.id} executed: $result")
+            Log.d(TAG, "Rule ${rule.id} executed: ${result.take(100)}")
             result
         } catch (e: Exception) {
             Log.e(TAG, "Rule ${rule.id} failed: ${e.message}")

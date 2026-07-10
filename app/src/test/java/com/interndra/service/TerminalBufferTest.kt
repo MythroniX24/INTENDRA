@@ -266,9 +266,9 @@ class TerminalBufferTest {
 
     @Test
     fun `backend indicator dimmed text`() {
-        buffer.processOutput("\u001b[90m[SmartShell]\u001b[0m\n")
+        buffer.processOutput("\u001b[90m[ShellExecutor]\u001b[0m\n")
         val lines = buffer.flush()
-        assertEquals("[SmartShell]", lines[0].text)
+        assertEquals("[ShellExecutor]", lines[0].text)
         assertEquals(Color.DKGRAY, lines[0].spans[0].fgColor)
     }
 

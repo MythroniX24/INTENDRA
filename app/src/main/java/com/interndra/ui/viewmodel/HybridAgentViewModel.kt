@@ -32,7 +32,6 @@ import com.interndra.search.WebSearchEngine
 import com.interndra.service.AgentAccessibilityService
 import com.interndra.service.ShizukuManager
 import com.interndra.service.ShizukuShell
-import com.interndra.service.SmartShell
 import com.interndra.services.AutomationEngine
 import com.interndra.services.AutomationWorker
 import com.interndra.service.TermuxBridge
@@ -112,7 +111,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     // ── Core systems ──────────────────────────────────────────────────────
     private val db              = AgentDatabase.getInstance(app)
     val repo                    = AgentRepository(db)
-    private val shell           = SmartShell(app)
     private val safety          = SafetyEngine()
     private val localEngine     = LocalAiEngine(app)
     val modelDownloader         = ModelDownloadManager(app)
@@ -129,7 +127,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     val automationEngine        = AutomationEngine(app)
     val agentPool               = AgentPool(viewModelScope)
     val workflowPlanner         = WorkflowPlanner()
-    val workflowEngine          = WorkflowEngine(app, repo, shell, safety)
+    val workflowEngine          = WorkflowEngine(app, repo, null, safety)
 
     private var tts: TextToSpeech? = null
     private var isTtsReady = false
@@ -928,7 +926,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             return
         }
 
-        val engine = HybridExecutionEngine(app, repo, shell, safety)
+        val engine = HybridExecutionEngine(app, repo, null, safety)
         var allSuccess = true
 
         val chatOutputLines = mutableListOf<String>()
