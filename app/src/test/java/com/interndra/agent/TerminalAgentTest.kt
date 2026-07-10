@@ -35,7 +35,6 @@ class TerminalAgentTest {
         // Mock SmartShell.get() to prevent real Runtime.exec() calls
         mockkObject(SmartShell.Companion)
         every { SmartShell.get(any()) } returns mockSmartShell
-        mockkObject(SmartShell.Companion)
 
         // Default: Termux NOT available, Shizuku NOT elevated
         every { termuxBridge.isTermuxInstalled() } returns false

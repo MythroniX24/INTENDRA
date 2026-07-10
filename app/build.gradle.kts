@@ -98,6 +98,12 @@ android {
         }
     }
 
+    // Unit tests: return default values for Android framework classes (Log, etc.)
+    // instead of throwing NoClassDefFoundError/ExceptionInInitializerError
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     // Allow Room schema export for version-control and migration verification
     ksp {
         arg("room.schemaLocation", "$projectDir/schemas")
