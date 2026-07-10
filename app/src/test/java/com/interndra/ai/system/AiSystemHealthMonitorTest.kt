@@ -307,17 +307,27 @@ class AiSystemHealthMonitorTest {
         assertThat(attempts).isEqualTo(1)
     }
 
-    @Test(expected = IllegalStateException::class)
+    @Test
     fun `executeWithRetry throws on non-retryable error`() = runBlocking {
-        monitor.executeWithRetry("openrouter", maxRetries = 2) {
-            throw IllegalStateException("401 Unauthorized")
+        try {
+            monitor.executeWithRetry("openrouter", maxRetries = 2) {
+                throw IllegalStateException("401 Unauthorized")
+            }
+            throw AssertionError("Expected IllegalStateException")
+        } catch (e: IllegalStateException) {
+            // Expected
         }
     }
 
-    @Test(expected = IllegalStateException::class)
+    @Test
     fun `executeWithRetry throws after max retries`() = runBlocking {
-        monitor.executeWithRetry("openrouter", maxRetries = 2) {
-            throw IllegalStateException("500 Internal Server Error")
+        try {
+            monitor.executeWithRetry("openrouter", maxRetries = 2) {
+                throw IllegalStateException("500 Internal Server Error")
+            }
+            throw AssertionError("Expected IllegalStateException")
+        } catch (e: IllegalStateException) {
+            // Expected
         }
     }
 

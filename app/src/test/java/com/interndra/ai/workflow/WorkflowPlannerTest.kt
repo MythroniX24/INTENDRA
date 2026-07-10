@@ -203,10 +203,10 @@ class WorkflowPlannerTest {
     // ── Launch App ──────────────────────────────────────────────────────────
     @Test
     fun `detects launch app`() {
-        val detected = planner.detect("open WhatsApp")
+        val detected = planner.detect("open settings")
         assertThat(detected).isNotNull()
         assertThat(detected!!.intent).isEqualTo(WorkflowPlanner.Intent.LAUNCH_APP)
-        assertThat(detected.packageName).isEqualTo("com.whatsapp")
+        assertThat(detected.packageName).isEqualTo("com.android.settings")
     }
 
     @Test
@@ -232,7 +232,7 @@ class WorkflowPlannerTest {
 
     @Test
     fun `plans launch app workflow`() {
-        val detected = planner.detect("open WhatsApp")
+        val detected = planner.detect("open settings")
         val workflow = planner.plan(detected!!)
         assertThat(workflow).isNotNull()
         assertThat(workflow!!.steps.first().command.command)

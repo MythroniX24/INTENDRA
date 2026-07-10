@@ -140,7 +140,7 @@ class AiOrchestrator(
                         cloudEngine.parseIntent(userInput, memory, chatHistory,
                             jailbreakActive = jailbreakActive,
                             jailbreakLevel = jailbreakLevel
-                        )
+                        ).copy(source = AiSource.FALLBACK)
                     } catch (e: Exception) {
                         runLocal(userInput, memory).copy(source = AiSource.FALLBACK)
                     }

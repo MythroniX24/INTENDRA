@@ -53,8 +53,8 @@ class SafetyEngine {
         Regex(""">\s*/dev/(sd[a-z]+|block/)""") to "redirect to block device",
         Regex("""\bshred\s+/dev/""") to "shred of device file",
         Regex("""\bfind\s+/\s+.*-delete\b""") to "find / -delete",
-        Regex("""\bfind\s+/sdcard\s+.*-delete\b""") to "find /sdcard -delete",
-        Regex("""\bfind\s+/storage\s+.*-delete\b""") to "find /storage -delete",
+        Regex("""\bfind\s+/sdcard[/\s].*-delete\b""") to "find /sdcard -delete",
+        Regex("""\bfind\s+/storage[/\s].*-delete\b""") to "find /storage -delete",
 
         // Bricking / bootloader
         Regex("""\bfastboot\s+(erase|format|flash\s+boot|flash\s+system|flash\s+recovery)""") to "fastboot destructive operation",
@@ -84,7 +84,7 @@ class SafetyEngine {
         // Credential / key theft
         Regex("""\bcat\s+/(data|system)/.*/(passwords|keys|wallet|keystore)""") to "credential file access",
         Regex("""\bscp\s+.*\.keystore\b""") to "keystore exfiltration via scp",
-        Regex("""\bcat\s+.*/whatsapp/messages\.db""") to "WhatsApp database read",
+        Regex("""\bcat\s+.*\bwhatsapp\b.*messages\.db""") to "WhatsApp database read",
 
         // Cryptocurrency / wallet
         Regex("""\brm\s+(-[a-z]*r[a-z]*f[a-z]*)?\s+.*/\.bitcoin/.*wallet""") to "bitcoin wallet deletion",
