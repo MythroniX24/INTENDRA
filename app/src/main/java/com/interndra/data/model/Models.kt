@@ -220,7 +220,10 @@ data class WorkflowStep(
     val label: String,
     val command: ShellCommand,
     val dependsOn: List<Int> = emptyList(),
-    val condition: String? = null  // optional guard expression, e.g. "prev.success"
+    val condition: String? = null,  // optional guard expression, e.g. "prev.success"
+    val maxRetries: Int = 0,        // 0 = no retry, 1+ = retry count
+    val timeoutMs: Long = 30_000L,  // per-step timeout in ms
+    val resultVar: String? = null   // store result in variable for chaining (e.g. "foundFiles")
 )
 
 data class WorkflowRunResult(
