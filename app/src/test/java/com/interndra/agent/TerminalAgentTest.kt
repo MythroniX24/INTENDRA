@@ -307,17 +307,16 @@ class TerminalAgentTest {
     // ── Output Streaming ──────────────────────────────────────────────
 
     @Test
-    fun `outputFlow emits events`() = runTest {
+    fun `outputFlow emits events`() = runTest(UnconfinedTestDispatcher()) {
         val events = mutableListOf<TerminalAgent.StreamEvent>()
-        val job = launch {
+        val job = launch(UnconfinedTestDispatcher()) {
             agent.outputFlow.collect { events.add(it) }
         }
-        // Create session AFTER collector is registered (replay=0 on SharedFlow)
+        // With UnconfinedTestDispatcher, collector is active immediately
         agent.createSession("stream-test")
-        advanceUntilIdle()
-        job.cancel()
         // Should have at least session creation event
         assertTrue(events.isNotEmpty())
+        job.cancel()
     }
 
     // ── Session Persistence ────────────────────────────────────────────
