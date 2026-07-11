@@ -690,15 +690,17 @@ class TerminalBufferTest {
     @Test
     fun `continuing after interrupted escape`() {
         buffer.processOutput("a\u001b[3")
-        buffer.flush()
+        val lines1 = buffer.flush()
+        // First flush: "a" was committed, escape is incomplete
+        assertEquals(1, lines1.size)
+        assertEquals("a", lines1[0].text)
+
         buffer.processOutput("1mred\u001b[0m")
-        val lines = buffer.flush()
-        // "a" was committed by flush() before the escape completed.
-        // "red" resumes on a new line after the escape resolves.
-        assertEquals(2, lines.size)
-        assertEquals("a", lines[0].text)
-        assertEquals("red", lines[1].text)
-        assertEquals(Color.RED, lines[1].spans[0].fgColor)
+        val lines2 = buffer.flush()
+        // Second flush: escape completed, "red" on a new line
+        assertEquals(1, lines2.size)
+        assertEquals("red", lines2[0].text)
+        assertEquals(Color.RED, lines2[0].spans[0].fgColor)
     }
 
     // ── Edge: Form Feed (FF) and Other Control Chars ─────────────────
