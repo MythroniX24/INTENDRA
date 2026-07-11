@@ -251,12 +251,12 @@ class TerminalBuffer {
                 }
             }
             'X' -> {
+                // DIAGNOSTIC: temporarily match DCH behavior to confirm branch is reached
                 val n = p.firstOrNull() ?: 1
                 if (cursorCol < currentLine.length) {
-                    val eraseEnd = (cursorCol + n).coerceAtMost(currentLine.length)
-                    for (i in cursorCol until eraseEnd) {
-                        currentLine.setCharAt(i, ' ')
-                    }
+                    val deleteEnd = (cursorCol + n).coerceAtMost(currentLine.length)
+                    currentLine.delete(cursorCol, deleteEnd)
+                    trimSpansAfterDelete(cursorCol, deleteEnd - cursorCol)
                 }
             }
             's' -> { savedRow = cursorRow; savedCol = cursorCol }
