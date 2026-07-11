@@ -618,7 +618,7 @@ class TerminalBufferTest {
     fun `DCH deletes characters at cursor`() {
         buffer.processOutput("abcdef\u001b[3D\u001b[2P")
         val lines = buffer.flush()
-        assertEquals("abcdf", lines[0].text)
+        assertEquals("abcf", lines[0].text)
     }
 
     // ── Erase Character (ECH) ────────────────────────────────────────
