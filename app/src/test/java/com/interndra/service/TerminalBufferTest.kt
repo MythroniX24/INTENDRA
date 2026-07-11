@@ -625,9 +625,21 @@ class TerminalBufferTest {
 
     @Test
     fun `ECH erases characters at cursor with spaces`() {
-        buffer.processOutput("abcdef\u001b[3D\u001b[2X")
+        // Split across calls to isolate cursor movement from erase
+        buffer.processOutput("abcdef")
+        buffer.processOutput("\u001b[3D")   // CUB 3: cursor back to position 3
+        buffer.processOutput("\u001b[2X")   // ECH 2: erase 2 chars from cursor
         val lines = buffer.flush()
         assertEquals("ab  ef", lines[0].text)
+    }
+
+    @Test
+    fun `ECH with empty params uses default 1`() {
+        buffer.processOutput("test")
+        buffer.processOutput("\u001b[3D")
+        buffer.processOutput("\u001b[X")   // ECH with no param = 1
+        val lines = buffer.flush()
+        assertEquals("te t", lines[0].text)
     }
 
     // ── Insert / Delete Lines ────────────────────────────────────────
