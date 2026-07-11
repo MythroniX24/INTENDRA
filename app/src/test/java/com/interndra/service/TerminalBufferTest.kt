@@ -693,8 +693,12 @@ class TerminalBufferTest {
         buffer.flush()
         buffer.processOutput("1mred\u001b[0m")
         val lines = buffer.flush()
-        assertEquals("ared", lines[0].text)
-        assertEquals(Color.RED, lines[0].spans[0].fgColor)
+        // "a" was committed by flush() before the escape completed.
+        // "red" resumes on a new line after the escape resolves.
+        assertEquals(2, lines.size)
+        assertEquals("a", lines[0].text)
+        assertEquals("red", lines[1].text)
+        assertEquals(Color.RED, lines[1].spans[0].fgColor)
     }
 
     // ── Edge: Form Feed (FF) and Other Control Chars ─────────────────

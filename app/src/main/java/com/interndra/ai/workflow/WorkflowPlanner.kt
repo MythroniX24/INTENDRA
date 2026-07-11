@@ -491,7 +491,10 @@ class WorkflowPlanner {
         val match = findSharePattern.find(input) ?: return null
         val searchPart = match.groupValues[1].trim()
 
-        val findDetected = detectFileSearch(searchPart.lowercase(), searchPart) ?: return null
+        // detectFileSearch requires "find" keyword in the input to match.
+        // Prepend "find" so the searchPart is correctly detected.
+        val findDetected = detectFileSearch("find ${searchPart.lowercase()}", "find $searchPart")
+            ?: return null
 
         val action = if (lower.contains("share")) "share" else "open"
 
