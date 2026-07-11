@@ -5,8 +5,6 @@ import android.util.Log
 import com.interndra.service.ExecutionBackend
 import com.interndra.service.ShellExecutionResult
 import com.interndra.service.ShizukuShell
-import com.interndra.service.ExecutionBackend
-import com.interndra.service.ShellExecutionResult
 import com.interndra.service.ShellExecutor
 import com.interndra.service.TerminalConfig
 import com.interndra.service.TermuxBridge

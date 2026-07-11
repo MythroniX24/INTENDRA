@@ -34,6 +34,7 @@ import com.interndra.service.ShizukuManager
 import com.interndra.service.ShizukuShell
 import com.interndra.services.AutomationEngine
 import com.interndra.services.AutomationWorker
+import com.interndra.service.ShellExecutor
 import com.interndra.service.TermuxBridge
 import com.interndra.services.InterndraNotificationListener
 import com.interndra.util.Constants
@@ -127,7 +128,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     val automationEngine        = AutomationEngine(app)
     val agentPool               = AgentPool(viewModelScope)
     val workflowPlanner         = WorkflowPlanner()
-    val workflowEngine          = WorkflowEngine(app, repo, null, safety)
+    val workflowEngine          = WorkflowEngine(app, repo, ShellExecutor, safety)
 
     private var tts: TextToSpeech? = null
     private var isTtsReady = false
@@ -681,6 +682,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                                 WorkflowEngine.NarrationLevel.NEEDS_PERMISSION -> "🔐 Needs permission"
                                 WorkflowEngine.NarrationLevel.COMPLETE         -> "🎯 Complete"
                                 WorkflowEngine.NarrationLevel.PARTIAL          -> "⚠️ Partial"
+                                WorkflowEngine.NarrationLevel.SKIPPED          -> "⏭️ Skipped"
                             }
                             narrationLines.add("$prefix: $msg")
                             // COMPILE FIX: repo.log() is a suspend function —
@@ -926,7 +928,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             return
         }
 
-        val engine = HybridExecutionEngine(app, repo, null, safety)
+        val engine = HybridExecutionEngine(app, repo, ShellExecutor, safety)
         var allSuccess = true
 
         val chatOutputLines = mutableListOf<String>()

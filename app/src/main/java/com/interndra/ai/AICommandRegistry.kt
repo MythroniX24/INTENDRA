@@ -78,7 +78,7 @@ object AICommandRegistry {
             examples = listOf("cat /storage/emulated/0/file.txt")))
         register(CommandEntry("pwd", CommandCategory.SHELL, "Print working directory"))
         register(CommandEntry("echo", CommandCategory.SHELL, "Print text to terminal",
-            examples = listOf("echo Hello", "echo $HOME")))
+            examples = listOf("echo Hello", "echo \$HOME")))
         register(CommandEntry("mkdir", CommandCategory.FILE_OPS, "Create a directory",
             examples = listOf("mkdir myfolder", "mkdir -p a/b/c")))
         register(CommandEntry("rm", CommandCategory.FILE_OPS, "Remove files or directories (use with care)",
@@ -90,7 +90,7 @@ object AICommandRegistry {
         register(CommandEntry("chmod", CommandCategory.FILE_OPS, "Change file permissions",
             examples = listOf("chmod +x script.sh")))
         register(CommandEntry("grep", CommandCategory.SHELL, "Search text using patterns",
-            examples = listOf("grep 'pattern' file.txt", "ls | grep '\.kt$'")))
+            examples = listOf("grep 'pattern' file.txt", "ls | grep '\\.kt$'")))
         register(CommandEntry("find", CommandCategory.FILE_OPS, "Search for files",
             examples = listOf("find . -name '*.kt'", "find /sdcard -size +1M")))
 
