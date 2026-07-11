@@ -254,12 +254,9 @@ class TerminalBuffer {
                 val n = p.firstOrNull() ?: 1
                 if (cursorCol < currentLine.length) {
                     val eraseEnd = (cursorCol + n).coerceAtMost(currentLine.length)
-                    val before = currentLine.substring(0, cursorCol)
-                    val after = currentLine.substring(eraseEnd)
-                    currentLine.clear()
-                    currentLine.append(before)
-                    for (i in 0 until (eraseEnd - cursorCol)) currentLine.append(' ')
-                    currentLine.append(after)
+                    for (i in cursorCol until eraseEnd) {
+                        currentLine.setCharAt(i, ' ')
+                    }
                 }
             }
             's' -> { savedRow = cursorRow; savedCol = cursorCol }
