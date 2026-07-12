@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -396,7 +397,7 @@ private fun findFirstColonOutsideQuotes(s: String): Int {
 private fun JsonNodeRow(node: JsonNode, indent: Int) {
     when (node) {
         is JsonNode.Value -> {
-            Row(Modifier.fillMaxWidth().padding(start = (indent * 16).dp, vertical = 1.dp)) {
+            Row(Modifier.fillMaxWidth().padding(start = (indent * 16).dp, top = 1.dp, bottom = 1.dp)) {
                 Text(node.text, color = node.color, fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace, lineHeight = 18.sp,
                     maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -407,7 +408,7 @@ private fun JsonNodeRow(node: JsonNode, indent: Int) {
             val isExpandable = node.value is JsonNode.Object || node.value is JsonNode.Array
 
             Row(
-                Modifier.fillMaxWidth().padding(start = (indent * 16).dp, vertical = 1.dp)
+                Modifier.fillMaxWidth().padding(start = (indent * 16).dp, top = 1.dp, bottom = 1.dp)
                     .then(if (isExpandable) Modifier.clickable { expanded = !expanded } else Modifier),
                 verticalAlignment = Alignment.Top
             ) {
@@ -442,7 +443,8 @@ private fun JsonNodeRow(node: JsonNode, indent: Int) {
                 when (val v = node.value) {
                     is JsonNode.Object -> v.children.forEach { JsonNodeRow(it, indent + 1) }
                     is JsonNode.Array -> v.children.forEach { JsonNodeRow(it, indent + 1) }
-                    else -> {}
+                    is JsonNode.Value -> {}
+                    is JsonNode.KeyValue -> {}
                 }
             }
         }
