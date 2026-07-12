@@ -102,16 +102,16 @@ fun HybridChatScreen(
 
     // ── Smart scroll: auto-scroll only when user is near bottom ──────────
     var userScrolledUp by remember { mutableStateOf(false) }
-    val isNearBottom: Boolean
-        get() {
-            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            val totalItems = listState.layoutInfo.totalItemsCount
-            return lastVisible >= totalItems - 3
-        }
+
+    fun isNearBottom(): Boolean {
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        val totalItems = listState.layoutInfo.totalItemsCount
+        return lastVisible >= totalItems - 3
+    }
 
     // Track scroll gestures to detect when user scrolls up (stop auto-scroll)
     LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress && !isNearBottom) {
+        if (listState.isScrollInProgress && !isNearBottom()) {
             userScrolledUp = true
             keyboard?.hide() // dismiss keyboard when user manually scrolls
         }
@@ -248,7 +248,7 @@ fun HybridChatScreen(
         }
 
         // ── Messages ──────────────────────────────────────────────────────
-        Box(Modifier.weight(1f)) {
+        Box(Modifier.weight(1f).fillMaxHeight()) {
             LazyColumn(
                 state               = listState,
                 modifier            = Modifier.fillMaxSize(),
@@ -294,7 +294,7 @@ fun HybridChatScreen(
             }
 
             // ── Scroll-to-bottom FAB ───────────────────────────────────────
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = userScrolledUp && messages.isNotEmpty(),
                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 8.dp),
                 enter = scaleIn(animationSpec = spring(dampingRatio = 0.6f)) + fadeIn(),
