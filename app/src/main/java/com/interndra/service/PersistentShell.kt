@@ -322,7 +322,7 @@ class PersistentShell(
 
                         result = ShellExecutionResult(
                             stdout = output.trim(),
-                            stderr = "",
+                            stderr = extractStderr(output),
                             exitCode = exitCode,
                             isSuccess = exitCode == 0,
                             backend = if (shizukuProvider != null) ExecutionBackend.SHIZUKU_ADB
