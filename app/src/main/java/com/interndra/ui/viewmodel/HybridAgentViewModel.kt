@@ -1014,19 +1014,17 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
 
         // Collect step outputs to update the chat message
         val stepOutputs = mutableListOf<String>()
+        val originalReply = repo.getMessageText(chatMessageId) ?: ""
 
         taskManager.execute(task) { step, output ->
             val icon = if (step.status == com.interndra.ai.tasks.StepStatus.COMPLETED) "✅" else "❌"
             val detail = if (output.isNotBlank()) output.take(200) else "(no output)"
             stepOutputs.add("$icon **${step.label}**\n```\n$detail\n```")
 
-            // Update the chat message with accumulated outputs
-            val existing = repo.getMessageText(chatMessageId) ?: ""
-            val taskBlock = buildString {
-                appendLine("*${intent.action.replace('_', ' ')}*")
-                stepOutputs.forEach { appendLine(it); appendLine() }
-            }
-            repo.updateAiMessage(chatMessageId, "$existing\n\n$taskBlock")
+            // Rebuild message cleanly each step (no duplication)
+            val taskBlock = stepOutputs.joinToString("\n")
+            repo.updateAiMessage(chatMessageId,
+                "$originalReply\n\n### ${intent.action.replace('_', ' ')}\n$taskBlock")
         }
 
         // Log to timeline
