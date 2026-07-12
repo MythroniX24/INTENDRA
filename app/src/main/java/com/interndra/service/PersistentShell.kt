@@ -351,8 +351,9 @@ class PersistentShell(
             }
 
             pendingCommands.remove(id)
-            val finalResult = result
-            return finalResult
+            return result ?: ShellExecutionResult("", "Unknown error", -1, false,
+                backend = ExecutionBackend.SHELL_EXECUTOR,
+                durationMs = System.currentTimeMillis() - startMs)
         } catch (e: Exception) {
             Log.e(TAG, "Execute failed: ${e.message}")
             pendingCommands.remove(id)
