@@ -322,8 +322,9 @@ class WorkflowPlannerTest {
         assertThat(detected!!.intent).isEqualTo(WorkflowPlanner.Intent.EMAIL)
         val workflow = planner.plan(detected)
         assertThat(workflow).isNotNull()
-        assertThat(workflow!!.steps.first().command.command).contains("gmail")
-        assertThat(workflow.tags).contains("email")
+        val wf = workflow!!
+        assertThat(wf.steps.first().command.command).contains("gmail")
+        assertThat(wf.tags).contains("email")
     }
 
     // ═════════════════════════════════════════════════════════════════════
