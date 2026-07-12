@@ -436,6 +436,7 @@ private fun JsonNodeRow(node: JsonNode, indent: Int) {
                     is JsonNode.Array ->
                         if (!expanded) Text("[…]", color = TerminalWhite.copy(0.4f),
                             fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                    is JsonNode.KeyValue -> {}
                 }
             }
 
