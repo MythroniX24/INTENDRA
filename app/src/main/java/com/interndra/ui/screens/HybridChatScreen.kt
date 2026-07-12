@@ -6,7 +6,6 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.speech.RecognizerIntent
-import android.view.HapticFeedbackConstants
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,7 +42,6 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -90,7 +88,6 @@ fun HybridChatScreen(
     val context    = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val haptic      = LocalHapticFeedback.current
-    val view        = LocalView.current
 
     // ── Theme-aware colors ────────────────────────────────────────────
     val colors = LocalInterndraColors.current
@@ -165,25 +162,18 @@ fun HybridChatScreen(
                 }
             }
 
-            var frameTarget = 0
             val frameDuration = 14L // ~70fps for smoother feel
 
             while (revealed < len && streamingMsgId == msg.id) {
-                // Accumulate time until we're ready to reveal one more character
+                // Accumulate time and reveal characters that fit in this frame
                 var accumulated = 0
-                while (revealed < len && accumulated < frameDuration && streamingMsgId == msg.id) {
+                var charsThisFrame = 0
+                while (revealed < len && accumulated < frameDuration && streamingMsgId == msg.id && charsThisFrame < 8) {
                     accumulated += charDelays[revealed]
-                    if (accumulated < frameDuration) {
-                        revealed++
-                    }
+                    revealed++
+                    charsThisFrame++
                 }
-                // Reveal in variable-size chunks for performance
-                val chunkSize = when {
-                    revealed + 3 >= len -> len - revealed  // last few chars: reveal all
-                    accumulated > frameDuration * 2 -> 3    // slow section: batch 3
-                    else -> 1                               // normal: one at a time
-                }
-                revealed = (revealed + chunkSize).coerceAtMost(len)
+                // Update displayed text with all characters accumulated this frame
                 streamedText = text.substring(0, revealed)
                 delay(frameDuration)
             }
