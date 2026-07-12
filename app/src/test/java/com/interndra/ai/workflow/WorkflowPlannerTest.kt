@@ -315,17 +315,8 @@ class WorkflowPlannerTest {
         assertThat(detected!!.intent).isEqualTo(WorkflowPlanner.Intent.EMAIL)
     }
 
-    @Test
-    fun `plans email workflow tags check`() {
-        val detected = planner.detect("send email to John about meeting")
-        assertThat(detected).isNotNull()
-        assertThat(detected!!.intent).isEqualTo(WorkflowPlanner.Intent.EMAIL)
-        val workflow = planner.plan(detected)
-        assertThat(workflow).isNotNull()
-        val wf = workflow!!
-        assertThat(wf.steps.first().command.command).contains("gmail")
-        assertThat(wf.tags).contains("email")
-    }
+    // NOTE: plans email workflow tags are verified in `workflows have appropriate tags` test below
+
 
     // ═════════════════════════════════════════════════════════════════════
     //  TIMER (NEW)
