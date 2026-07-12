@@ -871,13 +871,20 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 // TTS: only speak if user has enabled it in Settings
                 if (!intent.reply.isNullOrBlank() && ttsEnabled.value) speak(intent.reply)
                 if (commands.isNotEmpty()) {
-                    try {
-                        executeCommands(session, trimmed, intent, commands, placeholderId)
-                    } catch (e: kotlinx.coroutines.CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Command execution failed: ${e.message}")
-                        try { repo.log(session, LogType.STATUS_FAIL, "❌ Execution error: ${e.message}") } catch (_: Exception) {}
+                    // If the intent has multiple steps, use the TaskManager for
+                    // Claude-like step-by-step execution with progress tracking.
+                    // Single-step commands use the legacy direct execution path.
+                    if (commands.size > 1 || intent.steps.size > 1) {
+                        executeViaTaskManager(session, trimmed, intent, commands, placeholderId)
+                    } else {
+                        try {
+                            executeCommands(session, trimmed, intent, commands, placeholderId)
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Command execution failed: ${e.message}")
+                            try { repo.log(session, LogType.STATUS_FAIL, "❌ Execution error: ${e.message}") } catch (_: Exception) {}
+                        }
                     }
                 }
 
@@ -979,6 +986,63 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             repo.rememberSuccess(userInput, intent.action, commands, _uiState.value.lastAiSource?.name ?: "UNKNOWN")
             val count = repo.memoryCount()
             _uiState.update { it.copy(memoryCount = count) }
+        }
+    }
+
+    /**
+     * Execute commands via TaskManager for Claude-like step-by-step execution
+     * with live progress tracking, pause/resume/retry/cancel support.
+     */
+    private suspend fun executeViaTaskManager(
+        session: String, userInput: String,
+        intent: AiIntent, commands: List<ShellCommand>,
+        chatMessageId: Long
+    ) {
+        val steps = commands.mapIndexed { i, cmd ->
+            val label = intent.steps.getOrNull(i)?.ifBlank { null }
+                ?: cmd.description.ifBlank { null }
+                ?: "Step ${i + 1}"
+            label to cmd.command
+        }
+
+        val task = taskManager.createTask(
+            title = intent.action.replace('_', ' ')
+                .split(' ').joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } },
+            description = intent.reply?.take(100) ?: "",
+            steps = steps
+        )
+
+        // Collect step outputs to update the chat message
+        val stepOutputs = mutableListOf<String>()
+
+        taskManager.execute(task) { step, output ->
+            val icon = if (step.status == com.interndra.ai.tasks.StepStatus.COMPLETED) "✅" else "❌"
+            val detail = if (output.isNotBlank()) output.take(200) else "(no output)"
+            stepOutputs.add("$icon **${step.label}**\n```\n$detail\n```")
+
+            // Update the chat message with accumulated outputs
+            val existing = repo.getMessageText(chatMessageId) ?: ""
+            val taskBlock = buildString {
+                appendLine("*${intent.action.replace('_', ' ')}*")
+                stepOutputs.forEach { appendLine(it); appendLine() }
+            }
+            repo.updateAiMessage(chatMessageId, "$existing\n\n$taskBlock")
+        }
+
+        // Log to timeline
+        val finalTask = taskManager.activeTask.value
+        if (finalTask != null) {
+            timelineEngine.recordCommand(
+                command = intent.action,
+                output = "Task: ${finalTask.completedSteps}/${finalTask.steps.size} steps completed",
+                success = finalTask.status == com.interndra.ai.tasks.TaskStatus.COMPLETED,
+                durationMs = finalTask.totalDurationMs
+            )
+            if (finalTask.status == com.interndra.ai.tasks.TaskStatus.COMPLETED) {
+                repo.rememberSuccess(userInput, intent.action, commands,
+                    _uiState.value.lastAiSource?.name ?: "UNKNOWN")
+                _uiState.update { it.copy(memoryCount = repo.memoryCount()) }
+            }
         }
     }
 
