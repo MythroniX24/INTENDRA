@@ -97,12 +97,13 @@ class PersistentShell(
 
     // ── State queries ───────────────────────────────────────────────────
     val isAlive: Boolean get() = isRunning && try { process?.isAlive == true } catch (_: Exception) { false }
-    val pid: Int? get() = try {
-        // Process.pid() available API 26+; fallback for older versions
-        val p = process ?: return@try null
-        val method = p.javaClass.getMethod("pid")
-        (method.invoke(p) as? Int)
-    } catch (_: Exception) { null }
+    val pid: Int? get() {
+        val p = process ?: return null
+        return try {
+            val method = p.javaClass.getMethod("pid")
+            method.invoke(p) as? Int
+        } catch (_: Exception) { null }
+    }
 
     /** Human-readable description of the execution backend. */
     val backendDescription: String
