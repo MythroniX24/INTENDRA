@@ -106,9 +106,10 @@ class TerminalAgent(
             } else {
                 Log.e(TAG, "Failed to start persistent shell")
                 _outputFlow.tryEmit(StreamEvent.Output("default",
-                    "\u001b[31m✗ Failed to start terminal shell\u001b[0m\n"))
+                    "\u001b[31m✗ Failed to start persistent shell — using fallback execution\u001b[0m\n"))
+                // Don't cache dead shell — let runExecution try the fallback path
+                null
             }
-            persistentShell
         }
     }
 
@@ -185,7 +186,8 @@ class TerminalAgent(
     }
 
     // ── Streaming ─────────────────────────────────────────────────────────
-    private val _outputFlow = MutableSharedFlow<StreamEvent>(replay = 0, extraBufferCapacity = 256)
+    // Higher buffer to prevent output drops under heavy streaming
+    private val _outputFlow = MutableSharedFlow<StreamEvent>(replay = 0, extraBufferCapacity = 1024)
     val outputFlow: SharedFlow<StreamEvent> = _outputFlow.asSharedFlow()
 
     sealed class StreamEvent {

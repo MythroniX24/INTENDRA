@@ -104,12 +104,8 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
             if (event is TerminalAgent.StreamEvent.Output &&
                 (event.sessionName == activeSession || activeSession == "default")) {
                 terminalBuffer.processOutput(event.text)
-                // Flush with minimal debounce — 16ms (one frame) for smooth streaming
-                val now = System.currentTimeMillis()
-                if (now - refreshTick > 16) {
-                    refreshTick = now
-                    terminalLines = terminalBuffer.flush()
-                }
+                // FLUSH IMMEDIATELY — no debounce that drops output
+                terminalLines = terminalBuffer.flush()
             }
         }
     }
