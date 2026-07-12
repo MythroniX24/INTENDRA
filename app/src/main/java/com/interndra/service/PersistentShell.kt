@@ -96,8 +96,13 @@ class PersistentShell(
     )
 
     // ── State queries ───────────────────────────────────────────────────
-    val isAlive: Boolean get() = isRunning && process?.isAlive == true
-    val pid: Int? get() = try { process?.pid()?.toInt() } catch (_: Exception) { null }
+    val isAlive: Boolean get() = isRunning && try { process?.isAlive == true } catch (_: Exception) { false }
+    val pid: Int? get() = try {
+        // Process.pid() available API 26+; fallback for older versions
+        val p = process ?: return@try null
+        val method = p.javaClass.getMethod("pid")
+        (method.invoke(p) as? Int)
+    } catch (_: Exception) { null }
 
     /** Human-readable description of the execution backend. */
     val backendDescription: String
@@ -322,7 +327,7 @@ class PersistentShell(
 
                         result = ShellExecutionResult(
                             stdout = output.trim(),
-                            stderr = extractStderr(output),
+                            stderr = "",
                             exitCode = exitCode,
                             isSuccess = exitCode == 0,
                             backend = if (shizukuProvider != null) ExecutionBackend.SHIZUKU_ADB
@@ -345,7 +350,8 @@ class PersistentShell(
             }
 
             pendingCommands.remove(id)
-            return result
+            val finalResult = result
+            return finalResult
         } catch (e: Exception) {
             Log.e(TAG, "Execute failed: ${e.message}")
             pendingCommands.remove(id)
