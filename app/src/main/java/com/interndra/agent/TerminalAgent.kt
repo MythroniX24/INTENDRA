@@ -3,11 +3,11 @@ package com.interndra.agent
 import android.content.Context
 import android.util.Log
 import com.interndra.service.ExecutionBackend
+import com.interndra.service.PersistentShell
 import com.interndra.service.ShellExecutionResult
-import com.interndra.service.ShizukuShell
 import com.interndra.service.ShellExecutor
+import com.interndra.service.ShizukuShell
 import com.interndra.service.TerminalConfig
-import com.interndra.service.TermuxBridge
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.*
@@ -20,33 +20,110 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * TerminalAgent — persistent shell session manager with real-time streaming,
- * auto-completion, error recovery, background jobs, and automatic workdir tracking.
+ * TerminalAgent — persistent shell session manager with real-time streaming.
  *
- * ## A+++ UPGRADES:
- *  1. **Unified ShellExecutionResult** — all backends return the same type.
- *  2. **Command Queue + Deduplication** — Mutex-based, prevents concurrent duplicates.
- *  3. **Clean Fallback Chain** — ShizukuShell → TermuxBridge → SmartShell.
- *  4. **Persistent Aliases + Env Vars** — saved/loaded in session JSON.
- *  5. **TerminalConfig** — centralized timeout, cap, and limit constants.
- *  6. **Background Job Support** — spawn long-running commands (servers, watchers)
- *     via executeBackground(), cancel them, track status + output.
+ * ## A+++ UPGRADE: Real Persistent Shell (PersistentShell)
+ * Instead of spawning `sh -c "command"` for every command (which means `cd`
+ * and env vars never persist), we now use ONE persistent shell process that
+ * stays alive between commands. This means:
+ *  - `cd` actually changes the shell's working directory
+ *  - Environment variables set with `export` persist
+ *  - Aliases defined with `alias` persist
+ *  - The shell has real history and state
+ *  - Interactive programs (vim, python REPL) can work via PTY in future
  *
  * ## Execution Priority
- * ```
- * ShizukuShell → TermuxBridge → SmartShell (sandboxed fallback)
- * ```
+ * 1. **PersistentShell with Shizuku** — elevated shell (root/ADB UID), lives at /
+ * 2. **PersistentShell sandboxed** — app's own UID, limited permissions
+ * 3. **ShellExecutor fallback** — one-shot commands (legacy)
+ *
+ * ## No Termux Required
+ * TermuxBridge has been removed. The terminal works independently with its
+ * own built-in shell. No external Termux app needed.
  */
 class TerminalAgent(
     private val context: Context,
-    private val termuxBridge: TermuxBridge,
     private val shizukuShell: ShizukuShell,
     private val scope: CoroutineScope? = null
 ) {
     companion object {
         private const val TAG = "TerminalAgent"
+
+        /** Default working directory — ROOT (/) for Shizuku, /sdcard for sandbox. */
+        val DEFAULT_WORKDIR = "/"
+
+        /** Termux home (kept for backward compatibility with saved sessions). */
         val TERMUX_HOME = "/data/data/com.termux/files/home"
         val TERMUX_USR_BIN = "/data/data/com.termux/files/usr/bin"
+    }
+
+    // ── Persistent Shell ───────────────────────────────────────────────
+    @Volatile private var persistentShell: PersistentShell? = null
+    private val shellMutex = Mutex()
+
+    /** Get or create the persistent shell instance. */
+    private suspend fun getShell(): PersistentShell? {
+        var shell = persistentShell
+        if (shell?.isAlive == true) return shell
+
+        return shellMutex.withLock {
+            shell = persistentShell
+            if (shell?.isAlive == true) return@withLock shell
+
+            Log.i(TAG, "Creating persistent shell...")
+            val newShell = if (shizukuShell.isElevatedAvailable) {
+                // Shizuku-elevated shell with root privileges
+                Log.i(TAG, "Using Shizuku-elevated persistent shell (UID ${shizukuShell.manager.shizukuUid})")
+                PersistentShell(
+                    shellPath = PersistentShell.DEFAULT_SHELL,
+                    initialWorkdir = DEFAULT_WORKDIR,
+                    shizukuProvider = {
+                        try {
+                            shizukuShell.manager.executeShell("echo shizuku_ready 2>&1")
+                            // Use ShizukuProcessCreator to spawn a persistent shell
+                            createShizukuShellProcess()
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Shizuku shell spawn failed: ${e.message}")
+                            null
+                        }
+                    }
+                )
+            } else {
+                // Sandboxed persistent shell
+                Log.i(TAG, "Using sandboxed persistent shell")
+                PersistentShell(
+                    shellPath = PersistentShell.DEFAULT_SHELL,
+                    initialWorkdir = DEFAULT_WORKDIR
+                )
+            }
+
+            val started = newShell.start()
+            if (started) {
+                persistentShell = newShell
+                Log.i(TAG, "✅ Persistent shell started (${newShell.backendDescription})")
+                _outputFlow.tryEmit(StreamEvent.Output("default",
+                    "\u001b[32m✓ Terminal ready — ${newShell.backendDescription}\u001b[0m\n"))
+            } else {
+                Log.e(TAG, "Failed to start persistent shell")
+                _outputFlow.tryEmit(StreamEvent.Output("default",
+                    "\u001b[31m✗ Failed to start terminal shell\u001b[0m\n"))
+            }
+            persistentShell
+        }
+    }
+
+    /** Create a Shizuku-elevated persistent shell process via ShizukuManager. */
+    private fun createShizukuShellProcess(): Process? {
+        return try {
+            val method = rikka.shizuku.Shizuku::class.java.getDeclaredMethod(
+                "newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java
+            )
+            method.isAccessible = true
+            method.invoke(null, arrayOf("sh", "-i"), null, DEFAULT_WORKDIR) as? Process
+        } catch (e: Exception) {
+            Log.e(TAG, "Shizuku.newProcess failed: ${e.message}")
+            null
+        }
     }
 
     // ── Command Queue ──────────────────────────────────────────────────
@@ -61,10 +138,12 @@ class TerminalAgent(
     // ── Session ────────────────────────────────────────────────────────────
     data class TerminalSession(
         val name: String,
-        var workdir: String = TERMUX_HOME,
+        var workdir: String = DEFAULT_WORKDIR,
         val envVars: MutableMap<String, String> = mutableMapOf(
-            "HOME" to TERMUX_HOME, "PATH" to "$TERMUX_USR_BIN:/usr/bin:/bin",
-            "PWD" to TERMUX_HOME, "TERM" to "xterm-256color"
+            "HOME" to DEFAULT_WORKDIR,
+            "PATH" to "/system/bin:/system/xbin:/sbin:/vendor/bin:/data/local/tmp:/su/bin:/su/xbin:/data/data/com.termux/files/usr/bin:/usr/bin:/bin",
+            "PWD" to DEFAULT_WORKDIR,
+            "TERM" to "xterm-256color"
         ),
         val aliases: MutableMap<String, String> = mutableMapOf(),
         val history: MutableList<HistoryEntry> = mutableListOf(),
@@ -114,7 +193,6 @@ class TerminalAgent(
         data class CommandStart(val sessionName: String, val command: String) : StreamEvent()
         data class CommandEnd(val sessionName: String, val exitCode: Int, val backend: ExecutionBackend = ExecutionBackend.UNKNOWN) : StreamEvent()
         data class Error(val sessionName: String, val message: String) : StreamEvent()
-        // ── Background job events ──────────────────────────────────────
         data class JobCreated(val job: SessionJob) : StreamEvent()
         data class JobOutput(val jobId: Int, val sessionName: String, val text: String) : StreamEvent()
         data class JobEnded(val jobId: Int, val sessionName: String, val exitCode: Int) : StreamEvent()
@@ -128,22 +206,19 @@ class TerminalAgent(
     private val autoSaveScope: CoroutineScope = scope ?: CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     val executionBackendDescription: String
-        get() = when {
-            shizukuShell.isElevatedAvailable -> "Shizuku (${shizukuShell.privilegeDescription})"
-            termuxBridge.isTermuxInstalled() && termuxBridge.hasPermission() -> "Termux"
-            else -> "Sandboxed (ShellExecutor)"
-        }
+        get() = persistentShell?.backendDescription ?: "⚙️ ShellExecutor"
+
     val isElevated: Boolean get() = shizukuShell.isElevatedAvailable
 
     // ── Session Management ────────────────────────────────────────────────
-    fun createSession(name: String, workdir: String = TERMUX_HOME): TerminalSession =
+    fun createSession(name: String, workdir: String = DEFAULT_WORKDIR): TerminalSession =
         sessions.getOrPut(name) {
             TerminalSession(name = name, workdir = workdir).also {
                 _outputFlow.tryEmit(StreamEvent.Output(name, "\u001b[32m✓ Session '$name' created\u001b[0m\n"))
             }
         }
     fun getDefaultSession(): TerminalSession = createSession(defaultSessionName)
-    fun getOrCreateSession(name: String, workdir: String = TERMUX_HOME): TerminalSession =
+    fun getOrCreateSession(name: String, workdir: String = DEFAULT_WORKDIR): TerminalSession =
         sessions[name] ?: createSession(name, workdir)
     fun getAllSessions(): List<TerminalSession> = sessions.values.toList()
     fun getSessionNames(): List<String> = sessions.keys.toList()
@@ -157,15 +232,24 @@ class TerminalAgent(
         sessions[newName] = s.copy(name = newName); scheduleAutoSave(); return true
     }
     fun getWorkdir(sessionName: String): String = getOrCreateSession(sessionName).workdir
-    fun changeWorkdir(sessionName: String, target: String): String {
+
+    /** Change working directory — writes `cd` to the persistent shell. */
+    suspend fun changeWorkdir(sessionName: String, target: String): String {
         val session = getOrCreateSession(sessionName)
-        synchronized(session) {
-            val resolved = resolvePath(session.workdir, target)
-            session.workdir = resolved; session.envVars["PWD"] = resolved
+        val shell = getShell()
+        if (shell != null) {
+            val newDir = shell.changeWorkdir(target)
+            session.workdir = newDir
+            session.envVars["PWD"] = newDir
             session.lastActiveAt = System.currentTimeMillis()
-            _outputFlow.tryEmit(StreamEvent.Output(sessionName, "\u001b[36m${session.name} ~ $resolved\u001b[0m\n"))
+            _outputFlow.tryEmit(StreamEvent.Output(sessionName, "\u001b[36m$newDir\u001b[0m\n"))
+            return newDir
         }
-        return session.workdir
+        // Fallback: resolve locally
+        val resolved = resolvePath(session.workdir, target)
+        session.workdir = resolved; session.envVars["PWD"] = resolved
+        session.lastActiveAt = System.currentTimeMillis()
+        return resolved
     }
 
     // ── Aliases + Env ──────────────────────────────────────────────────
@@ -200,64 +284,38 @@ class TerminalAgent(
     }
 
     // ── Background Job Execution ───────────────────────────────────────
-
-    /**
-     * Spawn a command in the background WITHOUT blocking.
-     * Returns a [SessionJob] handle immediately — the command runs
-     * asynchronously and output is streamed via [StreamEvent.JobOutput].
-     *
-     * Use for long-running commands like servers, watchers, and daemons.
-     * Cancel with [cancelJob], check status with [listJobs].
-     */
-    fun executeBackground(
-        sessionName: String,
-        command: String
-    ): SessionJob {
+    fun executeBackground(sessionName: String, command: String): SessionJob {
         val jobId = jobIdCounter.incrementAndGet()
         val expanded = expandAliases(sessionName, command)
         val session = getOrCreateSession(sessionName)
-
         val job = SessionJob(id = jobId, command = expanded, sessionName = sessionName)
         backgroundJobs[jobId] = job
 
-        // Emit job created event
         _outputFlow.tryEmit(StreamEvent.JobCreated(job))
         _outputFlow.tryEmit(StreamEvent.Output(sessionName,
             "\u001b[33m⚡ Background job #$jobId: $expanded\u001b[0m\n"))
         session.outputLines.add("\u001b[33m⚡ Background job #$jobId: $expanded\u001b[0m\n")
 
-        // Spawn the process in a background thread
         Thread {
             try {
-                val bgProcess = ShellExecutor.spawnBackground(
-                    cmd = expanded,
-                    onOutput = { line ->
-                        job.outputLines.add(line)
-                        _outputFlow.tryEmit(StreamEvent.JobOutput(jobId, sessionName, line))
-                    }
-                )
+                val bgProcess = ShellExecutor.spawnBackground(expanded) { line ->
+                    job.outputLines.add(line)
+                    _outputFlow.tryEmit(StreamEvent.JobOutput(jobId, sessionName, line))
+                }
                 job.bgProcess = bgProcess
-
-                // Wait for process to complete (this is a daemon thread, won't block UI)
-                val done = bgProcess.waitFor(0) // 0 = wait indefinitely
+                val done = bgProcess.waitFor(0)
                 if (done || bgProcess.hasExited()) {
                     job.exitCode = bgProcess.exitCode ?: 0
                     job.status = if (job.exitCode == 0) BackgroundJobStatus.COMPLETED
                                  else BackgroundJobStatus.FAILED
-
                     val statusIcon = if (job.exitCode == 0) "\u001b[32m✓\u001b[0m" else "\u001b[31m✗\u001b[0m"
                     val msg = "$statusIcon Background job #$jobId finished (exit ${job.exitCode})\n"
                     _outputFlow.tryEmit(StreamEvent.Output(sessionName, msg))
                     _outputFlow.tryEmit(StreamEvent.JobEnded(jobId, sessionName, job.exitCode ?: -1))
-                    // Clean up completed job from the map after a delay to allow UI to see it
-                    kotlinx.coroutines.GlobalScope.launch {
-                        kotlinx.coroutines.delay(5000) // Keep visible for 5s
-                        backgroundJobs.remove(jobId)
-                    }
+                    GlobalScope.launch { delay(5000); backgroundJobs.remove(jobId) }
                 }
             } catch (e: Exception) {
-                job.status = BackgroundJobStatus.FAILED
-                job.exitCode = -1
+                job.status = BackgroundJobStatus.FAILED; job.exitCode = -1
                 _outputFlow.tryEmit(StreamEvent.Output(sessionName,
                     "\u001b[31m✗ Background job #$jobId failed: ${e.message}\u001b[0m\n"))
                 _outputFlow.tryEmit(StreamEvent.JobEnded(jobId, sessionName, -1))
@@ -267,52 +325,30 @@ class TerminalAgent(
         return job
     }
 
-    /**
-     * Cancel a running background job by ID.
-     * @return true if the job was found and cancelled, false otherwise.
-     */
     fun cancelJob(jobId: Int): Boolean {
         val job = backgroundJobs[jobId] ?: return false
         if (job.status == BackgroundJobStatus.RUNNING) {
-            job.bgProcess?.cancel()
-            job.status = BackgroundJobStatus.CANCELLED
-            job.exitCode = -1
-
+            job.bgProcess?.cancel(); job.status = BackgroundJobStatus.CANCELLED; job.exitCode = -1
             val msg = "\u001b[33m⏹ Job #$jobId cancelled: ${job.command.take(50)}\u001b[0m\n"
             _outputFlow.tryEmit(StreamEvent.Output(job.sessionName, msg))
             _outputFlow.tryEmit(StreamEvent.JobEnded(jobId, job.sessionName, -1))
         }
-        // Always remove from the map whether running or already finished
-        backgroundJobs.remove(jobId)
-        return true
+        backgroundJobs.remove(jobId); return true
     }
 
-    /**
-     * Cancel ALL running background jobs for a session.
-     */
     fun cancelAllJobs(sessionName: String) {
-        backgroundJobs.values
-            .filter { it.sessionName == sessionName && it.isActive }
+        backgroundJobs.values.filter { it.sessionName == sessionName && it.isActive }
             .forEach { cancelJob(it.id) }
     }
 
-    /** List all background jobs (active + recent). */
     fun listJobs(): List<SessionJob> = backgroundJobs.values.toList()
-
-    /** List background jobs for a specific session. */
     fun listJobsForSession(sessionName: String): List<SessionJob> =
         backgroundJobs.values.filter { it.sessionName == sessionName }
-
-    /** Get a specific background job by ID. */
     fun getJob(jobId: Int): SessionJob? = backgroundJobs[jobId]
-
-    /** Get accumulated output for a background job. */
     fun getJobOutput(jobId: Int): String = backgroundJobs[jobId]?.output ?: ""
-
-    /** Get the count of active background jobs. */
     fun activeJobCount(): Int = backgroundJobs.values.count { it.isActive }
 
-    // ── Command Execution with Streaming + Queue ────────────────────────
+    // ── Command Execution ──────────────────────────────────────────────
     suspend fun execute(
         sessionName: String, command: String,
         timeoutMs: Long = TerminalConfig.AGENT_TIMEOUT_MS
@@ -339,42 +375,56 @@ class TerminalAgent(
         val trimmed = expanded.trim()
 
         val prompt = if (command != expanded)
-            "\u001b[90m($command → $trimmed)\u001b[0m\n\u001b[32m\$\u001b[0m $trimmed\n"
-        else "\u001b[32m\$\u001b[0m $trimmed\n"
+            "\u001b[90m($command → $trimmed)\u001b[0m\n\u001b[32m\\$\u001b[0m $trimmed\n"
+        else "\u001b[32m\\$\u001b[0m $trimmed\n"
         session.outputLines.add(prompt)
         _outputFlow.emit(StreamEvent.CommandStart(sessionName, trimmed))
         _outputFlow.emit(StreamEvent.Output(sessionName, prompt))
 
-        if (trimmed.startsWith("cd ")) return@withContext handleCd(sessionName, session, trimmed, startMs)
-
-        val workdir = session.workdir
-        val result: ShellExecutionResult = when {
-            shizukuShell.isElevatedAvailable -> shizukuShell.execute(trimmed, timeoutMs) { line ->
-                session.outputLines.add(line); _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
+        // ── Try persistent shell first ──
+        val shell = getShell()
+        val result: ShellExecutionResult = if (shell != null && shell.isAlive) {
+            Log.d(TAG, "Executing via persistent shell: $trimmed")
+            shell.execute(trimmed, timeoutMs) { line ->
+                session.outputLines.add(line)
+                _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
             }
-            termuxBridge.isTermuxInstalled() && termuxBridge.hasPermission() ->
-                termuxBridge.executeShell(trimmed, workdir, timeoutMs) { line ->
+        } else {
+            // Fallback to one-shot ShizukuShell / ShellExecutor
+            Log.w(TAG, "Persistent shell not available, using one-shot execution")
+            if (shizukuShell.isElevatedAvailable) {
+                shizukuShell.execute(trimmed, timeoutMs) { line ->
                     session.outputLines.add(line); _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
                 }
-            else -> shizukuShell.execute(trimmed, timeoutMs) { line ->
-                session.outputLines.add(line); _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
+            } else {
+                ShellExecutor.runStreaming(trimmed, timeoutMs) { line ->
+                    session.outputLines.add(line); _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
+                }
             }
         }
 
-        // Emit backend indicator
+        // ── Backend indicator ──
         val indicator = when (result.backend) {
             ExecutionBackend.SHIZUKU_ROOT -> "\u001b[90m[🛡️ Shizuku Root]\u001b[0m\n"
             ExecutionBackend.SHIZUKU_ADB -> "\u001b[90m[🔑 Shizuku ADB]\u001b[0m\n"
-            ExecutionBackend.TERMUX -> "\u001b[90m[📦 Termux]\u001b[0m\n"
-            else -> "\u001b[90m[⚙️ ShellExecutor]\u001b[0m\n"
+            else -> "\u001b[90m[⚙️ Shell]\u001b[0m\n"
         }
         session.outputLines.add(indicator)
         _outputFlow.tryEmit(StreamEvent.Output(sessionName, indicator))
 
+        // Update workdir after command (shell may have changed it via cd)
+        if (shell != null && shell.isAlive && result.isSuccess) {
+            try {
+                val newWorkdir = shell.getWorkdir()
+                session.workdir = newWorkdir
+                session.envVars["PWD"] = newWorkdir
+            } catch (_: Exception) {}
+        }
+
         val duration = System.currentTimeMillis() - startMs
         synchronized(session) {
             session.lastActiveAt = System.currentTimeMillis()
-            session.history.add(HistoryEntry(trimmed, workdir, result.exitCode,
+            session.history.add(HistoryEntry(trimmed, session.workdir, result.exitCode,
                 result.stdout.take(TerminalConfig.MAX_STDOUT_SNIPPET_CHARS),
                 result.stderr.take(TerminalConfig.MAX_STDERR_SNIPPET_CHARS), durationMs = duration,
                 backend = result.backend.name))
@@ -388,17 +438,7 @@ class TerminalAgent(
         _outputFlow.emit(StreamEvent.Output(sessionName, exitMsg))
         _outputFlow.emit(StreamEvent.CommandEnd(sessionName, result.exitCode, result.backend))
         scheduleAutoSave()
-        SessionResult(result.stdout, result.stderr, result.exitCode, result.isSuccess, sessionName, workdir, duration, backend = result.backend)
-    }
-
-    private suspend fun handleCd(sessionName: String, session: TerminalSession, trimmed: String, startMs: Long): SessionResult {
-        val target = trimmed.removePrefix("cd ").trim().trim('"').trim('\'')
-        if (target.isNotBlank()) synchronized(session) {
-            session.workdir = resolvePath(session.workdir, target); session.envVars["PWD"] = session.workdir
-        }
-        _outputFlow.emit(StreamEvent.Output(sessionName, "\u001b[36m${session.workdir}\u001b[0m\n"))
-        _outputFlow.emit(StreamEvent.CommandEnd(sessionName, 0))
-        return SessionResult("", "", 0, true, sessionName, session.workdir, System.currentTimeMillis() - startMs)
+        SessionResult(result.stdout, result.stderr, result.exitCode, result.isSuccess, sessionName, session.workdir, duration, backend = result.backend)
     }
 
     // ── Error Recovery ───────────────────────────────────────────────────
@@ -507,7 +547,7 @@ class TerminalAgent(
         } catch (_: Exception) { return emptyList() }
     }
     private fun completeCommand(input: String): List<CompletionSuggestion> {
-        val cmds = listOf("ls","cd","cat","echo","pwd","mkdir","rm","cp","mv","touch","chmod","grep","find","head","tail","sort","wc","cut","diff","tar","zip","unzip","curl","wget","python","python3","node","npm","git","pkg","pip","pip3","make","gcc","g++","ruby","perl","php","vim","nano","less","more","clear","history","env","export","source",".","which","whereis","type","chsh","termux-setup-storage","ping","nslookup","dig","ssh","scp","rsync","htop","top","ps","kill","df","du","free","uname","neofetch","screenfetch","termux-wifi-connectioninfo","termux-battery-status","termux-sensor","termux-clipboard-get","termux-clipboard-set","termux-toast","termux-vibrate","termux-torch")
+        val cmds = listOf("ls","cd","cat","echo","pwd","mkdir","rm","cp","mv","touch","chmod","grep","find","head","tail","sort","wc","cut","diff","tar","zip","unzip","curl","wget","python","python3","node","npm","git","pkg","pip","pip3","make","gcc","g++","ruby","perl","php","vim","nano","less","more","clear","history","env","export","source",".","which","whereis","type","ping","nslookup","dig","ssh","scp","rsync","htop","top","ps","kill","df","du","free","uname","neofetch","screenfetch")
         return cmds.filter { it.startsWith(input) }.map { CompletionSuggestion(it.removePrefix(input), it, "command", 0.7f) }
     }
 
@@ -517,8 +557,8 @@ class TerminalAgent(
         if (cmdMatch != null) {
             val missing = cmdMatch.groupValues[1].lowercase()
             val pkgMap = mapOf("git" to "git","python3" to "python","python" to "python","pip" to "python-pip","pip3" to "python-pip","node" to "nodejs","npm" to "nodejs","make" to "make","gcc" to "gcc","g++" to "gcc","curl" to "curl","wget" to "wget","tar" to "tar","zip" to "zip","unzip" to "unzip","htop" to "htop","vim" to "vim","nano" to "nano","rsync" to "rsync","screenfetch" to "screenfetch","neofetch" to "neofetch","ffmpeg" to "ffmpeg","ruby" to "ruby","perl" to "perl","php" to "php")
-            val pkg = pkgMap[missing] ?: return RecoveryAction("Package '$missing' not available", listOf("pkg search $missing 2>/dev/null | head -20"), 0.3f, "Command '$missing' was not found.")
-            return RecoveryAction("Install '$pkg'", listOf("pkg install -y $pkg 2>&1"), 0.85f, "Installing '$pkg' via pkg...")
+            val pkg = pkgMap[missing] ?: return RecoveryAction("Package '$missing' not available", listOf("apt-get install $missing 2>/dev/null || echo 'Not available'"), 0.3f, "Command '$missing' was not found.")
+            return RecoveryAction("Install '$pkg'", listOf("apt-get install -y $pkg 2>&1 || pkg install -y $pkg 2>&1"), 0.85f, "Installing '$pkg'...")
         }
         val pipMatch = Regex("""(?:ModuleNotFoundError|ImportError|No module named)\s*['"]?(\w[\w.-]*)['"]?""").find(lower)
         if (pipMatch != null) return RecoveryAction("Install Python module", listOf("pip install ${pipMatch.groupValues[1]} 2>&1"), 0.9f, "Python module not found. Installing via pip...")
@@ -527,7 +567,7 @@ class TerminalAgent(
         if (lower.contains("not a git repository") || lower.contains("fatal: not a git")) return RecoveryAction("Init git repo", listOf("git init 2>&1", "git add . 2>&1"), 0.65f, "Initializing git repository...")
         if (lower.contains("permission denied") || lower.contains("not permitted")) return RecoveryAction("Fix permissions", listOf("chmod +x ${command.split(" ").firstOrNull() ?: "script"}"), 0.4f, "Permission denied.")
         if (lower.contains("connection refused") || lower.contains("network is unreachable") || lower.contains("could not connect") || lower.contains("timeout")) return RecoveryAction("Check network", listOf("ping -c 2 -W 3 8.8.8.8 2>&1 || echo 'Network offline'"), 0.35f, "Network issue detected.")
-        if (lower.contains("has no installation candidate") || lower.contains("unable to locate package")) return RecoveryAction("Update pkg lists", listOf("pkg update 2>&1"), 0.7f, "Package lists may be outdated.")
+        if (lower.contains("has no installation candidate") || lower.contains("unable to locate package")) return RecoveryAction("Update pkg lists", listOf("apt-get update 2>&1 || echo 'Update failed'"), 0.7f, "Package lists may be outdated.")
         if (lower.contains("syntaxerror") || lower.contains("syntax error")) return RecoveryAction("Check syntax", emptyList(), 0.3f, "Syntax error. Check quotes, brackets, indentation.")
         return null
     }
@@ -536,15 +576,15 @@ class TerminalAgent(
     private val npmScriptsCache = mutableListOf<String>()
     suspend fun refreshNpmScripts(sessionName: String) = withContext(Dispatchers.IO) {
         try {
-            val session = sessions[sessionName] ?: return@withContext
-            val r = termuxBridge.executeShell("cat package.json 2>/dev/null | grep -o '\"[a-z-]*\":' | tr -d '\":'", session.workdir, TerminalConfig.CONNECTION_TEST_TIMEOUT_MS)
+            val shell = getShell() ?: return@withContext
+            val r = shell.execute("cat package.json 2>/dev/null | grep -o '\"[a-z-]*\":' | tr -d '\":'", timeoutMs = TerminalConfig.CONNECTION_TEST_TIMEOUT_MS)
             if (r.isSuccess) { npmScriptsCache.clear(); npmScriptsCache.addAll(r.stdout.lines().map { it.trim() }.filter { it.isNotBlank() }) }
         } catch (e: Exception) { Log.w(TAG, "NPM cache: ${e.message}") }
     }
     suspend fun refreshGitBranches(sessionName: String) = withContext(Dispatchers.IO) {
         try {
-            val session = sessions[sessionName] ?: return@withContext
-            val r = termuxBridge.executeShell("git branch -a 2>/dev/null | sed 's/^*//' | sed 's/^[[:space:]]*//' | sed 's/(HEAD.*)//' | tr -d ' '", session.workdir, TerminalConfig.CONNECTION_TEST_TIMEOUT_MS)
+            val shell = getShell() ?: return@withContext
+            val r = shell.execute("git branch -a 2>/dev/null | sed 's/^*//' | sed 's/^[[:space:]]*//' | sed 's/(HEAD.*)//' | tr -d ' '", timeoutMs = TerminalConfig.CONNECTION_TEST_TIMEOUT_MS)
             if (r.isSuccess) gitBranchCache[sessionName] = r.stdout.lines().map { it.trim() }.filter { it.isNotBlank() && !it.startsWith("(") }
         } catch (e: Exception) { Log.w(TAG, "Git cache: ${e.message}") }
     }
@@ -553,7 +593,6 @@ class TerminalAgent(
     private fun resolvePath(currentDir: String, target: String): String = when {
         target == "." -> currentDir
         target == ".." -> File(currentDir).parent ?: currentDir
-        target.startsWith("~") -> target.replace("~", TERMUX_HOME)
         target.startsWith("/") -> target
         target.startsWith("..") -> {
             val parts = target.split("/").filter { it.isNotBlank() }
@@ -568,7 +607,7 @@ class TerminalAgent(
     private fun scheduleAutoSave() { autoSaveJob?.cancel(); autoSaveJob = autoSaveScope.launch { delay(TerminalConfig.AUTO_SAVE_DELAY_MS); saveSessionsToDisk() } }
     fun shutdown() {
         autoSaveJob?.cancel(); autoSaveJob = null
-        // Cancel ALL background jobs across ALL sessions
+        persistentShell?.destroy(); persistentShell = null
         backgroundJobs.values.filter { it.isActive }.forEach { cancelJob(it.id) }
         saveSessionsToDisk()
         sessions.clear()
@@ -583,7 +622,7 @@ class TerminalAgent(
             val data: List<Map<String, Any?>> = Gson().fromJson(file.readText(), object : TypeToken<List<Map<String, Any?>>>() {}.type)
             data.forEach { entry ->
                 val name = entry["name"] as? String ?: return@forEach
-                if (!sessions.containsKey(name)) sessions[name] = TerminalSession(name = name, workdir = entry["workdir"] as? String ?: TERMUX_HOME, envVars = (entry["envVars"] as? Map<String, String>)?.toMutableMap() ?: mutableMapOf(), aliases = (entry["aliases"] as? Map<String, String>)?.toMutableMap() ?: mutableMapOf())
+                if (!sessions.containsKey(name)) sessions[name] = TerminalSession(name = name, workdir = entry["workdir"] as? String ?: DEFAULT_WORKDIR, envVars = (entry["envVars"] as? Map<String, String>)?.toMutableMap() ?: mutableMapOf(), aliases = (entry["aliases"] as? Map<String, String>)?.toMutableMap() ?: mutableMapOf())
             }
             Log.d(TAG, "Loaded ${data.size} sessions")
         } catch (e: Exception) { Log.w(TAG, "Load failed: ${e.message}") }

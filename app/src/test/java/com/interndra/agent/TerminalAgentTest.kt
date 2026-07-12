@@ -19,7 +19,6 @@ import org.junit.Test
 class TerminalAgentTest {
 
     private lateinit var context: Context
-    private lateinit var termuxBridge: TermuxBridge
     private lateinit var shizukuShell: ShizukuShell
     private lateinit var agent: TerminalAgent
     private lateinit var testScope: CoroutineScope
@@ -27,13 +26,11 @@ class TerminalAgentTest {
     @Before
     fun setUp() {
         context = mockk(relaxed = true)
-        termuxBridge = mockk(relaxed = true)
         shizukuShell = mockk(relaxed = true)
 
-        // Default: Termux NOT available, Shizuku NOT elevated
-        every { termuxBridge.isTermuxInstalled() } returns false
-        every { termuxBridge.hasPermission() } returns false
+        // Default: Shizuku NOT elevated
         every { shizukuShell.isElevatedAvailable } returns false
+        every { shizukuShell.manager } returns mockk(relaxed = true)
 
         // Mock filesDir for persistence tests — use temp dir
         val tempDir = java.io.File(System.getProperty("java.io.tmpdir"), "interndra-test")
@@ -41,7 +38,7 @@ class TerminalAgentTest {
         every { context.filesDir } returns tempDir
 
         testScope = CoroutineScope(StandardTestDispatcher() + SupervisorJob())
-        agent = TerminalAgent(context, termuxBridge, shizukuShell, scope = testScope)
+        agent = TerminalAgent(context, shizukuShell, scope = testScope)
     }
 
     @After
@@ -56,7 +53,7 @@ class TerminalAgentTest {
     fun `createSession returns new session`() {
         val session = agent.createSession("test")
         assertEquals("test", session.name)
-        assertEquals(TerminalAgent.TERMUX_HOME, session.workdir)
+        assertEquals(TerminalAgent.DEFAULT_WORKDIR, session.workdir)
     }
 
     @Test
@@ -134,7 +131,7 @@ class TerminalAgentTest {
     @Test
     fun `getWorkdir returns default for new session`() {
         val dir = agent.getWorkdir("default")
-        assertEquals(TerminalAgent.TERMUX_HOME, dir)
+        assertEquals(TerminalAgent.DEFAULT_WORKDIR, dir)
     }
 
     @Test
@@ -191,20 +188,14 @@ class TerminalAgentTest {
     // ── Execution Backend Detection ─────────────────────────────────────
 
     @Test
-    fun `executionBackendDescription shows sandboxed when no backends`() {
-        assertTrue(agent.executionBackendDescription.contains("Sandboxed"))
+    fun `executionBackendDescription shows elevated when Shizuku available`() {
+        every { shizukuShell.isElevatedAvailable } returns true
+        assertTrue(agent.executionBackendDescription.contains("Shizuku"))
     }
 
     @Test
     fun `isElevated returns false when Shizuku not authorized`() {
         assertFalse(agent.isElevated)
-    }
-
-    @Test
-    fun `executionBackendDescription shows Termux when available`() {
-        every { termuxBridge.isTermuxInstalled() } returns true
-        every { termuxBridge.hasPermission() } returns true
-        assertTrue(agent.executionBackendDescription.contains("Termux"))
     }
 
     // ── Background Jobs ────────────────────────────────────────────────
@@ -320,7 +311,7 @@ class TerminalAgentTest {
         agent.saveSessionsToDisk()
 
         // Create a new agent (simulating restart)
-        val agent2 = TerminalAgent(context, termuxBridge, shizukuShell, scope = testScope)
+        val agent2 = TerminalAgent(context, shizukuShell, scope = testScope)
         agent2.loadSessionsFromDisk()
         val names = agent2.getSessionNames()
         assertTrue(names.contains("persist-test"))
@@ -339,7 +330,7 @@ class TerminalAgentTest {
     @Test
     fun `getWorkdir returns default for nonexistent session`() {
         val dir = agent.getWorkdir("nonexistent")
-        assertEquals(TerminalAgent.TERMUX_HOME, dir)
+        assertEquals(TerminalAgent.DEFAULT_WORKDIR, dir)
     }
 
     @Test

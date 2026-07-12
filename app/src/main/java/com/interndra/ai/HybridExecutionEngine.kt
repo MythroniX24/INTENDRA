@@ -9,7 +9,7 @@ import com.interndra.agent.TerminalAgent
 import com.interndra.data.local.AgentRepository
 import com.interndra.data.model.*
 import com.interndra.service.ShellExecutor
-import com.interndra.service.TermuxBridge
+import com.interndra.service.PersistentShell
 import java.io.File
 
 /**
@@ -43,7 +43,6 @@ class HybridExecutionEngine(
     private val repo: AgentRepository,
     private val shell: ShellExecutor = ShellExecutor,
     private val safety: SafetyEngine,
-    private val termuxBridge: TermuxBridge = TermuxBridge(context),
     private val terminalAgent: TerminalAgent? = null
 ) {
     companion object {
@@ -126,39 +125,26 @@ class HybridExecutionEngine(
         }
 
     /**
-     * Execute a command in Termux's full Linux environment.
-     * Uses TerminalAgent for persistent sessions if available.
-     * Enables: pkg install, pip, npm, git, python, apt, etc.
+     * Execute a command in the persistent shell.
+     * Uses TerminalAgent for persistent sessions with real shell state.
      */
     private suspend fun executeInTermux(index: Int, cmd: ShellCommand): ExecutionResult {
         return try {
-            if (!termuxBridge.isTermuxInstalled()) {
-                return ExecutionResult(
-                    stepIndex = index,
-                    success = false,
-                    output = "",
-                    error = "Termux is not installed. Install Termux from F-Droid or GitHub to run this command.\n" +
-                            "Download: https://f-droid.org/packages/com.termux/"
-                )
-            }
-
             val agent = terminalAgent
             if (agent != null) {
-                // Use TerminalAgent for session-aware execution with auto-recovery
+                // Use TerminalAgent for session-aware execution with persistent shell
                 val sessionName = "exec_$index"
-                val result = agent.executeWithRecovery(sessionName, cmd.command)
+                val result = agent.execute(sessionName, cmd.command)
                 if (result.isSuccess) {
                     val output = if (result.stdout.isNotBlank()) result.stdout else "(completed)"
-                    val recoveryNote = if (result.wasRecovered)
-                        "\n\n⚡ Auto-recovered: ${result.recoveryActions.firstOrNull() ?: "applied fix"}" else ""
-                    ExecutionResult(stepIndex = index, success = true, output = output + recoveryNote)
+                    ExecutionResult(stepIndex = index, success = true, output = output)
                 } else {
                     ExecutionResult(stepIndex = index, success = false,
                         output = result.stdout, error = result.stderr)
                 }
             } else {
-                // Direct Termux execution (no session management)
-                val result = termuxBridge.executeShell(cmd.command)
+                // Fallback to one-shot shell execution
+                val result = ShellExecutor.runAsync(cmd.command)
                 if (result.isSuccess) {
                     val output = if (result.stdout.isNotBlank()) result.stdout else "(completed)"
                     ExecutionResult(stepIndex = index, success = true, output = output)
@@ -168,8 +154,8 @@ class HybridExecutionEngine(
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Termux error on step $index: ${e.message}")
-            return ExecutionResult(stepIndex = index, success = false, output = "", error = "Termux error: ${e.message}")
+            Log.e(TAG, "Shell error on step $index: ${e.message}")
+            return ExecutionResult(stepIndex = index, success = false, output = "", error = "Shell error: ${e.message}")
         }
     }
 

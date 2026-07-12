@@ -35,7 +35,7 @@ import com.interndra.service.ShizukuShell
 import com.interndra.services.AutomationEngine
 import com.interndra.services.AutomationWorker
 import com.interndra.service.ShellExecutor
-import com.interndra.service.TermuxBridge
+import com.interndra.service.PersistentShell
 import com.interndra.services.InterndraNotificationListener
 import com.interndra.util.Constants
 import kotlinx.coroutines.*
@@ -218,24 +218,17 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     val shizukuPrivilegeLevel: String get() = shizukuManager.privilegeLevel
     val isShizukuElevated: Boolean get() = shizukuShell.isElevatedAvailable
 
-    // ── Termux status ────────────────────────────────────────────────────
-    private val termuxBridge = TermuxBridge(app)
-    private val _termuxInstalled = MutableStateFlow(termuxBridge.isTermuxInstalled())
-    val termuxInstalled: StateFlow<Boolean> = _termuxInstalled.asStateFlow()
-    private val _termuxExternalAppsEnabled = MutableStateFlow(false)
-    val termuxExternalAppsEnabled: StateFlow<Boolean> = _termuxExternalAppsEnabled.asStateFlow()
-
     // ── AI System Health Monitor ──────────────────────────────────────
     val healthMonitor = AiSystemHealthMonitor(app)
 
-    // ── Terminal Agent ───────────────────────────────────────────────────
-    val terminalAgent = TerminalAgent(app, termuxBridge, shizukuShell, scope = viewModelScope)
+    // ── Terminal Agent — uses PersistentShell (no Termux needed) ─────
+    val terminalAgent = TerminalAgent(app, shizukuShell, scope = viewModelScope)
     private val _terminalSessions = MutableStateFlow(terminalAgent.getSessionNames())
     val terminalSessions: StateFlow<List<String>> = _terminalSessions.asStateFlow()
     private val _activeTerminalSession = MutableStateFlow("default")
     val activeTerminalSession: StateFlow<String> = _activeTerminalSession.asStateFlow()
 
-    fun createTerminalSession(name: String, workdir: String = "/data/data/com.termux/files/home") {
+    fun createTerminalSession(name: String, workdir: String = "/") {
         terminalAgent.createSession(name, workdir)
         _terminalSessions.value = terminalAgent.getSessionNames()
     }
@@ -407,15 +400,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 _uiState.update { it.copy(pluginCount = pluginManager.count()) }
             } catch (e: Exception) {
                 Log.e(TAG, "Init: plugin registration failed: ${e.message}")
-            }
-        }
-
-        // Refresh Termux external apps status
-        viewModelScope.launch {
-            try {
-                _termuxExternalAppsEnabled.value = termuxBridge.isExternalAppsEnabled()
-            } catch (e: Exception) {
-                Log.e(TAG, "Init: Termux check failed: ${e.message}")
             }
         }
 
@@ -1285,7 +1269,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         super.onCleared()
         tts?.shutdown()
         localEngine.unload()
-        termuxBridge.unregisterReceiver()
         shizukuManager.shutdown()
         terminalAgent.shutdown()
         healthMonitor.saveReport()

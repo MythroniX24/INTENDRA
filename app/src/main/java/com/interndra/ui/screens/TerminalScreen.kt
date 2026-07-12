@@ -38,7 +38,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interndra.agent.TerminalAgent
 import com.interndra.service.TerminalBuffer
-import com.interndra.service.TermuxBridge
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 import kotlinx.coroutines.delay
@@ -130,9 +129,8 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
         inputFocusRequester.requestFocus()
     }
 
-    // Termux status
-    val termuxBridge = remember { TermuxBridge(context) }
-    val termuxInstalled = remember { termuxBridge.isTermuxInstalled() }
+    // Shizuku status for shell backend display
+    val isElevated = remember { vm.isShizukuElevated }
 
     // ── New Session Dialog ───────────────────────────────────────────────
     if (showNewSessionDialog) {
@@ -177,7 +175,7 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
             onSelectSession = { vm.setActiveTerminalSession(it) },
             onAddSession = { showNewSessionDialog = true },
             onSessionLongPress = { showSessionMenu = it },
-            termuxInstalled = termuxInstalled,
+            isElevated = isElevated,
             autoScroll = autoScroll,
             onToggleAutoScroll = { autoScroll = !autoScroll },
             onClear = { vm.terminalAgent.clearHistory(activeSession) }
@@ -265,10 +263,10 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                             color = TerminalWhite.copy(alpha = 0.25f), fontSize = 13.sp,
                             fontFamily = FontFamily.Monospace)
                         Spacer(Modifier.height(16.dp))
-                        if (!termuxInstalled) {
-                            Surface(shape = RoundedCornerShape(8.dp), color = TerminalRed.copy(0.12f)) {
-                                Text("⚠ Termux not installed — some commands won't work",
-                                    color = TerminalRed.copy(0.8f), fontSize = 11.sp,
+                        if (!isElevated) {
+                            Surface(shape = RoundedCornerShape(8.dp), color = TerminalYellow.copy(0.12f)) {
+                                Text("💡 Connect Shizuku for elevated shell (root/ADB)",
+                                    color = TerminalYellow.copy(0.7f), fontSize = 11.sp,
                                     fontFamily = FontFamily.Monospace,
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                             }
@@ -343,7 +341,7 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
         TerminalStatusBar(
             lineCount = terminalLines.size,
             sessionName = activeSession,
-            termuxInstalled = termuxInstalled
+            isElevated = isElevated
         )
     }
 
@@ -639,7 +637,7 @@ private fun TerminalTopBar(
     onSelectSession: (String) -> Unit,
     onAddSession: () -> Unit,
     onSessionLongPress: (String) -> Unit,
-    termuxInstalled: Boolean,
+    isElevated: Boolean,
     autoScroll: Boolean,
     onToggleAutoScroll: () -> Unit,
     onClear: () -> Unit
@@ -668,11 +666,11 @@ private fun TerminalTopBar(
                     }
                 }
 
-                // Termux status with pulse
+                // Shell backend status with pulse
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
-                        .background(if (termuxInstalled) TerminalGreen.copy(0.12f) else TerminalRed.copy(0.12f))
+                        .background(if (isElevated) TerminalGreen.copy(0.12f) else TerminalYellow.copy(0.12f))
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -682,11 +680,11 @@ private fun TerminalTopBar(
                             .size(6.dp)
                             .alpha(pulseAlpha)
                             .clip(CircleShape)
-                            .background(if (termuxInstalled) TerminalGreen else TerminalRed)
+                            .background(if (isElevated) TerminalGreen else TerminalYellow)
                     )
                     Text(
-                        if (termuxInstalled) "Termux" else "Shell",
-                        color = if (termuxInstalled) TerminalGreen else TerminalRed.copy(0.7f),
+                        if (isElevated) "🛡️ Shizuku" else "⚙️ Shell",
+                        color = if (isElevated) TerminalGreen else TerminalYellow.copy(0.7f),
                         fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
                         fontFamily = FontFamily.Monospace
                     )
@@ -1001,7 +999,7 @@ private fun TerminalInputBar(
 private fun TerminalStatusBar(
     lineCount: Int,
     sessionName: String,
-    termuxInstalled: Boolean
+    isElevated: Boolean
 ) {
     Surface(color = Color(0xFF0A0A0A), tonalElevation = 0.dp) {
         Row(
@@ -1019,8 +1017,8 @@ private fun TerminalStatusBar(
             )
             Row(verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (!termuxInstalled) {
-                    Text("Shell mode",
+                if (!isElevated) {
+                    Text("Sandbox mode",
                         color = TerminalYellow.copy(alpha = 0.4f), fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace)
                 }
@@ -1042,7 +1040,7 @@ private fun NewSessionDialog(
     onCreate: (name: String, workdir: String) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
-    var workdir by remember { mutableStateOf("/data/data/com.termux/files/home") }
+    var workdir by remember { mutableStateOf("/") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1080,7 +1078,7 @@ private fun NewSessionDialog(
                     value = workdir,
                     onValueChange = { workdir = it },
                     label = { Text("Working Directory", color = TerminalWhite.copy(0.5f)) },
-                    placeholder = { Text("e.g. /data/data/com.termux/files/home/project", color = TerminalWhite.copy(0.3f)) },
+                    placeholder = { Text("e.g. /sdcard/project", color = TerminalWhite.copy(0.3f)) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Accent,
