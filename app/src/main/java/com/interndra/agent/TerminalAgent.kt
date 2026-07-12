@@ -103,6 +103,7 @@ class TerminalAgent(
                 Log.i(TAG, "✅ Persistent shell started (${newShell.backendDescription})")
                 _outputFlow.tryEmit(StreamEvent.Output("default",
                     "\u001b[32m✓ Terminal ready — ${newShell.backendDescription}\u001b[0m\n"))
+                persistentShell
             } else {
                 Log.e(TAG, "Failed to start persistent shell")
                 _outputFlow.tryEmit(StreamEvent.Output("default",
