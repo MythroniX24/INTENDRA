@@ -422,9 +422,30 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
 }
 
 @Composable private fun TableBlock(b: EnhancedBlock.Table) {
+    val colCount = b.headers.size.coerceAtLeast(b.rows.firstOrNull()?.size ?: 0)
+    if (colCount == 0) return
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).border(1.dp,SurfaceLight,RoundedCornerShape(8.dp)).background(Color(0xFF1A1B1E)).horizontalScroll(rememberScrollState())) {
-        Row(Modifier.background(Accent.copy(0.2f)).padding(vertical=8.dp)){b.headers.forEachIndexed{i,h-> val a=b.alignment.getOrNull(i)?:TextAlign.Start; Text(h,color=Accent,fontSize=13.sp,fontWeight=FontWeight.Bold,textAlign=a,modifier=Modifier.widthIn(min=90.dp).padding(horizontal=12.dp))}}
-        b.rows.forEachIndexed{ri,r-> Row(Modifier.background(if(ri%2==1)SurfaceLight.copy(0.08f)else Color.Transparent).padding(vertical=6.dp)){r.forEachIndexed{ci,c-> val a=b.alignment.getOrNull(ci)?:TextAlign.Start; val rs=parseInline(c); Text(text=rs.annotated,color=TerminalWhite,fontSize=13.sp,textAlign=a,modifier=Modifier.widthIn(min=90.dp).padding(horizontal=12.dp,vertical=2.dp))}}}
+        // Header row — evenly weighted columns for proper alignment
+        Row(Modifier.background(Accent.copy(0.2f)).padding(vertical=10.dp, horizontal=4.dp)) {
+            repeat(colCount) { i ->
+                val h = b.headers.getOrNull(i) ?: ""
+                val a = b.alignment.getOrNull(i) ?: TextAlign.Start
+                Text(h, color=Accent, fontSize=13.sp, fontWeight=FontWeight.Bold, textAlign=a,
+                    modifier=Modifier.weight(1f).padding(horizontal=8.dp))
+            }
+        }
+        // Data rows — same weighted columns
+        b.rows.forEachIndexed { ri, r ->
+            Row(Modifier.background(if(ri%2==1)SurfaceLight.copy(0.08f)else Color.Transparent).padding(vertical=8.dp, horizontal=4.dp)) {
+                repeat(colCount) { ci ->
+                    val c = r.getOrNull(ci) ?: ""
+                    val a = b.alignment.getOrNull(ci) ?: TextAlign.Start
+                    val rs = parseInline(c)
+                    Text(text=rs.annotated, color=TerminalWhite, fontSize=13.sp, textAlign=a,
+                        modifier=Modifier.weight(1f).padding(horizontal=8.dp, vertical=2.dp))
+                }
+            }
+        }
         if (b.rows.isNotEmpty()) Box(Modifier.fillMaxWidth().background(Accent.copy(0.05f)).padding(horizontal=12.dp,vertical=4.dp)){Text("${b.rows.size} rows",color=TerminalWhite.copy(0.3f),fontSize=10.sp)} }
 }
 

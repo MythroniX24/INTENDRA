@@ -582,12 +582,14 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 Constants.AiProvider.GEMINI -> {
                     if (geminiKey.isBlank()) {
                         _uiState.update { it.copy(error = "Gemini mode needs Google Gemini API key — set it in Settings") }
+                        commandGate.set(false)  // FIX: release gate on early return
                         return
                     }
                 }
                 Constants.AiProvider.OPENROUTER -> {
                     if (key.isBlank()) {
                         _uiState.update { it.copy(error = "Cloud mode needs OpenRouter API key — set it in Settings") }
+                        commandGate.set(false)  // FIX: release gate on early return
                         return
                     }
                 }
@@ -597,17 +599,26 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         viewModelScope.launch(crashHandler + kotlinx.coroutines.Dispatchers.Main) {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
-            // SAFETY NET: if the entire command takes > 5 minutes, force-reset
+            // SAFETY NET: if the entire command takes > 2 minutes, force-reset
             // to prevent "processing forever" bug.
+            // WATCHDOG: separate coroutine ensures isLoading + commandGate are
+            // ALWAYS reset even if withTimeout fails to cancel cleanly.
+            val watchdogJob = launch {
+                delay(90_000L)
+                Log.w(TAG, "⏰ Watchdog: force-resetting loading state")
+                _uiState.update { it.copy(isLoading = false, error = "Request took too long — please try again") }
+                commandGate.set(false)
+            }
             try {
-                kotlinx.coroutines.withTimeout(300_000L) {
+                kotlinx.coroutines.withTimeout(120_000L) {
                     processCommand(trimmed, effectiveMode, mode, provider, key)
                 }
             } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                Log.e(TAG, "⏱ Command timed out after 5 minutes")
-                try { repo.addUserMessage("⏱ Command timed out after 5 minutes") } catch (_: Exception) {}
-                _uiState.update { it.copy(error = "Command timed out after 5 minutes. Try a simpler request.") }
+                Log.e(TAG, "⏱ Command timed out after 2 minutes")
+                try { repo.addUserMessage("⏱ Command timed out after 2 minutes") } catch (_: Exception) {}
+                _uiState.update { it.copy(error = "Command timed out after 2 minutes. Try a simpler request.") }
             } finally {
+                watchdogJob.cancel()
                 _uiState.update { it.copy(isLoading = false) }
                 commandGate.set(false)
             }
@@ -1258,7 +1269,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         }
 
         if (sb.isEmpty()) {
-            sb.append("*Processing...*")
+            sb.append("Got it! Let me handle this for you. 🔧")
         }
 
         sb.append("\n\n*$explanation*")
