@@ -55,7 +55,7 @@ fun ThinkingIndicator(
     dotsColor: Color = Accent,
     textColor: Color = TerminalWhite.copy(alpha = 0.5f)
 ) {
-    var phraseIndex by remember { mutableIntStateOf(0) }
+    var phraseIndex by remember { mutableStateOf(0) }
 
     // Cycle through phrases every 2 seconds
     LaunchedEffect(Unit) {
@@ -272,7 +272,7 @@ fun JsonTreeViewer(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.DataObject, null,
+                Icon(Icons.Default.Code, null,
                     tint = TerminalYellow, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("JSON", color = TerminalYellow, fontSize = 12.sp,

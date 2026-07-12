@@ -76,7 +76,6 @@ fun RichMarkdownText(
 ) {
     val blocks = remember(markdown) { EnhancedMarkdownParser.parse(markdown) }
     val clipboardManager = LocalClipboardManager.current
-    var showCopyButton by remember { mutableStateOf(false) }
     var copyClicked by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxWidth()) {
