@@ -188,9 +188,9 @@ class TerminalAgentTest {
     // ── Execution Backend Detection ─────────────────────────────────────
 
     @Test
-    fun `executionBackendDescription shows elevated when Shizuku available`() {
+    fun `isElevated returns true when Shizuku is available`() {
         every { shizukuShell.isElevatedAvailable } returns true
-        assertTrue(agent.executionBackendDescription.contains("Shizuku"))
+        assertTrue(agent.isElevated)
     }
 
     @Test
