@@ -1,7 +1,6 @@
 package com.interndra.ai.workflow
 
 import com.google.common.truth.Truth.assertThat
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -317,12 +316,14 @@ class WorkflowPlannerTest {
     }
 
     @Test
-    fun `plans email workflow`() {
+    fun `plans email workflow tags check`() {
         val detected = planner.detect("send email to John about meeting")
-        val workflow = planner.plan(detected!!)
+        assertThat(detected).isNotNull()
+        assertThat(detected!!.intent).isEqualTo(WorkflowPlanner.Intent.EMAIL)
+        val workflow = planner.plan(detected)
         assertThat(workflow).isNotNull()
         assertThat(workflow!!.steps.first().command.command).contains("gmail")
-        assertTrue("tags should contain 'email': ${workflow!!.tags}", workflow.tags.contains("email"))
+        assertThat(workflow.tags).contains("email")
     }
 
     // ═════════════════════════════════════════════════════════════════════
