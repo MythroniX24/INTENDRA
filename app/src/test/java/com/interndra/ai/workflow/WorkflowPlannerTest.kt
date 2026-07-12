@@ -322,7 +322,7 @@ class WorkflowPlannerTest {
         val workflow = planner.plan(detected!!)
         assertThat(workflow).isNotNull()
         assertThat(workflow!!.steps.first().command.command).contains("gmail")
-        assertTrue("tags should contain 'email': ${workflow.tags}", workflow.tags.contains("email"))
+        assertTrue("tags should contain 'email': ${workflow!!.tags}", workflow.tags.contains("email"))
     }
 
     // ═════════════════════════════════════════════════════════════════════

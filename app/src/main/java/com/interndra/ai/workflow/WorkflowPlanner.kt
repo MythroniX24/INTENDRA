@@ -738,7 +738,8 @@ class WorkflowPlanner {
     // ══════════════════════════════════════════════════════════════════════
 
     /**
-     * planEmail — Open Gmail with pre-filled To, Subject, Body
+     * planEmail — Open Gmail with pre-filled To, Subject, Body.
+     * Tags: messaging, email
      */
     private fun planEmail(d: DetectedIntent): Workflow {
         val to = d.emailTo ?: ""
