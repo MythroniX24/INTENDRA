@@ -605,9 +605,11 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             // ALWAYS reset even if withTimeout fails to cancel cleanly.
             val watchdogJob = launch {
                 delay(90_000L)
-                Log.w(TAG, "⏰ Watchdog: force-resetting loading state")
-                _uiState.update { it.copy(isLoading = false, error = "Request took too long — please try again") }
-                commandGate.set(false)
+                if (_uiState.value.isLoading) {  // only reset if truly stuck
+                    Log.w(TAG, "⏰ Watchdog: force-resetting loading state")
+                    _uiState.update { it.copy(isLoading = false, error = "Request took too long — please try again") }
+                    commandGate.set(false)
+                }
             }
             try {
                 kotlinx.coroutines.withTimeout(120_000L) {
