@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import com.interndra.ai.JailbreakLevel
 import com.interndra.data.model.*
 import com.interndra.ui.components.*
+import com.interndra.ui.theme.LocalInterndraColors
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 import com.interndra.ui.viewmodel.HybridUiState
@@ -85,6 +86,9 @@ fun HybridChatScreen(
     val keyboard   = LocalSoftwareKeyboardController.current
     val context    = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+
+    // ── Theme-aware colors ────────────────────────────────────────────
+    val colors = LocalInterndraColors.current
 
     // ── Task system ───────────────────────────────────────────────────
     val activeTask by vm.taskManager.activeTask.collectAsState()
@@ -155,7 +159,7 @@ fun HybridChatScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Background800).imePadding()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).imePadding()) {
 
         // ── Emergency lock banner ─────────────────────────────────────────
         AnimatedVisibility(visible = uiState.emergencyLockActive) {
@@ -266,10 +270,10 @@ fun HybridChatScreen(
 private fun SimpleTopBar(
     onOpenDrawer: () -> Unit
 ) {
-    Surface(color = Color(0xFF0F0F0F), tonalElevation = 0.dp) {
+    Surface(color = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)) {
             IconButton(onClick = onOpenDrawer, modifier = Modifier.align(Alignment.CenterStart)) {
-                Icon(Icons.Default.Menu, "Menu", tint = Color.White)
+                Icon(Icons.Default.Menu, "Menu", tint = MaterialTheme.colorScheme.onBackground)
             }
         }
     }
@@ -335,15 +339,15 @@ private fun MessageGroup(
                 if (showAvatar) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = Background800,
-                        border = BorderStroke(1.dp, SurfaceLight),
+                        color = MaterialTheme.colorScheme.background,
+                        border = BorderStroke(1.dp, colors.aiBubbleBorder),
                         modifier = Modifier
                             .padding(top = 8.dp, end = 10.dp)
                             .size(36.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.AutoAwesome, "AI",
-                                tint = Accent, modifier = Modifier.size(20.dp))
+                                tint = colors.accent, modifier = Modifier.size(20.dp))
                         }
                     }
                 }
@@ -355,12 +359,12 @@ private fun MessageGroup(
                             .widthIn(max = if (isUser) 300.dp else 400.dp)
                             .clip(borderRadius)
                             .background(
-                                if (isUser) UserBubble else Color(0xFF1A1B1E),
+                                if (isUser) colors.userBubbleBg else colors.aiBubbleBg,
                                 shape = borderRadius
                             )
                             .border(
                                 if (!isUser) 0.5.dp else 0.dp,
-                                if (!isUser) SurfaceLight.copy(alpha = 0.3f) else Color.Transparent,
+                                if (!isUser) colors.aiBubbleBorder else Color.Transparent,
                                 shape = borderRadius
                             )
                             .padding(
@@ -370,8 +374,8 @@ private fun MessageGroup(
                     ) {
                         if (msg.isLoading) {
                             ThinkingIndicator()
-                        } else if (isUser) {
-                            Text(msg.content, color = TerminalWhite, fontSize = 15.sp, lineHeight = 22.sp)
+                        } else                        if (isUser) {
+                            Text(msg.content, color = colors.userBubbleText, fontSize = 15.sp, lineHeight = 22.sp)
                         } else {
                             // Streaming or full text
                             val displayText = if (msg.id == streamingMsgId && streamedText.isNotEmpty())
@@ -480,17 +484,18 @@ private fun SimpleInputBar(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit
 ) {
+    val colors = LocalInterndraColors.current
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Color(0xFF0F0F0F))
+            .background(colors.inputBarBg)
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Surface(
             modifier  = Modifier.fillMaxWidth(),
             shape     = RoundedCornerShape(24.dp),
-            color     = Color(0xFF1A1B1E),
-            border    = BorderStroke(1.dp, Color(0xFF2A2A2A))
+            color     = colors.inputFieldBg,
+            border    = BorderStroke(1.dp, colors.inputFieldBorder)
         ) {
             Row(
                 Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
@@ -504,7 +509,7 @@ private fun SimpleInputBar(
                     placeholder   = {
                         Text(
                             "Ask anything...",
-                            fontSize = 15.sp, color = Color(0xFF666666)
+                            fontSize = 15.sp, color = colors.inputPlaceholder
                         )
                     },
                     colors = TextFieldDefaults.colors(
@@ -512,9 +517,9 @@ private fun SimpleInputBar(
                         unfocusedContainerColor = Color.Transparent,
                         focusedIndicatorColor   = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent,
-                        focusedTextColor        = Color.White,
-                        unfocusedTextColor      = Color.White,
-                        cursorColor             = Accent
+                        focusedTextColor        = colors.inputTextColor,
+                        unfocusedTextColor      = colors.inputTextColor,
+                        cursorColor             = colors.accent
                     ),
                     maxLines = 5,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),

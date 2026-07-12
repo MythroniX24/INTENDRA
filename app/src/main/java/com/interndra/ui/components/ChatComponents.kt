@@ -41,6 +41,10 @@ import com.interndra.ai.tasks.TaskStep
 import com.interndra.ui.theme.*
 import kotlinx.coroutines.delay
 
+// ── Keep backward-compat colors reference ────────────────────────────────
+@Composable
+private fun themeColors() = LocalInterndraColors.current
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ThinkingIndicator — Animated dots with cycling status text
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -263,12 +267,13 @@ fun JsonTreeViewer(
         }
     }
 
+    val colors = LocalInterndraColors.current
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF1A1B1E))
-            .border(1.dp, SurfaceLight, RoundedCornerShape(8.dp))
+            .background(colors.codeBlockBg)
+            .border(1.dp, colors.codeBlockBorder, RoundedCornerShape(8.dp))
             .padding(12.dp)
     ) {
         Row(
@@ -278,13 +283,13 @@ fun JsonTreeViewer(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Code, null,
-                    tint = TerminalYellow, modifier = Modifier.size(16.dp))
+                    tint = colors.terminalYellow, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("JSON", color = TerminalYellow, fontSize = 12.sp,
+                Text("JSON", color = colors.terminalYellow, fontSize = 12.sp,
                     fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
             }
             val clip = LocalClipboardManager.current
-            Text("Copy", color = TerminalWhite.copy(0.4f), fontSize = 11.sp,
+            Text("Copy", color = colors.terminalWhite.copy(0.4f), fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.clickable {
                     clip.setText(AnnotatedString(jsonString))
@@ -481,17 +486,18 @@ fun ExpandableCodeBlock(
     val clipboardManager = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
 
+    val colors = LocalInterndraColors.current
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFF1A1B1E))
-            .border(1.dp, SurfaceLight, RoundedCornerShape(10.dp))
+            .background(colors.codeBlockBg)
+            .border(1.dp, colors.codeBlockBorder, RoundedCornerShape(10.dp))
     ) {
         // Header
         Row(
             Modifier.fillMaxWidth()
-                .background(Color(0xFF2A2B30))
+                .background(colors.codeBlockHeader)
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -778,11 +784,12 @@ fun TaskCard(
         TaskStatus.PLANNED -> "Planned"
     }
 
+    val colors = LocalInterndraColors.current
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF1A1B1E))
+            .background(colors.surfaceCard)
             .border(1.dp, statusColor.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
     ) {
         // Header with title + status

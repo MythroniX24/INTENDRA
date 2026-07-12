@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -18,9 +19,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.interndra.ui.theme.SurfaceCard
-import com.interndra.ui.theme.SurfaceLight
-import com.interndra.ui.theme.TerminalWhite
+import com.interndra.ui.theme.LocalInterndraColors
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Skeleton — Shimmer loading placeholder
@@ -37,10 +36,11 @@ fun Skeleton(
     height: Dp = 16.dp,
     shape: RoundedCornerShape = RoundedCornerShape(6.dp)
 ) {
+    val colors = LocalInterndraColors.current
     val shimmerColors = listOf(
-        SurfaceLight.copy(alpha = 0.08f),
-        SurfaceLight.copy(alpha = 0.2f),
-        SurfaceLight.copy(alpha = 0.08f)
+        colors.surfaceInteractive.copy(alpha = 0.08f),
+        colors.surfaceInteractive.copy(alpha = 0.2f),
+        colors.surfaceInteractive.copy(alpha = 0.08f)
     )
 
     val transition = rememberInfiniteTransition(label = "shimmer")
@@ -121,6 +121,86 @@ fun SkeletonStatCard(modifier: Modifier = Modifier) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Message entry animation specs
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Creates a slide-up + fade-in animation spec for chat messages.
+ * Messages enter from below with a smooth fade and scale.
+ */
+fun messageEnterTransition(): EnterTransition {
+    return slideInVertically(
+        initialOffsetY = { it / 4 },
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        )
+    ) + fadeIn(animationSpec = tween(300, easing = FastOutSlowInEasing))
+}
+
+/**
+ * Creates a slide-out + fade-out animation spec for chat messages.
+ */
+fun messageExitTransition(): ExitTransition {
+    return slideOutVertically(
+        targetOffsetY = { it / 4 },
+        animationSpec = tween(200)
+    ) + fadeOut(animationSpec = tween(150))
+}
+
+/**
+ * Animated visibility for a single message bubble with staggered delay.
+ * Each message in a group gets a slight delay so they appear one after another.
+ *
+ * @param index the message's position in the group (0 = first)
+ * @param visible whether this message is visible
+ * @param content composable content
+ */
+@Composable
+fun AnimatedMessage(
+    index: Int = 0,
+    visible: Boolean = true,
+    content: @Composable AnimatedVisibilityScope.() -> Unit
+) {
+    val delayMs = (index * 50).coerceAtMost(200)
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInVertically(
+            initialOffsetY = { it / 3 },
+            animationSpec = tween(300, delayMs, easing = FastOutSlowInEasing)
+        ) + fadeIn(animationSpec = tween(300, delayMs)),
+        exit = slideOutVertically(
+            targetOffsetY = { it / 4 },
+            animationSpec = tween(200)
+        ) + fadeOut(animationSpec = tween(150)),
+        content = content
+    )
+}
+
+/**
+ * Scale + fade entrance for UI cards and elements.
+ */
+@Composable
+fun AnimatedCard(
+    visible: Boolean = true,
+    delay: Int = 0,
+    content: @Composable AnimatedVisibilityScope.() -> Unit
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = scaleIn(
+            initialScale = 0.95f,
+            animationSpec = tween(250, delay, easing = FastOutSlowInEasing)
+        ) + fadeIn(animationSpec = tween(250, delay)),
+        exit = scaleOut(
+            targetScale = 0.95f,
+            animationSpec = tween(150)
+        ) + fadeOut(animationSpec = tween(150)),
+        content = content
+    )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // TabTransition — AnimatedContent spec for page transitions
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -185,6 +265,7 @@ fun ShimmerBorder(
 ) {
     if (!isLoading) return
 
+    val colors = LocalInterndraColors.current
     val transition = rememberInfiniteTransition(label = "shimmer_border")
     val phase by transition.animateFloat(
         initialValue = 0f, targetValue = 360f,
@@ -201,9 +282,9 @@ fun ShimmerBorder(
             .background(
                 Brush.sweepGradient(
                     colors = listOf(
-                        TerminalWhite.copy(alpha = 0f),
-                        TerminalWhite.copy(alpha = 0.15f),
-                        TerminalWhite.copy(alpha = 0f)
+                        colors.terminalWhite.copy(alpha = 0f),
+                        colors.terminalWhite.copy(alpha = 0.15f),
+                        colors.terminalWhite.copy(alpha = 0f)
                     )
                 ),
                 RoundedCornerShape(1.dp)
