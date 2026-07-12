@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.speech.RecognizerIntent
+import android.view.HapticFeedbackConstants
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,7 +14,6 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -38,9 +38,12 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -86,6 +89,8 @@ fun HybridChatScreen(
     val keyboard   = LocalSoftwareKeyboardController.current
     val context    = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val haptic      = LocalHapticFeedback.current
+    val view        = LocalView.current
 
     // ── Theme-aware colors ────────────────────────────────────────────
     val colors = LocalInterndraColors.current
@@ -93,48 +98,98 @@ fun HybridChatScreen(
     // ── Task system ───────────────────────────────────────────────────
     val activeTask by vm.taskManager.activeTask.collectAsState()
 
-    // ── Streaming state: which FRESH (newly arrived) message is streaming ──
-    // FIX: The old code used LaunchedEffect(messages) which triggered on EVERY
-    // message list change, including loading old messages from the database.
-    // This caused ALL old AI messages to get the typing animation on app startup.
-    // Now we only animate messages that arrived AFTER the composable was created.
+    // ── Streaming state ───────────────────────────────────────────────
     val initialMessageCount = remember { messages.size }
     var streamingMsgId by remember { mutableStateOf<Long?>(null) }
     var streamedText by remember { mutableStateOf("") }
-    var streamCharsPerFrame by remember { mutableStateOf(3) }
 
-    // Auto-scroll on new messages (use scrollToItem for instant, not animate)
-    LaunchedEffect(messages.size, streamedText) {
-        if (messages.isNotEmpty()) {
-            listState.scrollToItem(messages.size - 1)
+    // ── Smart scroll: auto-scroll only when user is near bottom ──────────
+    var userScrolledUp by remember { mutableStateOf(false) }
+    val isNearBottom: Boolean
+        get() {
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val totalItems = listState.layoutInfo.totalItemsCount
+            return lastVisible >= totalItems - 3
+        }
+
+    // Track scroll gestures to detect when user scrolls up (stop auto-scroll)
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress && !isNearBottom) {
+            userScrolledUp = true
+            keyboard?.hide() // dismiss keyboard when user manually scrolls
         }
     }
 
-    // ── Streaming effect: animate NEW messages after initial load ──
-    // FIX: Use a Set<Long> to track which message IDs have been animated,
-    // so EVERY new AI message gets the typing effect, not just the first one.
+    // Auto-scroll on new messages (only if user hasn't scrolled up)
+    LaunchedEffect(messages.size, streamedText) {
+        if (messages.isNotEmpty() && !userScrolledUp) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    // Reset userScrolledUp when a new message is sent (user's own message)
+    val lastMsg = messages.lastOrNull()
+    LaunchedEffect(lastMsg?.id) {
+        if (lastMsg?.role == MessageRole.USER) {
+            userScrolledUp = false
+        }
+    }
+
+    // ── Streaming effect: smooth character reveal with variable speed ──
+    // Speed is content-aware: faster for whitespace/punctuation, slower for code/alphanumeric
     val animatedMessageIds = remember { mutableSetOf<Long>() }
     LaunchedEffect(messages.size) {
-        val lastMsg = messages.lastOrNull()
-        // Only animate AI messages that arrived AFTER initial load and haven't been animated yet
-        if (lastMsg != null && messages.size > initialMessageCount &&
-            lastMsg.role == MessageRole.AI && !lastMsg.isLoading &&
-            lastMsg.content.length > 30 && lastMsg.id !in animatedMessageIds) {
-            animatedMessageIds.add(lastMsg.id)
-            streamingMsgId = lastMsg.id
+        val msg = messages.lastOrNull()
+        if (msg != null && messages.size > initialMessageCount &&
+            msg.role == MessageRole.AI && !msg.isLoading &&
+            msg.content.length > 30 && msg.id !in animatedMessageIds) {
+            animatedMessageIds.add(msg.id)
+            streamingMsgId = msg.id
             streamedText = ""
-            val text = lastMsg.content
-            val charCount = text.length
-            val speed = if (charCount > 500) 8 else if (charCount > 200) 5 else 3
-            streamCharsPerFrame = speed
+            val text = msg.content
             var revealed = 0
-            while (revealed < charCount && streamingMsgId == lastMsg.id) {
-                revealed = (revealed + speed).coerceAtMost(charCount)
+            val len = text.length
+
+            // Calculate per-character delays based on content type
+            val charDelays = IntArray(len) { idx ->
+                val c = text[idx]
+                when {
+                    c.isWhitespace() -> 8     // faster: whitespace
+                    c in listOf('.', ',', '!', '?', ';', ':') -> 12 // punctuation pause
+                    c == '\n' -> 20           // newline = longer pause
+                    idx > 0 && text[idx-1] == '`' -> 4  // code boundaries: fast
+                    c.isLetterOrDigit() -> 6   // normal text: medium
+                    c == ' ' && idx > 0 && idx < len-1 &&
+                        text[idx-1] in listOf('.','!','?') -> 40 // after sentence: slow reveal
+                    else -> 4                  // fast: symbols, numbers
+                }
+            }
+
+            var frameTarget = 0
+            val frameDuration = 14L // ~70fps for smoother feel
+
+            while (revealed < len && streamingMsgId == msg.id) {
+                // Accumulate time until we're ready to reveal one more character
+                var accumulated = 0
+                while (revealed < len && accumulated < frameDuration && streamingMsgId == msg.id) {
+                    accumulated += charDelays[revealed]
+                    if (accumulated < frameDuration) {
+                        revealed++
+                    }
+                }
+                // Reveal in variable-size chunks for performance
+                val chunkSize = when {
+                    revealed + 3 >= len -> len - revealed  // last few chars: reveal all
+                    accumulated > frameDuration * 2 -> 3    // slow section: batch 3
+                    else -> 1                               // normal: one at a time
+                }
+                revealed = (revealed + chunkSize).coerceAtMost(len)
                 streamedText = text.substring(0, revealed)
-                delay(16) // ~60fps
+                delay(frameDuration)
             }
             streamedText = text
             streamingMsgId = null
+            userScrolledUp = false // after streaming completes, ensure we're at bottom
         }
     }
 
@@ -203,44 +258,79 @@ fun HybridChatScreen(
         }
 
         // ── Messages ──────────────────────────────────────────────────────
-        LazyColumn(
-            state               = listState,
-            modifier            = Modifier.weight(1f),
-            contentPadding      = PaddingValues(top = 8.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            if (messages.isEmpty()) {
-                item { PremiumWelcomeScreen { text -> inputText = text } }
-            } else {
-                // Render grouped messages
-                itemsIndexed(groupedMessages, key = { idx, _ -> "group_${idx}_${messages.size}" }) { _, (role, msgs) ->
-                    MessageGroup(
-                        role = role,
-                        messages = msgs,
-                        streamingMsgId = streamingMsgId,
-                        streamedText = streamedText,
-                        onCopy = { text ->
-                            clipboardManager.setText(AnnotatedString(text))
-                            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                        },
-                        onDelete = { msg -> vm.deleteMessage(msg) },
-                        onRegenerate = { vm.sendCommand("regenerate last response") }
-                    )
-                }
+        Box(Modifier.weight(1f)) {
+            LazyColumn(
+                state               = listState,
+                modifier            = Modifier.fillMaxSize(),
+                contentPadding      = PaddingValues(top = 8.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (messages.isEmpty()) {
+                    item { PremiumWelcomeScreen { text -> inputText = text } }
+                } else {
+                    // Render grouped messages
+                    itemsIndexed(groupedMessages, key = { idx, _ -> "group_${idx}_${messages.size}" }) { groupIdx, (role, msgs) ->
+                        MessageGroup(
+                            role = role,
+                            messages = msgs,
+                            streamingMsgId = streamingMsgId,
+                            streamedText = streamedText,
+                            groupIndex = groupIdx,
+                            onCopy = { text ->
+                                clipboardManager.setText(AnnotatedString(text))
+                                Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                            },
+                            onDelete = { msg -> vm.deleteMessage(msg) },
+                            onRegenerate = { vm.sendCommand("regenerate last response") }
+                        )
+                    }
 
-                // Task card (if active)
-                activeTask?.let { task ->
-                    item(key = "task_${task.id}") {
-                        Box(Modifier.padding(horizontal = 4.dp, vertical = 6.dp)) {
-                            TaskCard(
-                                task = task,
-                                onPause = { vm.taskManager.pause() },
-                                onResume = { vm.taskManager.resume() },
-                                onRetry = { vm.taskManager.retryAll() },
-                                onCancel = { vm.taskManager.cancel() },
-                                onRetryStep = { idx -> vm.taskManager.retryStep(idx) }
-                            )
+                    // Task card (if active)
+                    activeTask?.let { task ->
+                        item(key = "task_${task.id}") {
+                            Box(Modifier.padding(horizontal = 4.dp, vertical = 6.dp)) {
+                                TaskCard(
+                                    task = task,
+                                    onPause = { vm.taskManager.pause() },
+                                    onResume = { vm.taskManager.resume() },
+                                    onRetry = { vm.taskManager.retryAll() },
+                                    onCancel = { vm.taskManager.cancel() },
+                                    onRetryStep = { idx -> vm.taskManager.retryStep(idx) }
+                                )
+                            }
                         }
+                    }
+                }
+            }
+
+            // ── Scroll-to-bottom FAB ───────────────────────────────────────
+            AnimatedVisibility(
+                visible = userScrolledUp && messages.isNotEmpty(),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 8.dp),
+                enter = scaleIn(animationSpec = spring(dampingRatio = 0.6f)) + fadeIn(),
+                exit = scaleOut(animationSpec = tween(150)) + fadeOut(tween(150))
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = colors.accent.copy(alpha = 0.9f),
+                    shadowElevation = 6.dp,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clickable {
+                            userScrolledUp = false
+                            keyboard?.hide()
+                            scope.launch {
+                                listState.animateScrollToItem(messages.size - 1)
+                            }
+                        }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            "Scroll to bottom",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
                     }
                 }
             }
@@ -253,9 +343,12 @@ fun HybridChatScreen(
             onTextChange = { inputText = it },
             onSend = {
                 if (inputText.isNotBlank()) {
+                    // Haptic feedback on send
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     keyboard?.hide()
                     vm.sendCommand(inputText)
                     inputText = ""
+                    userScrolledUp = false
                     scope.launch {
                         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
                     }
@@ -286,6 +379,7 @@ private fun MessageGroup(
     messages: List<ChatMessage>,
     streamingMsgId: Long?,
     streamedText: String,
+    groupIndex: Int = 0,
     onCopy: (String) -> Unit,
     onDelete: (ChatMessage) -> Unit,
     onRegenerate: () -> Unit
@@ -317,7 +411,8 @@ private fun MessageGroup(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
         )
 
-        // ENHANCED: Connected message bubbles
+        // ENHANCED: Connected message bubbles with entry animation
+        // Each message slides up with a staggered delay for a premium feel
         messages.forEachIndexed { idx, msg ->
             val isLast = idx == messages.size - 1
             val borderRadius = if (isUser) {
@@ -329,77 +424,83 @@ private fun MessageGroup(
             }
 
             val showAvatar = !isUser && isLast
+            val isStreaming = msg.id == streamingMsgId && streamedText.isNotEmpty()
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = if (!isUser && !isLast) 48.dp else 0.dp),
-                horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+            // Animated message entry (skip animation for streaming messages to avoid flicker)
+            AnimatedMessage(
+                index = idx + groupIndex * 2,
+                visible = true
             ) {
-                // AI avatar only on last message of group
-                if (showAvatar) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.background,
-                        border = BorderStroke(1.dp, colors.aiBubbleBorder),
-                        modifier = Modifier
-                            .padding(top = 8.dp, end = 10.dp)
-                            .size(36.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.AutoAwesome, "AI",
-                                tint = colors.accent, modifier = Modifier.size(20.dp))
-                        }
-                    }
-                }
-
-                // Message content
-                Column {
-                    Box(
-                        modifier = Modifier
-                            .widthIn(max = if (isUser) 300.dp else 400.dp)
-                            .clip(borderRadius)
-                            .background(
-                                if (isUser) colors.userBubbleBg else colors.aiBubbleBg,
-                                shape = borderRadius
-                            )
-                            .border(
-                                if (!isUser) 0.5.dp else 0.dp,
-                                if (!isUser) colors.aiBubbleBorder else Color.Transparent,
-                                shape = borderRadius
-                            )
-                            .padding(
-                                horizontal = if (isUser) 16.dp else 14.dp,
-                                vertical = if (isUser) 12.dp else 6.dp
-                            )
-                    ) {
-                        if (msg.isLoading) {
-                            ThinkingIndicator()
-                        } else                        if (isUser) {
-                            Text(msg.content, color = colors.userBubbleText, fontSize = 15.sp, lineHeight = 22.sp)
-                        } else {
-                            // Streaming or full text
-                            val displayText = if (msg.id == streamingMsgId && streamedText.isNotEmpty())
-                                streamedText else msg.content
-                            RichMarkdownText(
-                                markdown = displayText,
-                                modifier = Modifier.fillMaxWidth(),
-                                onLinkClick = { url ->
-                                    val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    runCatching { context.startActivity(intent) }
-                                }
-                            )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = if (!isUser && !isLast) 48.dp else 0.dp),
+                    horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+                ) {
+                    // AI avatar only on last message of group
+                    if (showAvatar) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.background,
+                            border = BorderStroke(1.dp, colors.aiBubbleBorder),
+                            modifier = Modifier
+                                .padding(top = 8.dp, end = 10.dp)
+                                .size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.AutoAwesome, "AI",
+                                    tint = colors.accent, modifier = Modifier.size(20.dp))
+                            }
                         }
                     }
 
-                    // Message actions bar (only for AI messages, last in group)
-                    if (isLast && !msg.isLoading) {
-                        MessageActionsBar(
-                            onCopy = { onCopy(msg.content) },
-                            onRegenerate = if (msg.role == MessageRole.AI) onRegenerate else null,
-                            isUserMessage = isUser
-                        )
+                    // Message content
+                    Column {
+                        Box(
+                            modifier = Modifier
+                                .widthIn(max = if (isUser) 300.dp else 400.dp)
+                                .clip(borderRadius)
+                                .background(
+                                    if (isUser) colors.userBubbleBg else colors.aiBubbleBg,
+                                    shape = borderRadius
+                                )
+                                .border(
+                                    if (!isUser) 0.5.dp else 0.dp,
+                                    if (!isUser) colors.aiBubbleBorder else Color.Transparent,
+                                    shape = borderRadius
+                                )
+                                .padding(
+                                    horizontal = if (isUser) 16.dp else 14.dp,
+                                    vertical = if (isUser) 12.dp else 6.dp
+                                )
+                        ) {
+                            if (msg.isLoading) {
+                                ThinkingIndicator()
+                            } else                        if (isUser) {
+                                Text(msg.content, color = colors.userBubbleText, fontSize = 15.sp, lineHeight = 22.sp)
+                            } else {
+                                // Streaming or full text
+                                val displayText = if (isStreaming) streamedText else msg.content
+                                RichMarkdownText(
+                                    markdown = displayText,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onLinkClick = { url ->
+                                        val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        runCatching { context.startActivity(intent) }
+                                    }
+                                )
+                            }
+                        }
+
+                        // Message actions bar (only for AI messages, last in group)
+                        if (isLast && !msg.isLoading) {
+                            MessageActionsBar(
+                                onCopy = { onCopy(msg.content) },
+                                onRegenerate = if (msg.role == MessageRole.AI) onRegenerate else null,
+                                isUserMessage = isUser
+                            )
+                        }
                     }
                 }
             }
