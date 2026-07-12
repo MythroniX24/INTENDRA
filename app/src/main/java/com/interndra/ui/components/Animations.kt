@@ -77,9 +77,10 @@ fun SkeletonCard(
     modifier: Modifier = Modifier,
     lines: Int = 3
 ) {
+    val colors = LocalInterndraColors.current
     Card(
         modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+        colors = CardDefaults.cardColors(containerColor = colors.surfaceCard),
         shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
@@ -102,9 +103,10 @@ fun SkeletonCard(
  */
 @Composable
 fun SkeletonStatCard(modifier: Modifier = Modifier) {
+    val colors = LocalInterndraColors.current
     Card(
         modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+        colors = CardDefaults.cardColors(containerColor = colors.surfaceCard),
         shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {

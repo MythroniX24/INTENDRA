@@ -146,10 +146,6 @@ val ShadowLarge        get() = Color(0x1E000000)
 
 // ── Helper: evaluate InterndraColors based on current theme  ────────────
 // Injected via CompositionLocal by Theme.kt. Defaults to dark mode.
-val LocalInterndraColors = androidx.compose.runtime.staticCompositionLocalOf {
+val LocalInterndraColors = androidx.compose.runtime.compositionLocalOf {
     InterndraColors(isLight = false)
 }
-
-/** Access current theme colors from any composable. */
-val androidx.compose.runtime.CompositionLocalMap.colors: InterndraColors
-    get() = this[LocalInterndraColors] ?: InterndraColors(isLight = false)

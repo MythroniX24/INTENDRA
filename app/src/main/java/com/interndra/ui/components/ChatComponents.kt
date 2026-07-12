@@ -41,10 +41,6 @@ import com.interndra.ai.tasks.TaskStep
 import com.interndra.ui.theme.*
 import kotlinx.coroutines.delay
 
-// ── Keep backward-compat colors reference ────────────────────────────────
-@Composable
-private fun themeColors() = LocalInterndraColors.current
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // ThinkingIndicator — Animated dots with cycling status text
 // ═══════════════════════════════════════════════════════════════════════════════

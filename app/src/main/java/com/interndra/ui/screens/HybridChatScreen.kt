@@ -290,6 +290,7 @@ private fun MessageGroup(
     onDelete: (ChatMessage) -> Unit,
     onRegenerate: () -> Unit
 ) {
+    val colors = LocalInterndraColors.current
     val isUser = role == MessageRole.USER
     val context = LocalContext.current
 
