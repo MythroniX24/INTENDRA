@@ -75,32 +75,77 @@ fun RichMarkdownText(
     onLinkClick: ((String) -> Unit)? = null
 ) {
     val blocks = remember(markdown) { EnhancedMarkdownParser.parse(markdown) }
+    val clipboardManager = LocalClipboardManager.current
+    var showCopyButton by remember { mutableStateOf(false) }
+    var copyClicked by remember { mutableStateOf(false) }
+
     Column(modifier = modifier.fillMaxWidth()) {
-        blocks.forEach { block ->
-            when (block) {
-                is EnhancedBlock.Heading -> HeadingBlock(block)
-                is EnhancedBlock.Paragraph -> ParagraphBlock(block, onLinkClick)
-                is EnhancedBlock.BulletList -> BulletListBlock(block, onLinkClick)
-                is EnhancedBlock.NumberedList -> NumberedListBlock(block, onLinkClick)
-                is EnhancedBlock.Checklist -> ChecklistBlock(block, onLinkClick)
-                is EnhancedBlock.CodeBlock -> CodeBlockBlock(block)
-                is EnhancedBlock.DiffBlock -> DiffBlockBlock(block)
-                is EnhancedBlock.Quote -> QuoteBlock(block, onLinkClick)
-                is EnhancedBlock.Table -> TableBlock(block)
-                is EnhancedBlock.Callout -> CalloutBlock(block, onLinkClick)
-                is EnhancedBlock.MathBlock -> MathBlock(block)
-                is EnhancedBlock.Collapsible -> CollapsibleBlock(block, onLinkClick)
-                is EnhancedBlock.DefinitionList -> DefinitionListBlock(block, onLinkClick)
-                is EnhancedBlock.FootnoteSection -> FootnoteSectionBlock(block, onLinkClick)
-                is EnhancedBlock.Mermaid -> MermaidBlock(block)
-                is EnhancedBlock.FileTree -> FileTreeBlock(block)
-                is EnhancedBlock.HorizontalRule -> HorizontalRuleBlock()
-                is EnhancedBlock.TagList -> TagListBlock(block)
-                is EnhancedBlock.Spoiler -> SpoilerBlock(block, onLinkClick)
-                is EnhancedBlock.ImagePlaceholder -> ImagePlaceholderBlock(block)
-                is EnhancedBlock.FootnoteRef, is EnhancedBlock.KeyboardShortcut -> {} // handled inline
+        // Copy entire response button (shown on hover/long press area)
+        Box(Modifier.fillMaxWidth()) {
+            Column {
+                blocks.forEach { block ->
+                    when (block) {
+                        is EnhancedBlock.Heading -> HeadingBlock(block)
+                        is EnhancedBlock.Paragraph -> ParagraphBlock(block, onLinkClick)
+                        is EnhancedBlock.BulletList -> BulletListBlock(block, onLinkClick)
+                        is EnhancedBlock.NumberedList -> NumberedListBlock(block, onLinkClick)
+                        is EnhancedBlock.Checklist -> ChecklistBlock(block, onLinkClick)
+                        is EnhancedBlock.CodeBlock -> CodeBlockBlock(block)
+                        is EnhancedBlock.DiffBlock -> DiffBlockBlock(block)
+                        is EnhancedBlock.Quote -> QuoteBlock(block, onLinkClick)
+                        is EnhancedBlock.Table -> TableBlock(block)
+                        is EnhancedBlock.Callout -> CalloutBlock(block, onLinkClick)
+                        is EnhancedBlock.MathBlock -> MathBlock(block)
+                        is EnhancedBlock.Collapsible -> CollapsibleBlock(block, onLinkClick)
+                        is EnhancedBlock.DefinitionList -> DefinitionListBlock(block, onLinkClick)
+                        is EnhancedBlock.FootnoteSection -> FootnoteSectionBlock(block, onLinkClick)
+                        is EnhancedBlock.Mermaid -> MermaidBlock(block)
+                        is EnhancedBlock.FileTree -> FileTreeBlock(block)
+                        is EnhancedBlock.HorizontalRule -> HorizontalRuleBlock()
+                        is EnhancedBlock.TagList -> TagListBlock(block)
+                        is EnhancedBlock.Spoiler -> SpoilerBlock(block, onLinkClick)
+                        is EnhancedBlock.ImagePlaceholder -> ImagePlaceholderBlock(block)
+                        is EnhancedBlock.FootnoteRef, is EnhancedBlock.KeyboardShortcut -> {} // handled inline
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
+
+                // Copy entire response footer
+                if (blocks.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color.Transparent,
+                            modifier = Modifier.clickable {
+                                clipboardManager.setText(AnnotatedString(markdown))
+                                copyClicked = true
+                            }
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.ContentCopy, "Copy response",
+                                    tint = if (copyClicked) Success else TerminalWhite.copy(alpha = 0.2f),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Text(
+                                    if (copyClicked) "Copied!" else "Copy response",
+                                    color = if (copyClicked) Success else TerminalWhite.copy(alpha = 0.2f),
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.SansSerif
+                                )
+                            }
+                        }
+                    }
+                }
             }
-            Spacer(Modifier.height(6.dp))
         }
     }
 }
@@ -389,21 +434,7 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
 }
 
 @Composable private fun CodeBlockBlock(b: EnhancedBlock.CodeBlock) {
-    val clip=LocalClipboardManager.current; var copied by remember{mutableStateOf(false)}
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0xFF1A1B1E)).border(1.dp,SurfaceLight,RoundedCornerShape(10.dp))) {
-        Row(Modifier.fillMaxWidth().background(Color(0xFF2A2B30)).padding(horizontal=12.dp,vertical=6.dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
-            val lc=getLangColor(b.language)
-            Row(verticalAlignment=Alignment.CenterVertically){ Box(Modifier.size(8.dp).clip(CircleShape).background(lc)); Spacer(Modifier.width(8.dp)); Text(b.language.ifBlank{"code"},color=lc,fontSize=12.sp,fontFamily=FontFamily.Monospace,fontWeight=FontWeight.SemiBold)
-                if (b.code.lines().size>1) { Spacer(Modifier.width(8.dp)); Text("${b.code.lines().size} lines",color=TerminalWhite.copy(0.4f),fontSize=10.sp,fontFamily=FontFamily.Monospace) } }
-            val copyIconColor = if (copied) Success else TerminalWhite.copy(0.6f)
-            val copyLabel = if (copied) "Copied!" else "Copy"
-            Row(modifier=Modifier.clickable{clip.setText(AnnotatedString(b.code));copied=true},verticalAlignment=Alignment.CenterVertically){ Icon(Icons.Default.ContentCopy,null,tint=copyIconColor,modifier=Modifier.size(15.dp)); Spacer(Modifier.width(4.dp)); Text(copyLabel,color=copyIconColor,fontSize=12.sp,fontFamily=FontFamily.Monospace) } }
-        val cl=b.code.split("\n")
-        if (b.showLines && cl.size<=200) {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                Column(Modifier.background(Color(0xFF1F2023)).padding(vertical=6.dp).widthIn(min=36.dp),horizontalAlignment=Alignment.End) { cl.forEachIndexed{idx,_-> val hl=idx+1 in b.highlightLines; Text("${idx+1}",color=if(hl)TerminalYellow else TerminalWhite.copy(0.3f),fontSize=12.sp,fontFamily=FontFamily.Monospace,lineHeight=18.sp,modifier=Modifier.background(if(hl)TerminalYellow.copy(0.1f)else Color.Transparent).padding(horizontal=8.dp,vertical=0.dp)) } }
-                Text(text=b.code,color=TerminalWhite.copy(0.9f),fontSize=13.sp,fontFamily=FontFamily.Monospace,lineHeight=18.sp,modifier=Modifier.padding(horizontal=12.dp,vertical=6.dp)) } }
-        else { Text(text=b.code,color=TerminalWhite.copy(0.9f),fontSize=13.sp,fontFamily=FontFamily.Monospace,lineHeight=18.sp,modifier=Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(12.dp)) } }
+    ExpandableCodeBlock(code = b.code, language = b.language)
 }
 
 @Composable private fun DiffBlockBlock(b: EnhancedBlock.DiffBlock) {

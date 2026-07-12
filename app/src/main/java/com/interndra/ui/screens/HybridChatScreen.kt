@@ -50,7 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interndra.ai.JailbreakLevel
 import com.interndra.data.model.*
-import com.interndra.ui.components.RichMarkdownText
+import com.interndra.ui.components.*
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 import com.interndra.ui.viewmodel.HybridUiState
@@ -332,18 +332,24 @@ private fun MessageGroup(
                 Column {
                     Box(
                         modifier = Modifier
-                            .widthIn(max = if (isUser) 300.dp else 360.dp)
+                            .widthIn(max = if (isUser) 300.dp else 400.dp)
                             .clip(borderRadius)
                             .background(
-                                if (isUser) UserBubble else Color(0xFF1A1B1E)
+                                if (isUser) UserBubble else Color(0xFF1A1B1E),
+                                shape = borderRadius
+                            )
+                            .border(
+                                if (!isUser) 0.5.dp else 0.dp,
+                                if (!isUser) SurfaceLight.copy(alpha = 0.3f) else Color.Transparent,
+                                shape = borderRadius
                             )
                             .padding(
-                                horizontal = if (isUser) 16.dp else 12.dp,
-                                vertical = if (isUser) 12.dp else 10.dp
+                                horizontal = if (isUser) 16.dp else 14.dp,
+                                vertical = if (isUser) 12.dp else 6.dp
                             )
                     ) {
                         if (msg.isLoading) {
-                            SimpleLoadingDots()
+                            ThinkingIndicator()
                         } else if (isUser) {
                             Text(msg.content, color = TerminalWhite, fontSize = 15.sp, lineHeight = 22.sp)
                         } else {
@@ -362,90 +368,16 @@ private fun MessageGroup(
                         }
                     }
 
-                    // Enhanced message actions (only for last message in group)
+                    // Message actions bar (only for AI messages, last in group)
                     if (isLast && !msg.isLoading) {
-                        EnhancedMessageActions(
-                            role = msg.role,
-                            content = msg.content,
-                            onCopy = onCopy,
-                            onRegenerate = onRegenerate
+                        MessageActionsBar(
+                            onCopy = { onCopy(msg.content) },
+                            onRegenerate = if (msg.role == MessageRole.AI) onRegenerate else null,
+                            isUserMessage = isUser
                         )
                     }
                 }
             }
-        }
-    }
-}
-
-// ── Enhanced Message Actions ──────────────────────────────────────────────
-@Composable
-private fun EnhancedMessageActions(
-    role: MessageRole,
-    content: String,
-    onCopy: (String) -> Unit,
-    onRegenerate: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .padding(horizontal = 8.dp, vertical = 2.dp)
-            .fillMaxWidth(),
-        horizontalArrangement = if (role == MessageRole.USER) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Copy button
-        Surface(
-            shape = RoundedCornerShape(6.dp),
-            color = Color.Transparent,
-            modifier = Modifier
-                .size(28.dp)
-                .clickable { onCopy(content) }
-        ) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Default.ContentCopy,
-                    "Copy",
-                    tint = TerminalWhite.copy(alpha = 0.25f),
-                    modifier = Modifier.size(14.dp)
-                )
-            }
-        }
-
-        // Regenerate button (AI only)
-        if (role == MessageRole.AI) {
-            Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = Color.Transparent,
-                modifier = Modifier
-                    .size(28.dp)
-                    .clickable { onRegenerate() }
-            ) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Default.Refresh,
-                        "Regenerate",
-                        tint = TerminalWhite.copy(alpha = 0.25f),
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
-            }
-        }
-    }
-}
-
-// ── Simple Loading Dots ────────────────────────────────────────────────────
-@Composable
-private fun SimpleLoadingDots() {
-    Row(
-        modifier = Modifier.height(24.dp).padding(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        repeat(3) {
-            Box(
-                Modifier
-                    .size(6.dp)
-                    .background(TerminalWhite.copy(0.4f), CircleShape)
-            )
         }
     }
 }
