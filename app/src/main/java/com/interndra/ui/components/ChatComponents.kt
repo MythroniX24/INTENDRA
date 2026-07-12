@@ -34,6 +34,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.interndra.ai.tasks.TaskPlan
+import com.interndra.ai.tasks.TaskStatus
+import com.interndra.ai.tasks.StepStatus
+import com.interndra.ai.tasks.TaskStep
 import com.interndra.ui.theme.*
 import kotlinx.coroutines.delay
 
@@ -724,4 +728,357 @@ private fun getLangColor(lang: String): Color = when (lang.lowercase()) {
     "diff" -> VaultPurple
     "mermaid" -> VaultCyan
     else -> Accent
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TaskCard — Claude-like task execution card with progress & step tracking
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Renders a task execution card showing title, progress bar, step list
+ * with animated status indicators, and action buttons (pause/resume/retry/cancel).
+ */
+@Composable
+fun TaskCard(
+    task: TaskPlan,
+    modifier: Modifier = Modifier,
+    onPause: (() -> Unit)? = null,
+    onResume: (() -> Unit)? = null,
+    onRetry: (() -> Unit)? = null,
+    onCancel: (() -> Unit)? = null,
+    onRetryStep: ((Int) -> Unit)? = null,
+    expanded: Boolean = true
+) {
+    var isExpanded by remember { mutableStateOf(expanded) }
+
+    val statusColor = when (task.status) {
+        TaskStatus.RUNNING -> Accent
+        TaskStatus.COMPLETED -> Success
+        TaskStatus.FAILED -> Danger
+        TaskStatus.CANCELLED -> TerminalYellow
+        TaskStatus.PAUSED -> TerminalYellow
+        TaskStatus.PLANNED -> TerminalWhite.copy(0.5f)
+    }
+
+    val statusIcon = when (task.status) {
+        TaskStatus.RUNNING -> "⚡"
+        TaskStatus.COMPLETED -> "✅"
+        TaskStatus.FAILED -> "❌"
+        TaskStatus.CANCELLED -> "⏹"
+        TaskStatus.PAUSED -> "⏸"
+        TaskStatus.PLANNED -> "📋"
+    }
+
+    val statusLabel = when (task.status) {
+        TaskStatus.RUNNING -> "Running"
+        TaskStatus.COMPLETED -> "Completed"
+        TaskStatus.FAILED -> "Failed"
+        TaskStatus.CANCELLED -> "Cancelled"
+        TaskStatus.PAUSED -> "Paused"
+        TaskStatus.PLANNED -> "Planned"
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1A1B1E))
+            .border(1.dp, statusColor.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+    ) {
+        // Header with title + status
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { isExpanded = !isExpanded }
+                .background(statusColor.copy(alpha = 0.08f))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(statusIcon, fontSize = 16.sp)
+                Spacer(Modifier.width(8.dp))
+                Column {
+                    Text(
+                        task.title,
+                        color = TerminalWhite,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (task.description.isNotBlank()) {
+                        Text(
+                            task.description,
+                            color = TerminalWhite.copy(0.5f),
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            // Status badge
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = statusColor.copy(alpha = 0.15f),
+                border = BorderStroke(1.dp, statusColor.copy(alpha = 0.4f))
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // Pulsing dot for running
+                    if (task.status == TaskStatus.RUNNING) {
+                        val inf = rememberInfiniteTransition(label = "task_pulse")
+                        val alpha by inf.animateFloat(0.4f, 1f,
+                            infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "pulse")
+                        Box(
+                            Modifier.size(6.dp).alpha(alpha)
+                                .clip(CircleShape).background(statusColor)
+                        )
+                    }
+                    Text(statusLabel, color = statusColor, fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            Spacer(Modifier.width(4.dp))
+            Icon(
+                if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                null, tint = TerminalWhite.copy(0.4f), modifier = Modifier.size(18.dp)
+            )
+        }
+
+        // Progress bar
+        if (task.steps.isNotEmpty()) {
+            Box(
+                Modifier.fillMaxWidth().height(3.dp).background(SurfaceLight.copy(alpha = 0.3f))
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(task.progress.coerceIn(0f, 1f))
+                        .height(3.dp)
+                        .background(
+                            when (task.status) {
+                                TaskStatus.COMPLETED -> Success
+                                TaskStatus.FAILED -> Danger
+                                else -> Accent
+                            }
+                        )
+                )
+            }
+            // Step counter
+            Row(
+                Modifier.fillMaxWidth()
+                    .background(statusColor.copy(alpha = 0.04f))
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "${task.completedSteps}/${task.steps.size} steps",
+                    color = TerminalWhite.copy(0.4f), fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                if (task.totalDurationMs > 0) {
+                    Text(
+                        formatDuration(task.totalDurationMs),
+                        color = TerminalWhite.copy(0.3f), fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
+
+        // Step list (expanded)
+        AnimatedVisibility(visible = isExpanded) {
+            Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+                task.steps.forEach { step ->
+                    TaskStepRow(
+                        step = step,
+                        isExecuting = task.status == TaskStatus.RUNNING,
+                        onRetry = if (step.status == StepStatus.FAILED && onRetryStep != null) {
+                            { onRetryStep(step.index) }
+                        } else null
+                    )
+                }
+            }
+        }
+
+        // Action buttons (bottom)
+        if (task.status != TaskStatus.COMPLETED && task.status != TaskStatus.PLANNED) {
+            Divider(color = SurfaceLight.copy(alpha = 0.2f))
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Pause / Resume
+                when (task.status) {
+                    TaskStatus.RUNNING -> {
+                        TaskActionChip("⏸ Pause", TerminalYellow, onPause)
+                    }
+                    TaskStatus.PAUSED -> {
+                        TaskActionChip("▶ Resume", Success, onResume)
+                    }
+                    else -> {}
+                }
+
+                // Retry (failed/cancelled)
+                if (task.status == TaskStatus.FAILED || task.status == TaskStatus.CANCELLED) {
+                    TaskActionChip("↻ Retry All", Accent, onRetry)
+                }
+
+                Spacer(Modifier.weight(1f))
+
+                // Cancel (only if running or paused)
+                if (task.status == TaskStatus.RUNNING || task.status == TaskStatus.PAUSED) {
+                    TaskActionChip("✕ Cancel", Danger, onCancel)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TaskStepRow(
+    step: TaskStep,
+    isExecuting: Boolean,
+    onRetry: (() -> Unit)?
+) {
+    val statusIcon = when (step.status) {
+        StepStatus.COMPLETED -> "✓"
+        StepStatus.RUNNING -> "●"
+        StepStatus.FAILED -> "✗"
+        StepStatus.PENDING -> "○"
+        StepStatus.SKIPPED -> "⏭"
+    }
+
+    val statusColor = when (step.status) {
+        StepStatus.COMPLETED -> Success
+        StepStatus.RUNNING -> Accent
+        StepStatus.FAILED -> Danger
+        StepStatus.PENDING -> TerminalWhite.copy(0.3f)
+        StepStatus.SKIPPED -> TerminalWhite.copy(0.2f)
+    }
+
+    val bgColor = when {
+        step.status == StepStatus.RUNNING -> Accent.copy(alpha = 0.06f)
+        step.status == StepStatus.FAILED -> Danger.copy(alpha = 0.04f)
+        step.index % 2 == 1 -> Color.Transparent
+        else -> SurfaceLight.copy(alpha = 0.04f)
+    }
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(bgColor)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Status indicator
+        Box(
+            Modifier
+                .size(20.dp)
+                .clip(CircleShape)
+                .background(
+                    if (step.status == StepStatus.RUNNING && isExecuting) Color.Transparent
+                    else statusColor.copy(alpha = 0.15f)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            if (step.status == StepStatus.RUNNING && isExecuting) {
+                val inf = rememberInfiniteTransition(label = "step_pulse_${step.index}")
+                val alpha by inf.animateFloat(0.3f, 1f,
+                    infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "pulse")
+                Box(Modifier.size(8.dp).alpha(alpha).clip(CircleShape).background(statusColor))
+            } else {
+                Text(statusIcon, fontSize = 10.sp, color = statusColor, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        Spacer(Modifier.width(8.dp))
+
+        // Step label
+        Column(Modifier.weight(1f)) {
+            Text(
+                step.label,
+                color = if (step.status == StepStatus.PENDING) TerminalWhite.copy(0.5f) else TerminalWhite,
+                fontSize = 12.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textDecoration = if (step.status == StepStatus.SKIPPED)
+                    androidx.compose.ui.text.style.TextDecoration.LineThrough
+                else androidx.compose.ui.text.style.TextDecoration.None
+            )
+            if (step.error != null && step.status == StepStatus.FAILED) {
+                Text(
+                    step.error.take(80),
+                    color = Danger.copy(0.7f),
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+
+        // Duration or retry
+        if (step.durationMs > 0 && step.status != StepStatus.RUNNING) {
+            Text(
+                formatDuration(step.durationMs),
+                color = TerminalWhite.copy(0.3f),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+
+        // Retry button for failed steps
+        if (step.status == StepStatus.FAILED && onRetry != null) {
+            Spacer(Modifier.width(6.dp))
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = Danger.copy(alpha = 0.1f),
+                modifier = Modifier.clickable(onClick = onRetry)
+            ) {
+                Text("Retry", color = Danger, fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun TaskActionChip(
+    label: String,
+    color: Color,
+    onClick: (() -> Unit)?
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = color.copy(alpha = 0.1f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.25f)),
+        modifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+    ) {
+        Text(
+            label,
+            color = color,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+        )
+    }
+}
+
+private fun formatDuration(ms: Long): String = when {
+    ms < 1000 -> "${ms}ms"
+    ms < 60_000 -> "${ms / 1000}.${(ms % 1000) / 100}s"
+    else -> "${ms / 60_000}m ${(ms % 60_000) / 1000}s"
 }

@@ -86,6 +86,9 @@ fun HybridChatScreen(
     val context    = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
 
+    // ── Task system ───────────────────────────────────────────────────
+    val activeTask by vm.taskManager.activeTask.collectAsState()
+
     // ── Streaming state: which FRESH (newly arrived) message is streaming ──
     // FIX: The old code used LaunchedEffect(messages) which triggered on EVERY
     // message list change, including loading old messages from the database.
@@ -219,6 +222,22 @@ fun HybridChatScreen(
                         onDelete = { msg -> vm.deleteMessage(msg) },
                         onRegenerate = { vm.sendCommand("regenerate last response") }
                     )
+                }
+
+                // Task card (if active)
+                activeTask?.let { task ->
+                    item(key = "task_${task.id}") {
+                        Box(Modifier.padding(horizontal = 4.dp, vertical = 6.dp)) {
+                            TaskCard(
+                                task = task,
+                                onPause = { vm.taskManager.pause() },
+                                onResume = { vm.taskManager.resume() },
+                                onRetry = { vm.taskManager.retryAll() },
+                                onCancel = { vm.taskManager.cancel() },
+                                onRetryStep = { idx -> vm.taskManager.retryStep(idx) }
+                            )
+                        }
+                    }
                 }
             }
         }

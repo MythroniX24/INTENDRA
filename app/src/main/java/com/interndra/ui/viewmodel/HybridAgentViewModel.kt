@@ -16,6 +16,9 @@ import androidx.work.WorkManager
 import com.interndra.agent.TerminalAgent
 import com.interndra.ai.*
 import com.interndra.ai.system.AiSystemHealthMonitor
+import com.interndra.ai.tasks.TaskManager
+import com.interndra.ai.tasks.TaskPlan
+import com.interndra.ai.tasks.TaskStepResult
 import com.interndra.ai.workflow.WorkflowEngine
 import com.interndra.ai.workflow.WorkflowPlanner
 import com.interndra.ai.agents.AgentPool
@@ -129,6 +132,10 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     val agentPool               = AgentPool(viewModelScope)
     val workflowPlanner         = WorkflowPlanner()
     val workflowEngine          = WorkflowEngine(app, repo, ShellExecutor, safety)
+    val taskManager              = TaskManager(viewModelScope) { command ->
+        val result = ShellExecutor.runAsync(command)
+        TaskStepResult(success = result.isSuccess, output = result.stdout, error = result.stderr)
+    }
 
     private var tts: TextToSpeech? = null
     private var isTtsReady = false
