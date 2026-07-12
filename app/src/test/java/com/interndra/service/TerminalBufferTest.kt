@@ -631,7 +631,8 @@ class TerminalBufferTest {
         buffer.processOutput(ESC + "[3D")   // CUB 3: cursor back to position 3
         buffer.processOutput(ESC + "[2X")   // ECH 2: erase 2 chars from cursor
         val lines = buffer.flush()
-        assertEquals("ab  ef", lines[0].text)
+        // CUB 3 from col 6 → col 3. ECH 2 erases positions 3,4 (d,e) → "abc  f"
+        assertEquals("abc  f", lines[0].text)
     }
 
     @Test
@@ -641,7 +642,8 @@ class TerminalBufferTest {
         buffer.processOutput(ESC + "[3D")
         buffer.processOutput(ESC + "[X")   // ECH with no param = 1
         val lines = buffer.flush()
-        assertEquals("te t", lines[0].text)
+        // CUB 3 from col 4 → col 1. ECH 1 erases position 1 (e) → "t st"
+        assertEquals("t st", lines[0].text)
     }
 
     // ── Insert / Delete Lines ────────────────────────────────────────
