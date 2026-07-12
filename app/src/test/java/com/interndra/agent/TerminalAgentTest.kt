@@ -135,7 +135,7 @@ class TerminalAgentTest {
     }
 
     @Test
-    fun `changeWorkdir updates path`() {
+    fun `changeWorkdir updates path`() = runTest {
         agent.changeWorkdir("default", "/tmp/test")
         val dir = agent.getWorkdir("default")
         assertTrue(dir.contains("/tmp/test"))
