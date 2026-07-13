@@ -222,15 +222,15 @@ private fun MessageList(
     groupedMessages: List<Pair<MessageRole, List<ChatMessage>>>,
     activeTask: TaskPlan?,
     colors: InterndraColors,
-    onSuggestionClick: (String) -> Unit = {},
+    onSuggestionClick: (String) -> Unit,
     onCopy: (String) -> Unit,
     onDelete: (ChatMessage) -> Unit,
     onRegenerate: () -> Unit,
-    onTaskPause: () -> Unit = {},
-    onTaskResume: () -> Unit = {},
-    onTaskRetry: () -> Unit = {},
-    onTaskCancel: () -> Unit = {},
-    onTaskRetryStep: (Int) -> Unit = {}
+    onTaskPause: () -> Unit,
+    onTaskResume: () -> Unit,
+    onTaskRetry: () -> Unit,
+    onTaskCancel: () -> Unit,
+    onTaskRetryStep: (Int) -> Unit
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
