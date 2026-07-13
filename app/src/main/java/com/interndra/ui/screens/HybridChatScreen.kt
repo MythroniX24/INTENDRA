@@ -83,8 +83,6 @@ fun HybridChatScreen(
     val jailbreakLevel by vm.jailbreakLevel.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
-    val listState  = rememberLazyListState()
-    val scope      = rememberCoroutineScope()
     val keyboard   = LocalSoftwareKeyboardController.current
     val context    = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -95,94 +93,6 @@ fun HybridChatScreen(
 
     // ── Task system ───────────────────────────────────────────────────
     val activeTask by vm.taskManager.activeTask.collectAsState()
-
-    // ── Streaming state ───────────────────────────────────────────────
-    val initialMessageCount = remember { messages.size }
-    var streamingMsgId by remember { mutableStateOf<Long?>(null) }
-    var streamedText by remember { mutableStateOf("") }
-
-    // ── Smart scroll: auto-scroll only when user is near bottom ──────────
-    var userScrolledUp by remember { mutableStateOf(false) }
-
-    fun isNearBottom(): Boolean {
-        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        val totalItems = listState.layoutInfo.totalItemsCount
-        return lastVisible >= totalItems - 3
-    }
-
-    // Track scroll gestures to detect when user scrolls up (stop auto-scroll)
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress && !isNearBottom()) {
-            userScrolledUp = true
-            keyboard?.hide() // dismiss keyboard when user manually scrolls
-        }
-    }
-
-    // Auto-scroll on new messages (only if user hasn't scrolled up)
-    LaunchedEffect(messages.size, streamedText) {
-        if (messages.isNotEmpty() && !userScrolledUp) {
-            listState.animateScrollToItem(messages.size - 1)
-        }
-    }
-
-    // Reset userScrolledUp when a new message is sent (user's own message)
-    val lastMsg = messages.lastOrNull()
-    LaunchedEffect(lastMsg?.id) {
-        if (lastMsg?.role == MessageRole.USER) {
-            userScrolledUp = false
-        }
-    }
-
-    // ── Streaming effect: smooth character reveal with variable speed ──
-    // Speed is content-aware: faster for whitespace/punctuation, slower for code/alphanumeric
-    val animatedMessageIds = remember { mutableSetOf<Long>() }
-    LaunchedEffect(messages.size) {
-        val msg = messages.lastOrNull()
-        if (msg != null && messages.size > initialMessageCount &&
-            msg.role == MessageRole.AI && !msg.isLoading &&
-            msg.content.length > 30 && msg.id !in animatedMessageIds) {
-            animatedMessageIds.add(msg.id)
-            streamingMsgId = msg.id
-            streamedText = ""
-            val text = msg.content
-            var revealed = 0
-            val len = text.length
-
-            // Calculate per-character delays based on content type
-            val charDelays = IntArray(len) { idx ->
-                val c = text[idx]
-                when {
-                    c.isWhitespace() -> 8     // faster: whitespace
-                    c in listOf('.', ',', '!', '?', ';', ':') -> 12 // punctuation pause
-                    c == '\n' -> 20           // newline = longer pause
-                    idx > 0 && text[idx-1] == '`' -> 4  // code boundaries: fast
-                    c.isLetterOrDigit() -> 6   // normal text: medium
-                    c == ' ' && idx > 0 && idx < len-1 &&
-                        text[idx-1] in listOf('.','!','?') -> 40 // after sentence: slow reveal
-                    else -> 4                  // fast: symbols, numbers
-                }
-            }
-
-            val frameDuration = 14L // ~70fps for smoother feel
-
-            while (revealed < len && streamingMsgId == msg.id) {
-                // Accumulate time and reveal characters that fit in this frame
-                var accumulated = 0
-                var charsThisFrame = 0
-                while (revealed < len && accumulated < frameDuration && streamingMsgId == msg.id && charsThisFrame < 8) {
-                    accumulated += charDelays[revealed]
-                    revealed++
-                    charsThisFrame++
-                }
-                // Update displayed text with all characters accumulated this frame
-                streamedText = text.substring(0, revealed)
-                delay(frameDuration)
-            }
-            streamedText = text
-            streamingMsgId = null
-            userScrolledUp = false // after streaming completes, ensure we're at bottom
-        }
-    }
 
     // ── Group messages by consecutive role (derived for recomposition efficiency) ──
     val groupedMessages by remember {
@@ -250,86 +160,25 @@ fun HybridChatScreen(
                 onAccept = { vm.confirmAction() }, onDeny = { vm.denyAction() })
         }
 
-        // ── Messages ──────────────────────────────────────────────────────
-        Box(Modifier.weight(1f).fillMaxHeight()) {
-            LazyColumn(
-                state               = listState,
-                modifier            = Modifier.fillMaxSize(),
-                contentPadding      = PaddingValues(top = 8.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                if (messages.isEmpty()) {
-                    item { PremiumWelcomeScreen { text -> inputText = text } }
-                } else {
-                    // Render grouped messages (stable key using first message ID of each group)
-                    itemsIndexed(groupedMessages, key = { _, group ->
-                        "group_${group.second.firstOrNull()?.id ?: group.hashCode()}"
-                    }) { groupIdx, (role, msgs) ->
-                        MessageGroup(
-                            role = role,
-                            messages = msgs,
-                            streamingMsgId = streamingMsgId,
-                            streamedText = streamedText,
-                            groupIndex = groupIdx,
-                            onCopy = { text ->
-                                clipboardManager.setText(AnnotatedString(text))
-                                Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                            },
-                            onDelete = { msg -> vm.deleteMessage(msg) },
-                            onRegenerate = { vm.sendCommand("regenerate last response") }
-                        )
-                    }
-
-                    // Task card (if active)
-                    activeTask?.let { task ->
-                        item(key = "task_${task.id}") {
-                            Box(Modifier.padding(horizontal = 4.dp, vertical = 6.dp)) {
-                                TaskCard(
-                                    task = task,
-                                    onPause = { vm.taskManager.pause() },
-                                    onResume = { vm.taskManager.resume() },
-                                    onRetry = { vm.taskManager.retryAll() },
-                                    onCancel = { vm.taskManager.cancel() },
-                                    onRetryStep = { idx -> vm.taskManager.retryStep(idx) }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ── Scroll-to-bottom FAB ───────────────────────────────────────
-            androidx.compose.animation.AnimatedVisibility(
-                visible = userScrolledUp && messages.isNotEmpty(),
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 8.dp),
-                enter = scaleIn(animationSpec = spring(dampingRatio = 0.6f)) + fadeIn(),
-                exit = scaleOut(animationSpec = tween(150)) + fadeOut(tween(150))
-            ) {
-                Surface(
-                    shape = CircleShape,
-                    color = colors.accent.copy(alpha = 0.9f),
-                    shadowElevation = 6.dp,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clickable {
-                            userScrolledUp = false
-                            keyboard?.hide()
-                            scope.launch {
-                                listState.animateScrollToItem(messages.size - 1)
-                            }
-                        }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Default.KeyboardArrowDown,
-                            "Scroll to bottom",
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                }
-            }
-        }
+        // ── Messages (isolated recomposition scope for streaming) ─────────
+        MessageList(
+            messages = messages,
+            groupedMessages = groupedMessages,
+            activeTask = activeTask,
+            colors = colors,
+            onSuggestionClick = { text -> inputText = text },
+            onCopy = { text ->
+                clipboardManager.setText(AnnotatedString(text))
+                Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+            },
+            onDelete = { msg -> vm.deleteMessage(msg) },
+            onRegenerate = { vm.sendCommand("regenerate last response") },
+            onTaskPause = { vm.taskManager.pause() },
+            onTaskResume = { vm.taskManager.resume() },
+            onTaskRetry = { vm.taskManager.retryAll() },
+            onTaskCancel = { vm.taskManager.cancel() },
+            onTaskRetryStep = { idx -> vm.taskManager.retryStep(idx) }
+        )
 
         // ── Simple Input Bar ──────────────────────────────────────────────
         SimpleInputBar(
@@ -343,10 +192,6 @@ fun HybridChatScreen(
                     keyboard?.hide()
                     vm.sendCommand(inputText)
                     inputText = ""
-                    userScrolledUp = false
-                    scope.launch {
-                        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
-                    }
                 }
             }
         )
@@ -362,6 +207,189 @@ private fun SimpleTopBar(
         Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)) {
             IconButton(onClick = onOpenDrawer, modifier = Modifier.align(Alignment.CenterStart)) {
                 Icon(Icons.Default.Menu, "Menu", tint = MaterialTheme.colorScheme.onBackground)
+            }
+        }
+    }
+}
+
+// ── Message List (isolated recomposition scope for streaming) ──────────
+@Composable
+private fun MessageList(
+    messages: List<ChatMessage>,
+    groupedMessages: List<Pair<MessageRole, List<ChatMessage>>>,
+    activeTask: TaskPlan?,
+    colors: InterndraColors,
+    onSuggestionClick: (String) -> Unit = {},
+    onCopy: (String) -> Unit,
+    onDelete: (ChatMessage) -> Unit,
+    onRegenerate: () -> Unit,
+    onTaskPause: () -> Unit = {},
+    onTaskResume: () -> Unit = {},
+    onTaskRetry: () -> Unit = {},
+    onTaskCancel: () -> Unit = {},
+    onTaskRetryStep: (Int) -> Unit = {}
+) {
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val keyboard = LocalSoftwareKeyboardController.current
+    val context = LocalContext.current
+
+    // ── Streaming state (local to this scope = no recomposition of parent) ─
+    val initialMessageCount = remember { messages.size }
+    var streamingMsgId by remember { mutableStateOf<Long?>(null) }
+    var streamedText by remember { mutableStateOf("") }
+    var userScrolledUp by remember { mutableStateOf(false) }
+
+    fun isNearBottom(): Boolean {
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        val totalItems = listState.layoutInfo.totalItemsCount
+        return lastVisible >= totalItems - 3
+    }
+
+    // Track scroll gestures to detect when user scrolls up (stop auto-scroll)
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress && !isNearBottom()) {
+            userScrolledUp = true
+            keyboard?.hide()
+        }
+    }
+
+    // Auto-scroll on new messages (only if user hasn't scrolled up)
+    LaunchedEffect(messages.size, streamedText) {
+        if (messages.isNotEmpty() && !userScrolledUp) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    // Reset userScrolledUp when a new user message arrives
+    val lastMsg = messages.lastOrNull()
+    LaunchedEffect(lastMsg?.id) {
+        if (lastMsg?.role == MessageRole.USER) {
+            userScrolledUp = false
+        }
+    }
+
+    // ── Streaming effect: smooth character reveal with variable speed ──
+    val animatedMessageIds = remember { mutableSetOf<Long>() }
+    LaunchedEffect(messages.size) {
+        val msg = messages.lastOrNull()
+        if (msg != null && messages.size > initialMessageCount &&
+            msg.role == MessageRole.AI && !msg.isLoading &&
+            msg.content.length > 30 && msg.id !in animatedMessageIds) {
+            animatedMessageIds.add(msg.id)
+            streamingMsgId = msg.id
+            streamedText = ""
+            val text = msg.content
+            var revealed = 0
+            val len = text.length
+
+            // Calculate per-character delays
+            val charDelays = IntArray(len) { idx ->
+                val c = text[idx]
+                when {
+                    c.isWhitespace() -> 8
+                    c in listOf('.', ',', '!', '?', ';', ':') -> 12
+                    c == '\n' -> 20
+                    idx > 0 && text[idx-1] == '`' -> 4
+                    c.isLetterOrDigit() -> 6
+                    c == ' ' && idx > 0 && idx < len-1 &&
+                        text[idx-1] in listOf('.','!','?') -> 40
+                    else -> 4
+                }
+            }
+
+            val frameDuration = 14L
+
+            while (revealed < len && streamingMsgId == msg.id) {
+                var accumulated = 0
+                var charsThisFrame = 0
+                while (revealed < len && accumulated < frameDuration && streamingMsgId == msg.id && charsThisFrame < 8) {
+                    accumulated += charDelays[revealed]
+                    revealed++
+                    charsThisFrame++
+                }
+                streamedText = text.substring(0, revealed)
+                delay(frameDuration)
+            }
+            streamedText = text
+            streamingMsgId = null
+            userScrolledUp = false
+        }
+    }
+
+    // ── Render ───────────────────────────────────────────────────────────
+    Box(Modifier.weight(1f).fillMaxHeight()) {
+        LazyColumn(
+            state               = listState,
+            modifier            = Modifier.fillMaxSize(),
+            contentPadding      = PaddingValues(top = 8.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            beyondViewportPageSize = 3
+        ) {
+            if (messages.isEmpty()) {
+                item { PremiumWelcomeScreen(onTextChange = onSuggestionClick) }
+            } else {
+                itemsIndexed(groupedMessages, key = { _, group ->
+                    "group_${group.second.firstOrNull()?.id ?: group.hashCode()}"
+                }) { groupIdx, (role, msgs) ->
+                    MessageGroup(
+                        role = role,
+                        messages = msgs,
+                        streamingMsgId = streamingMsgId,
+                        streamedText = streamedText,
+                        groupIndex = groupIdx,
+                        onCopy = onCopy,
+                        onDelete = onDelete,
+                        onRegenerate = onRegenerate
+                    )
+                }
+
+                activeTask?.let { task ->
+                    item(key = "task_${task.id}") {
+                        Box(Modifier.padding(horizontal = 4.dp, vertical = 6.dp)) {
+                            TaskCard(
+                                task = task,
+                                onPause = onTaskPause,
+                                onResume = onTaskResume,
+                                onRetry = onTaskRetry,
+                                onCancel = onTaskCancel,
+                                onRetryStep = onTaskRetryStep
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Scroll-to-bottom FAB ─────────────────────────────────────────
+        androidx.compose.animation.AnimatedVisibility(
+            visible = userScrolledUp && messages.isNotEmpty(),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 8.dp),
+            enter = scaleIn(animationSpec = spring(dampingRatio = 0.6f)) + fadeIn(),
+            exit = scaleOut(animationSpec = tween(150)) + fadeOut(tween(150))
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = colors.accent.copy(alpha = 0.9f),
+                shadowElevation = 6.dp,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clickable {
+                        userScrolledUp = false
+                        keyboard?.hide()
+                        scope.launch {
+                            listState.animateScrollToItem(messages.size - 1)
+                        }
+                    }
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.KeyboardArrowDown,
+                        "Scroll to bottom",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
         }
     }

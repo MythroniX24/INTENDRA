@@ -278,7 +278,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     // ── DB-backed flows ───────────────────────────────────────────────────
     val messages: StateFlow<List<ChatMessage>> by lazy {
         safeStateFlow(
-            activeWorkspaceId.flatMapLatest { wsId -> repo.getMessages(wsId) },
+            activeWorkspaceId.flatMapLatest { wsId -> repo.getMessages(wsId).distinctUntilChanged() },
             emptyList()
         )
     }

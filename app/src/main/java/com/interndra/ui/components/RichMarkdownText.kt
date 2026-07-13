@@ -429,7 +429,7 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
         b.items.forEach{(checked,text)->
             Row(Modifier.fillMaxWidth().padding(bottom=3.dp),verticalAlignment=Alignment.Top){
                 Box(Modifier.padding(top=3.dp,end=8.dp).size(18.dp).clip(RoundedCornerShape(4.dp)).background(if(checked)Success else SurfaceLight).border(1.5.dp,if(checked)Success else TerminalWhite.copy(0.4f),RoundedCornerShape(4.dp)),contentAlignment=Alignment.Center){if(checked)Text("✓",color=Background800,fontSize=12.sp,fontWeight=FontWeight.Bold)}
-                val r=parseInline(text); ClickableText(text=r.annotated,color=if(checked)TerminalWhite.copy(0.6f)else TerminalWhite,fontSize=15.sp,lineHeight=22.sp,textDecoration=if(checked)TextDecoration.LineThrough else TextDecoration.None,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) } } }
+                val r=remember(text){parseInline(text)}; ClickableText(text=r.annotated,color=if(checked)TerminalWhite.copy(0.6f)else TerminalWhite,fontSize=15.sp,lineHeight=22.sp,textDecoration=if(checked)TextDecoration.LineThrough else TextDecoration.None,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) } } }
 }
 
 @Composable private fun CodeBlockBlock(b: EnhancedBlock.CodeBlock) {
@@ -448,7 +448,7 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
 
 @Composable private fun QuoteBlock(b: EnhancedBlock.Quote, onLinkClick: ((String)->Unit)?) {
     val (bg,br,bw)=when(b.quoteType){QuoteType.NORMAL-> Triple(SurfaceLight.copy(0.12f),TerminalWhite.copy(0.3f),3.dp);QuoteType.TWEET-> Triple(Color(0xFF1DA1F2).copy(0.08f),Color(0xFF1DA1F2),2.dp);QuoteType.GITHUB_ALERT-> Triple(Color(0xFF0969DA).copy(0.08f),Color(0xFF0969DA),2.dp) }
-    Column(Modifier.fillMaxWidth().padding(start=8.dp).clip(RoundedCornerShape(6.dp)).background(bg).border(bw,br,RoundedCornerShape(6.dp)).padding(12.dp)) { b.lines.forEach{val r=parseInline(it); ClickableText(text=r.annotated,color=TerminalWhite.copy(0.85f),fontSize=14.sp,fontStyle=FontStyle.Italic,lineHeight=20.sp,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick)} }
+    Column(Modifier.fillMaxWidth().padding(start=8.dp).clip(RoundedCornerShape(6.dp)).background(bg).border(bw,br,RoundedCornerShape(6.dp)).padding(12.dp)) { b.lines.forEach{val r=remember(it){parseInline(it)}; ClickableText(text=r.annotated,color=TerminalWhite.copy(0.85f),fontSize=14.sp,fontStyle=FontStyle.Italic,lineHeight=20.sp,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick)} }
 }
 
 @Composable private fun TableBlock(b: EnhancedBlock.Table) {
@@ -470,7 +470,7 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
                 repeat(colCount) { ci ->
                     val c = r.getOrNull(ci) ?: ""
                     val a = b.alignment.getOrNull(ci) ?: TextAlign.Start
-                    val rs = parseInline(c)
+                    val rs = remember(c) { parseInline(c) }
                     Text(text=rs.annotated, color=TerminalWhite, fontSize=13.sp, textAlign=a,
                         modifier=Modifier.weight(1f).padding(horizontal=8.dp, vertical=2.dp))
                 }
@@ -494,7 +494,7 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
         Text(ic as String,color=lc as Color,fontSize=18.sp,modifier=Modifier.padding(end=10.dp,top=1.dp))
         Column(Modifier.fillMaxWidth()){ Text(title,color=lc,fontSize=13.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(bottom=4.dp))
             val ct = b.text.lines().dropWhile{it.startsWith("[!")||it.startsWith("⚠")||it.startsWith("✅")||it.startsWith("ℹ")}.joinToString("\n").trim()
-            val r=parseInline(ct); ClickableText(text=r.annotated,color=TerminalWhite,fontSize=14.sp,lineHeight=20.sp,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) } }
+            val r=remember(b.text) { parseInline(ct) }; ClickableText(text=r.annotated,color=TerminalWhite,fontSize=14.sp,lineHeight=20.sp,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) } }
 }
 
 @Composable private fun MathBlock(b: EnhancedBlock.MathBlock) {
@@ -514,20 +514,21 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
 
 @Composable private fun DefinitionListBlock(b: EnhancedBlock.DefinitionList, onLinkClick: ((String)->Unit)?) {
     Column(Modifier.fillMaxWidth()) { b.terms.forEach{(t,d)-> Column(Modifier.fillMaxWidth().padding(vertical=4.dp).clip(RoundedCornerShape(6.dp)).background(SurfaceLight.copy(0.08f)).padding(8.dp)){
-        val tr=parseInline(t); Text(text=tr.annotated,color=Accent,fontSize=15.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.padding(bottom=2.dp))
-        val dr=parseInline(d); ClickableText(text=dr.annotated,color=TerminalWhite.copy(0.85f),fontSize=14.sp,lineHeight=20.sp,modifier=Modifier.padding(start=8.dp),onLinkClick=onLinkClick) } } }
+        val tr=remember(t){parseInline(t)}; Text(text=tr.annotated,color=Accent,fontSize=15.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.padding(bottom=2.dp))
+        val dr=remember(d){parseInline(d)}; ClickableText(text=dr.annotated,color=TerminalWhite.copy(0.85f),fontSize=14.sp,lineHeight=20.sp,modifier=Modifier.padding(start=8.dp),onLinkClick=onLinkClick) } } }
 }
 
 @Composable private fun FootnoteSectionBlock(b: EnhancedBlock.FootnoteSection, onLinkClick: ((String)->Unit)?) {
     Column(Modifier.fillMaxWidth().padding(top=12.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceLight.copy(0.08f)).padding(12.dp)) {
         Text("📝 References",color=Accent,fontSize=14.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(bottom=8.dp))
-        b.footnotes.forEach{(id,t)-> Row(Modifier.fillMaxWidth().padding(bottom=4.dp),verticalAlignment=Alignment.Top){ Text("[^$id]",color=VaultCyan,fontSize=12.sp,fontWeight=FontWeight.Medium,modifier=Modifier.width(36.dp)); val r=parseInline(t); ClickableText(text=r.annotated,color=TerminalWhite.copy(0.75f),fontSize=13.sp,lineHeight=18.sp,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) } } }
+        b.footnotes.forEach{(id,t)-> Row(Modifier.fillMaxWidth().padding(bottom=4.dp),verticalAlignment=Alignment.Top){ Text("[^$id]",color=VaultCyan,fontSize=12.sp,fontWeight=FontWeight.Medium,modifier=Modifier.width(36.dp)); val r=remember(t){parseInline(t)}; ClickableText(text=r.annotated,color=TerminalWhite.copy(0.75f),fontSize=13.sp,lineHeight=18.sp,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) } } }
 }
 
 @Composable private fun MermaidBlock(b: EnhancedBlock.Mermaid) {
+    val codeVisible = remember(b.code) { b.code } // memoize unchanged code
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFF1F2937)).border(1.dp,VaultCyan.copy(0.3f),RoundedCornerShape(8.dp)).padding(12.dp)) {
         Row(verticalAlignment=Alignment.CenterVertically){ Text("📊",fontSize=18.sp); Spacer(Modifier.width(8.dp)); Text("Diagram",color=VaultCyan,fontSize=13.sp,fontWeight=FontWeight.Bold) }
-        Spacer(Modifier.height(8.dp)); Text(b.code,color=TerminalWhite.copy(0.8f),fontSize=12.sp,fontFamily=FontFamily.Monospace,lineHeight=17.sp,modifier=Modifier.fillMaxWidth().background(Color(0xFF111827)).clip(RoundedCornerShape(6.dp)).padding(10.dp))
+        Spacer(Modifier.height(8.dp)); Text(codeVisible,color=TerminalWhite.copy(0.8f),fontSize=12.sp,fontFamily=FontFamily.Monospace,lineHeight=17.sp,modifier=Modifier.fillMaxWidth().background(Color(0xFF111827)).clip(RoundedCornerShape(6.dp)).padding(10.dp))
         Spacer(Modifier.height(6.dp)); Text("Mermaid diagram",color=TerminalWhite.copy(0.3f),fontSize=10.sp,fontStyle=FontStyle.Italic) }
 }
 
@@ -545,14 +546,17 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
 
 @Composable private fun SpoilerBlock(b: EnhancedBlock.Spoiler, onLinkClick: ((String)->Unit)?) {
     var rev by remember{mutableStateOf(false)}
+    val revealedText = remember(b.text) { b.text.replace("||", "") }
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(if(rev)SurfaceLight.copy(0.1f)else Color(0xFF1A1A1A)).border(1.dp,if(rev)TerminalWhite.copy(0.2f)else SurfaceLight,RoundedCornerShape(6.dp)).clickable{rev=!rev}.padding(horizontal=12.dp,vertical=8.dp)) {
-        if (rev) { val r=parseInline(b.text.replace("||","")); ClickableText(text=r.annotated,color=TerminalWhite,fontSize=14.sp,lineHeight=20.sp,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) }
+        if (rev) { val r=remember(revealedText){parseInline(revealedText)}; ClickableText(text=r.annotated,color=TerminalWhite,fontSize=14.sp,lineHeight=20.sp,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) }
         else { Row(verticalAlignment=Alignment.CenterVertically){ Text("⬤⬤⬤ Spoiler ⬤⬤⬤",color=TerminalWhite.copy(0.4f),fontSize=14.sp); Spacer(Modifier.width(8.dp)); Text("Tap to reveal",color=TerminalWhite.copy(0.2f),fontSize=11.sp) } } }
 }
 
 @Composable private fun ImagePlaceholderBlock(b: EnhancedBlock.ImagePlaceholder) {
+    val altText = remember(b.alt) { b.alt }
+    val urlText = remember(b.url) { b.url?.takeLast(40) }
     Box(Modifier.fillMaxWidth().heightIn(min=60.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceLight.copy(0.1f)).border(1.dp,SurfaceLight,RoundedCornerShape(8.dp)).padding(16.dp),contentAlignment=Alignment.Center) {
-        Column(horizontalAlignment=Alignment.CenterHorizontally){ Text("🖼️",fontSize=24.sp); Spacer(Modifier.height(4.dp)); Text(b.alt,color=TerminalWhite.copy(0.5f),fontSize=12.sp,textAlign=TextAlign.Center); if(b.url!=null) Text("🔗 ${b.url.takeLast(40)}",color=Accent.copy(0.5f),fontSize=10.sp,fontFamily=FontFamily.Monospace) } }
+        Column(horizontalAlignment=Alignment.CenterHorizontally){ Text("🖼️",fontSize=24.sp); Spacer(Modifier.height(4.dp)); Text(altText,color=TerminalWhite.copy(0.5f),fontSize=12.sp,textAlign=TextAlign.Center); if(urlText!=null) Text("🔗 $urlText",color=Accent.copy(0.5f),fontSize=10.sp,fontFamily=FontFamily.Monospace) } }
 }
 
 @Composable private fun HorizontalRuleBlock() { Box(Modifier.fillMaxWidth().padding(vertical=8.dp).height(1.dp).background(TerminalWhite.copy(0.15f))) }
