@@ -589,7 +589,7 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
                 border=BorderStroke(1.dp,VaultCyan.copy(0.25f)),
                 modifier=Modifier.clickable{
                     val encoded = encodeMermaidCode(b.code)
-                    val url = "https://mermaid.ink/img/$encoded"
+                    val url = "https://mermaid.ink/img/pako:$encoded"
                     val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     runCatching { context.startActivity(intent) }
@@ -606,7 +606,7 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
         if (renderRequested) {
             Spacer(Modifier.height(8.dp))
             val encoded = remember(b.code) { encodeMermaidCode(b.code) }
-            val imageUrl = "https://mermaid.ink/img/$encoded?type=png&bgColor=1f2937"
+            val imageUrl = "https://mermaid.ink/img/pako:$encoded?type=png&bgColor=1f2937"
 
             val imageLoader = remember { ImageCacheUtil.getImageLoader(context) }
             val request = remember(imageUrl) {
