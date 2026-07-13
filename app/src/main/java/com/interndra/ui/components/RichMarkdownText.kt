@@ -1,6 +1,9 @@
 @file:OptIn(ExperimentalLayoutApi::class)
 package com.interndra.ui.components
 
+import android.content.Intent
+import android.util.Base64
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -38,7 +42,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -48,9 +54,13 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.size.Size
 import com.interndra.ui.theme.Accent
 import com.interndra.ui.theme.Background800
 import com.interndra.ui.theme.Danger
@@ -60,6 +70,9 @@ import com.interndra.ui.theme.TerminalWhite
 import com.interndra.ui.theme.TerminalYellow
 import com.interndra.ui.theme.VaultCyan
 import com.interndra.ui.theme.VaultPurple
+import com.interndra.util.ImageCacheUtil
+import java.io.ByteArrayOutputStream
+import java.util.zip.Deflater
 
 /**
  * RichMarkdownText — ENHANCED premium AI chat renderer (ChatGPT-level).
@@ -525,11 +538,153 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
 }
 
 @Composable private fun MermaidBlock(b: EnhancedBlock.Mermaid) {
-    val codeVisible = remember(b.code) { b.code } // memoize unchanged code
+    val context = LocalContext.current
+    val codeVisible = remember(b.code) { b.code }
+    var renderRequested by remember { mutableStateOf(false) }
+
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFF1F2937)).border(1.dp,VaultCyan.copy(0.3f),RoundedCornerShape(8.dp)).padding(12.dp)) {
-        Row(verticalAlignment=Alignment.CenterVertically){ Text("📊",fontSize=18.sp); Spacer(Modifier.width(8.dp)); Text("Diagram",color=VaultCyan,fontSize=13.sp,fontWeight=FontWeight.Bold) }
-        Spacer(Modifier.height(8.dp)); Text(codeVisible,color=TerminalWhite.copy(0.8f),fontSize=12.sp,fontFamily=FontFamily.Monospace,lineHeight=17.sp,modifier=Modifier.fillMaxWidth().background(Color(0xFF111827)).clip(RoundedCornerShape(6.dp)).padding(10.dp))
-        Spacer(Modifier.height(6.dp)); Text("Mermaid diagram",color=TerminalWhite.copy(0.3f),fontSize=10.sp,fontStyle=FontStyle.Italic) }
+        // ── Header ───────────────────────────────────────────────────────
+        Row(verticalAlignment=Alignment.CenterVertically){
+            Text("📊",fontSize=18.sp); Spacer(Modifier.width(8.dp))
+            Text("Diagram",color=VaultCyan,fontSize=13.sp,fontWeight=FontWeight.Bold)
+            Spacer(Modifier.weight(1f))
+            // Copy code button
+            Surface(shape=RoundedCornerShape(6.dp),color=VaultCyan.copy(0.12f),
+                modifier=Modifier.clickable{
+                    val clip = LocalClipboardManager.current
+                    clip.setText(AnnotatedString(b.code))
+                }) {
+                Row(Modifier.padding(horizontal=8.dp,vertical=4.dp),verticalAlignment=Alignment.CenterVertically){
+                    Icon(Icons.Default.ContentCopy,null,tint=VaultCyan,modifier=Modifier.size(12.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Code",color=VaultCyan,fontSize=10.sp,fontFamily=FontFamily.Monospace)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // ── Code (collapsible when rendered) ─────────────────────────────
+        Text(codeVisible,color=TerminalWhite.copy(0.8f),fontSize=12.sp,
+            fontFamily=FontFamily.Monospace,lineHeight=17.sp,
+            modifier=Modifier.fillMaxWidth().background(Color(0xFF111827))
+                .clip(RoundedCornerShape(6.dp)).padding(10.dp))
+
+        Spacer(Modifier.height(6.dp))
+
+        // ── Action buttons ──────────────────────────────────────────────
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+            // Render Diagram button
+            Surface(shape=RoundedCornerShape(6.dp),color=Accent.copy(0.12f),
+                border=BorderStroke(1.dp,Accent.copy(0.25f)),
+                modifier=Modifier.clickable{renderRequested=!renderRequested}) {
+                Row(Modifier.padding(horizontal=10.dp,vertical=5.dp),verticalAlignment=Alignment.CenterVertically,
+                    horizontalArrangement=Arrangement.spacedBy(4.dp)){
+                    Text(if(renderRequested)"📋"else"🧪",fontSize=12.sp)
+                    Text(if(renderRequested)"Hide"else"Render Diagram",color=Accent,fontSize=11.sp,fontWeight=FontWeight.Medium)
+                }
+            }
+            // Open in Browser button
+            Surface(shape=RoundedCornerShape(6.dp),color=VaultCyan.copy(0.12f),
+                border=BorderStroke(1.dp,VaultCyan.copy(0.25f)),
+                modifier=Modifier.clickable{
+                    val encoded = encodeMermaidCode(b.code)
+                    val url = "https://mermaid.ink/img/$encoded"
+                    val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    runCatching { context.startActivity(intent) }
+                }) {
+                Row(Modifier.padding(horizontal=10.dp,vertical=5.dp),verticalAlignment=Alignment.CenterVertically,
+                    horizontalArrangement=Arrangement.spacedBy(4.dp)){
+                    Text("🌐",fontSize=12.sp)
+                    Text("Open",color=VaultCyan,fontSize=11.sp,fontWeight=FontWeight.Medium)
+                }
+            }
+        }
+
+        // ── Rendered image (cached via Coil) ────────────────────────────
+        if (renderRequested) {
+            Spacer(Modifier.height(8.dp))
+            val encoded = remember(b.code) { encodeMermaidCode(b.code) }
+            val imageUrl = "https://mermaid.ink/img/$encoded?type=png&bgColor=1f2937"
+
+            val imageLoader = remember { ImageCacheUtil.getImageLoader(context) }
+            val request = remember(imageUrl) {
+                ImageRequest.Builder(context)
+                    .data(imageUrl)
+                    .memoryCacheKey(imageUrl)
+                    .diskCacheKey(imageUrl)
+                    .size(Size(800, 600))
+                    .crossfade(true)
+                    .build()
+            }
+
+            // Loading state
+            var isLoading by remember { mutableStateOf(true) }
+            var isError by remember { mutableStateOf(false) }
+
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFF111827))) {
+                if (isLoading && !isError) {
+                    Row(Modifier.fillMaxWidth().padding(20.dp),horizontalArrangement=Arrangement.Center){
+                        CircularProgressIndicator(Modifier.size(20.dp),color=VaultCyan,strokeWidth=2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Rendering...",color=VaultCyan.copy(0.6f),fontSize=11.sp)
+                    }
+                }
+
+                if (isError) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp),horizontalAlignment=Alignment.CenterHorizontally){
+                        Text("⚠️",fontSize=24.sp)
+                        Spacer(Modifier.height(4.dp))
+                        Text("Could not render diagram",color=TerminalWhite.copy(0.4f),fontSize=11.sp)
+                        Text("Open in browser instead",color=VaultCyan.copy(0.5f),fontSize=10.sp)
+                    }
+                }
+
+                AsyncImage(
+                    model = request,
+                    contentDescription = "Rendered Mermaid diagram",
+                    imageLoader = imageLoader,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentScale = ContentScale.Fit,
+                    onState = { state ->
+                        when (state) {
+                            is coil.compose.State.Success -> {
+                                isLoading = false; isError = false
+                            }
+                            is coil.compose.State.Error -> {
+                                isLoading = false; isError = true
+                            }
+                            else -> {}
+                        }
+                    }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+        Text("Mermaid diagram",color=TerminalWhite.copy(0.25f),fontSize=9.sp,fontStyle=FontStyle.Italic)
+    }
+}
+
+/** Encode Mermaid code to compressed base64 URL for mermaid.ink */
+private fun encodeMermaidCode(code: String): String {
+    // Apply deflate compression for shorter URLs (reduces length ~40%)
+    val input = code.toByteArray(Charsets.UTF_8)
+    val deflater = Deflater(Deflater.BEST_COMPRESSION, true) // no zlib header
+    val output = ByteArrayOutputStream(input.size)
+    deflater.setInput(input)
+    deflater.finish()
+    val buffer = ByteArray(1024)
+    while (!deflater.finished()) {
+        val len = deflater.deflate(buffer)
+        if (len > 0) output.write(buffer, 0, len)
+    }
+    deflater.end()
+    val compressed = output.toByteArray()
+    output.close()
+    // URL-safe base64 without padding
+    return Base64.encodeToString(compressed, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
 }
 
 @Composable private fun FileTreeBlock(b: EnhancedBlock.FileTree) {
@@ -553,10 +708,118 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
 }
 
 @Composable private fun ImagePlaceholderBlock(b: EnhancedBlock.ImagePlaceholder) {
+    val context = LocalContext.current
     val altText = remember(b.alt) { b.alt }
-    val urlText = remember(b.url) { b.url?.takeLast(40) }
-    Box(Modifier.fillMaxWidth().heightIn(min=60.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceLight.copy(0.1f)).border(1.dp,SurfaceLight,RoundedCornerShape(8.dp)).padding(16.dp),contentAlignment=Alignment.Center) {
-        Column(horizontalAlignment=Alignment.CenterHorizontally){ Text("🖼️",fontSize=24.sp); Spacer(Modifier.height(4.dp)); Text(altText,color=TerminalWhite.copy(0.5f),fontSize=12.sp,textAlign=TextAlign.Center); if(urlText!=null) Text("🔗 $urlText",color=Accent.copy(0.5f),fontSize=10.sp,fontFamily=FontFamily.Monospace) } }
+    val urlText = remember(b.url) { b.url?.trim() }
+
+    if (urlText != null && urlText.isNotBlank() &&
+        (urlText.startsWith("http://") || urlText.startsWith("https://"))) {
+        // ── Load actual image from URL with Coil caching ────────────────
+        var isLoading by remember(b.url) { mutableStateOf(true) }
+        var isError by remember(b.url) { mutableStateOf(false) }
+
+        val imageLoader = remember { ImageCacheUtil.getImageLoader(context) }
+        val request = remember(urlText) {
+            ImageRequest.Builder(context)
+                .data(urlText)
+                .memoryCacheKey(urlText)
+                .diskCacheKey(urlText)
+                .crossfade(true)
+                .build()
+        }
+
+        Column(Modifier.fillMaxWidth()) {
+            Box(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(SurfaceLight.copy(0.08f))
+                    .border(1.dp, SurfaceLight.copy(0.3f), RoundedCornerShape(10.dp))
+            ) {
+                // Loading indicator
+                if (isLoading && !isError) {
+                    Box(
+                        Modifier.fillMaxWidth().heightIn(min=120.dp).padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            Modifier.size(24.dp),
+                            color = Accent,
+                            strokeWidth = 2.dp
+                        )
+                    }
+                }
+
+                // Error state
+                if (isError) {
+                    Box(
+                        Modifier.fillMaxWidth().heightIn(min=80.dp).padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("🖼️", fontSize = 24.sp)
+                            Spacer(Modifier.height(4.dp))
+                            Text(altText, color = TerminalWhite.copy(0.5f), fontSize = 12.sp,
+                                textAlign = TextAlign.Center)
+                            Text("Tap to open", color = Accent.copy(0.5f), fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                }
+
+                // Actual image loaded via Coil (with disk cache)
+                AsyncImage(
+                    model = request,
+                    contentDescription = altText,
+                    imageLoader = imageLoader,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(urlText))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            runCatching { context.startActivity(intent) }
+                        },
+                    contentScale = ContentScale.Fit,
+                    onState = { state ->
+                        when (state) {
+                            is coil.compose.State.Success -> {
+                                isLoading = false; isError = false
+                            }
+                            is coil.compose.State.Error -> {
+                                isLoading = false; isError = true
+                            }
+                            else -> {}
+                        }
+                    }
+                )
+            }
+
+            // Caption / URL
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp, start = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text(altText, color = TerminalWhite.copy(0.4f), fontSize = 11.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f))
+                val displayUrl = urlText.takeLast(30)
+                Text(displayUrl, color = Accent.copy(0.5f), fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    } else {
+        // ── No URL — show placeholder only ──────────────────────────────
+        Box(Modifier.fillMaxWidth().heightIn(min=60.dp).clip(RoundedCornerShape(8.dp))
+            .background(SurfaceLight.copy(0.1f))
+            .border(1.dp,SurfaceLight,RoundedCornerShape(8.dp)).padding(16.dp),
+            contentAlignment=Alignment.Center) {
+            Column(horizontalAlignment=Alignment.CenterHorizontally){
+                Text("🖼️",fontSize=24.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(altText,color=TerminalWhite.copy(0.5f),fontSize=12.sp,textAlign=TextAlign.Center)
+                if(urlText!=null && urlText.isNotBlank()) Text("🔗 ${urlText.takeLast(40)}",color=Accent.copy(0.5f),fontSize=10.sp,fontFamily=FontFamily.Monospace)
+            }
+        }
+    }
 }
 
 @Composable private fun HorizontalRuleBlock() { Box(Modifier.fillMaxWidth().padding(vertical=8.dp).height(1.dp).background(TerminalWhite.copy(0.15f))) }
