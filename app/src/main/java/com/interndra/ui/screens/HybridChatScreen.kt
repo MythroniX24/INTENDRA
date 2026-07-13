@@ -319,7 +319,8 @@ private fun MessageList(
         }
     }
 
-    // ── Render ───────────────────────────────────────────────────────────        Box(modifier = modifier.fillMaxHeight()) {
+    // ── Render ───────────────────────────────────────────────────────────
+        Box(modifier = modifier.fillMaxHeight()) {
         LazyColumn(
             state               = listState,
             modifier            = Modifier.fillMaxSize(),
