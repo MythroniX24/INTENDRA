@@ -547,7 +547,7 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
             Text("📊",fontSize=18.sp); Spacer(Modifier.width(8.dp))
             Text("Diagram",color=VaultCyan,fontSize=13.sp,fontWeight=FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            // Copy code button (uses clipboard from composable scope)
+            // Copy code button
             Surface(shape=RoundedCornerShape(6.dp),color=VaultCyan.copy(0.12f),
                 modifier=Modifier.clickable{
                     clipboard.setText(AnnotatedString(b.code))
@@ -562,7 +562,7 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
 
         Spacer(Modifier.height(8.dp))
 
-        // ── Code (collapsible when rendered) ─────────────────────────────
+        // ── Code ────────────────────────────────────────────────────────
         Text(codeVisible,color=TerminalWhite.copy(0.8f),fontSize=12.sp,
             fontFamily=FontFamily.Monospace,lineHeight=17.sp,
             modifier=Modifier.fillMaxWidth().background(Color(0xFF111827))
@@ -575,22 +575,24 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
             // Render Diagram button
             Surface(shape=RoundedCornerShape(6.dp),color=Accent.copy(0.12f),
                 border=BorderStroke(1.dp,Accent.copy(0.25f)),
-                modifier=Modifier.clickable{renderRequested=!renderRequested}) {
+                modifier=Modifier.clickable{ renderRequested = !renderRequested }) {
                 Row(Modifier.padding(horizontal=10.dp,vertical=5.dp),verticalAlignment=Alignment.CenterVertically,
                     horizontalArrangement=Arrangement.spacedBy(4.dp)){
-                    Text(if(renderRequested)"📋"else"🧪",fontSize=12.sp)
-                    Text(if(renderRequested)"Hide"else"Render Diagram",color=Accent,fontSize=11.sp,fontWeight=FontWeight.Medium)
+                    val icon = if (renderRequested) "📋" else "🧪"
+                    val label = if (renderRequested) "Hide" else "Render Diagram"
+                    Text(icon,fontSize=12.sp)
+                    Text(label,color=Accent,fontSize=11.sp,fontWeight=FontWeight.Medium)
                 }
             }
             // Open in Browser button
             Surface(shape=RoundedCornerShape(6.dp),color=VaultCyan.copy(0.12f),
                 border=BorderStroke(1.dp,VaultCyan.copy(0.25f)),
                 modifier=Modifier.clickable{
-                    val encoded = encodeMermaidBase64(b.code)
-                    val url = "https://mermaid.ink/img/" + encoded
-                    val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                    val enc = encodeMermaidBase64(b.code)
+                    val u = "https://mermaid.ink/img/" + enc
+                    val i = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(u))
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    runCatching { context.startActivity(intent) }
+                    runCatching { context.startActivity(i) }
                 }) {
                 Row(Modifier.padding(horizontal=10.dp,vertical=5.dp),verticalAlignment=Alignment.CenterVertically,
                     horizontalArrangement=Arrangement.spacedBy(4.dp)){
@@ -617,26 +619,12 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
                     .build()
             }
 
-            // Loading state
-            var isLoading by remember { mutableStateOf(true) }
-            var isError by remember { mutableStateOf(false) }
-
             Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFF111827))) {
-                if (isLoading && !isError) {
-                    Row(Modifier.fillMaxWidth().padding(20.dp),horizontalArrangement=Arrangement.Center){
-                        CircularProgressIndicator(Modifier.size(20.dp),color=VaultCyan,strokeWidth=2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Rendering...",color=VaultCyan.copy(0.6f),fontSize=11.sp)
-                    }
-                }
-
-                if (isError) {
-                    Column(Modifier.fillMaxWidth().padding(16.dp),horizontalAlignment=Alignment.CenterHorizontally){
-                        Text("⚠️",fontSize=24.sp)
-                        Spacer(Modifier.height(4.dp))
-                        Text("Could not render diagram",color=TerminalWhite.copy(0.4f),fontSize=11.sp)
-                        Text("Open in browser instead",color=VaultCyan.copy(0.5f),fontSize=10.sp)
-                    }
+                // Loading indicator (visible until image crossfades in)
+                Row(Modifier.fillMaxWidth().padding(20.dp),horizontalArrangement=Arrangement.Center){
+                    CircularProgressIndicator(Modifier.size(20.dp),color=VaultCyan,strokeWidth=2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Rendering...",color=VaultCyan.copy(0.6f),fontSize=11.sp)
                 }
 
                 AsyncImage(
@@ -644,18 +632,7 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
                     contentDescription = "Rendered Mermaid diagram",
                     imageLoader = imageLoader,
                     modifier = Modifier.fillMaxWidth(),
-                    contentScale = ContentScale.Fit,
-                    onState = { state ->
-                        when (state) {
-                            is coil.compose.AsyncImageState.Success -> {
-                                isLoading = false; isError = false
-                            }
-                            is coil.compose.AsyncImageState.Error -> {
-                                isLoading = false; isError = true
-                            }
-                            else -> {}
-                        }
-                    }
+                    contentScale = ContentScale.Fit
                 )
             }
         }
@@ -699,9 +676,6 @@ private fun encodeMermaidBase64(code: String): String {
     if (urlText != null && urlText.isNotBlank() &&
         (urlText.startsWith("http://") || urlText.startsWith("https://"))) {
         // ── Load actual image from URL with Coil caching ────────────────
-        var isLoading by remember(b.url) { mutableStateOf(true) }
-        var isError by remember(b.url) { mutableStateOf(false) }
-
         val imageLoader = remember { ImageCacheUtil.getImageLoader(context) }
         val request = remember(urlText) {
             ImageRequest.Builder(context)
@@ -719,35 +693,16 @@ private fun encodeMermaidBase64(code: String): String {
                     .background(SurfaceLight.copy(0.08f))
                     .border(1.dp, SurfaceLight.copy(0.3f), RoundedCornerShape(10.dp))
             ) {
-                // Loading indicator
-                if (isLoading && !isError) {
-                    Box(
-                        Modifier.fillMaxWidth().heightIn(min=120.dp).padding(24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(
-                            Modifier.size(24.dp),
-                            color = Accent,
-                            strokeWidth = 2.dp
-                        )
-                    }
-                }
-
-                // Error state
-                if (isError) {
-                    Box(
-                        Modifier.fillMaxWidth().heightIn(min=80.dp).padding(16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("🖼️", fontSize = 24.sp)
-                            Spacer(Modifier.height(4.dp))
-                            Text(altText, color = TerminalWhite.copy(0.5f), fontSize = 12.sp,
-                                textAlign = TextAlign.Center)
-                            Text("Tap to open", color = Accent.copy(0.5f), fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace)
-                        }
-                    }
+                // Loading indicator (behind image, shown until crossfade completes)
+                Box(
+                    Modifier.fillMaxWidth().heightIn(min=120.dp).padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        Modifier.size(24.dp),
+                        color = Accent,
+                        strokeWidth = 2.dp
+                    )
                 }
 
                 // Actual image loaded via Coil (with disk cache)
@@ -762,18 +717,7 @@ private fun encodeMermaidBase64(code: String): String {
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             runCatching { context.startActivity(intent) }
                         },
-                    contentScale = ContentScale.Fit,
-                    onState = { state ->
-                        when (state) {
-                            is coil.compose.AsyncImageState.Success -> {
-                                isLoading = false; isError = false
-                            }
-                            is coil.compose.AsyncImageState.Error -> {
-                                isLoading = false; isError = true
-                            }
-                            else -> {}
-                        }
-                    }
+                    contentScale = ContentScale.Fit
                 )
             }
 
