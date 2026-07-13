@@ -160,8 +160,9 @@ fun HybridChatScreen(
                 onAccept = { vm.confirmAction() }, onDeny = { vm.denyAction() })
         }
 
-        // ── Messages (isolated recomposition scope for streaming) ─────────
+    // ── Messages (isolated recomposition scope for streaming) ─────────
         MessageList(
+            modifier = Modifier.weight(1f),
             messages = messages,
             groupedMessages = groupedMessages,
             activeTask = activeTask,
@@ -215,6 +216,7 @@ private fun SimpleTopBar(
 // ── Message List (isolated recomposition scope for streaming) ──────────
 @Composable
 private fun MessageList(
+    modifier: Modifier = Modifier,
     messages: List<ChatMessage>,
     groupedMessages: List<Pair<MessageRole, List<ChatMessage>>>,
     activeTask: TaskPlan?,
@@ -317,8 +319,7 @@ private fun MessageList(
         }
     }
 
-    // ── Render ───────────────────────────────────────────────────────────
-    Box(Modifier.weight(1f).fillMaxHeight()) {
+    // ── Render ───────────────────────────────────────────────────────────        Box(modifier = modifier.fillMaxHeight()) {
         LazyColumn(
             state               = listState,
             modifier            = Modifier.fillMaxSize(),
