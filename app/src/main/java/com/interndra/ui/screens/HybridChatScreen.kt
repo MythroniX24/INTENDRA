@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interndra.ai.JailbreakLevel
+import com.interndra.ai.tasks.TaskPlan
 import com.interndra.data.model.*
 import com.interndra.ui.components.*
 import com.interndra.ui.theme.LocalInterndraColors
@@ -325,8 +326,7 @@ private fun MessageList(
             state               = listState,
             modifier            = Modifier.fillMaxSize(),
             contentPadding      = PaddingValues(top = 8.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            beyondViewportPageSize = 3
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             if (messages.isEmpty()) {
                 item { PremiumWelcomeScreen(onTextChange = onSuggestionClick) }
