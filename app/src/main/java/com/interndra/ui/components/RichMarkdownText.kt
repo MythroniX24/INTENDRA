@@ -59,7 +59,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
+import coil.compose.AsyncImageState
+import coil.request.ImageResult
 import coil.size.Size
 import com.interndra.ui.theme.Accent
 import com.interndra.ui.theme.Background800
@@ -71,8 +72,6 @@ import com.interndra.ui.theme.TerminalYellow
 import com.interndra.ui.theme.VaultCyan
 import com.interndra.ui.theme.VaultPurple
 import com.interndra.util.ImageCacheUtil
-import java.io.ByteArrayOutputStream
-import java.util.zip.Deflater
 
 /**
  * RichMarkdownText — ENHANCED premium AI chat renderer (ChatGPT-level).
@@ -539,6 +538,7 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
 
 @Composable private fun MermaidBlock(b: EnhancedBlock.Mermaid) {
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val codeVisible = remember(b.code) { b.code }
     var renderRequested by remember { mutableStateOf(false) }
 
@@ -548,11 +548,10 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
             Text("📊",fontSize=18.sp); Spacer(Modifier.width(8.dp))
             Text("Diagram",color=VaultCyan,fontSize=13.sp,fontWeight=FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            // Copy code button
+            // Copy code button (uses clipboard from composable scope)
             Surface(shape=RoundedCornerShape(6.dp),color=VaultCyan.copy(0.12f),
                 modifier=Modifier.clickable{
-                    val clip = LocalClipboardManager.current
-                    clip.setText(AnnotatedString(b.code))
+                    clipboard.setText(AnnotatedString(b.code))
                 }) {
                 Row(Modifier.padding(horizontal=8.dp,vertical=4.dp),verticalAlignment=Alignment.CenterVertically){
                     Icon(Icons.Default.ContentCopy,null,tint=VaultCyan,modifier=Modifier.size(12.dp))
@@ -588,8 +587,8 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
             Surface(shape=RoundedCornerShape(6.dp),color=VaultCyan.copy(0.12f),
                 border=BorderStroke(1.dp,VaultCyan.copy(0.25f)),
                 modifier=Modifier.clickable{
-                    val encoded = encodeMermaidCode(b.code)
-                    val url = "https://mermaid.ink/img/pako:$encoded"
+                    val encoded = encodeMermaidBase64(b.code)
+                    val url = "https://mermaid.ink/img/" + encoded
                     val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     runCatching { context.startActivity(intent) }
@@ -605,8 +604,8 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
         // ── Rendered image (cached via Coil) ────────────────────────────
         if (renderRequested) {
             Spacer(Modifier.height(8.dp))
-            val encoded = remember(b.code) { encodeMermaidCode(b.code) }
-            val imageUrl = "https://mermaid.ink/img/pako:$encoded?type=png&bgColor=1f2937"
+            val encoded = remember(b.code) { encodeMermaidBase64(b.code) }
+            val imageUrl = "https://mermaid.ink/img/" + encoded + "?type=png&bgColor=1f2937"
 
             val imageLoader = remember { ImageCacheUtil.getImageLoader(context) }
             val request = remember(imageUrl) {
@@ -649,10 +648,10 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
                     contentScale = ContentScale.Fit,
                     onState = { state ->
                         when (state) {
-                            is coil.compose.State.Success -> {
+                            is coil.compose.AsyncImageState.Success -> {
                                 isLoading = false; isError = false
                             }
-                            is coil.compose.State.Error -> {
+                            is coil.compose.AsyncImageState.Error -> {
                                 isLoading = false; isError = true
                             }
                             else -> {}
@@ -667,24 +666,10 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
     }
 }
 
-/** Encode Mermaid code to compressed base64 URL for mermaid.ink */
-private fun encodeMermaidCode(code: String): String {
-    // Apply deflate compression for shorter URLs (reduces length ~40%)
+/** Encode Mermaid code to URL-safe base64 for mermaid.ink */
+private fun encodeMermaidBase64(code: String): String {
     val input = code.toByteArray(Charsets.UTF_8)
-    val deflater = Deflater(Deflater.BEST_COMPRESSION, true) // no zlib header
-    val output = ByteArrayOutputStream(input.size)
-    deflater.setInput(input)
-    deflater.finish()
-    val buffer = ByteArray(1024)
-    while (!deflater.finished()) {
-        val len = deflater.deflate(buffer)
-        if (len > 0) output.write(buffer, 0, len)
-    }
-    deflater.end()
-    val compressed = output.toByteArray()
-    output.close()
-    // URL-safe base64 without padding
-    return Base64.encodeToString(compressed, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+    return Base64.encodeToString(input, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
 }
 
 @Composable private fun FileTreeBlock(b: EnhancedBlock.FileTree) {
@@ -781,10 +766,10 @@ private fun encodeMermaidCode(code: String): String {
                     contentScale = ContentScale.Fit,
                     onState = { state ->
                         when (state) {
-                            is coil.compose.State.Success -> {
+                            is coil.compose.AsyncImageState.Success -> {
                                 isLoading = false; isError = false
                             }
-                            is coil.compose.State.Error -> {
+                            is coil.compose.AsyncImageState.Error -> {
                                 isLoading = false; isError = true
                             }
                             else -> {}
