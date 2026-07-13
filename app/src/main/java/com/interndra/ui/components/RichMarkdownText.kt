@@ -59,8 +59,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import coil.compose.AsyncImageState
-import coil.request.ImageResult
+import coil.request.ImageRequest
 import coil.size.Size
 import com.interndra.ui.theme.Accent
 import com.interndra.ui.theme.Background800
