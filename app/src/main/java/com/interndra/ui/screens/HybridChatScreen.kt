@@ -184,24 +184,26 @@ fun HybridChatScreen(
         }
     }
 
-    // ── Group messages by consecutive role ──────────────────────────────────
-    val groupedMessages = remember(messages) {
-        if (messages.isEmpty()) emptyList()
-        else {
-            val groups = mutableListOf<Pair<MessageRole, List<ChatMessage>>>()
-            var currentRole = messages[0].role
-            var currentGroup = mutableListOf<ChatMessage>()
-            for (msg in messages) {
-                if (msg.role == currentRole && !msg.isLoading) {
-                    currentGroup.add(msg)
-                } else {
-                    if (currentGroup.isNotEmpty()) groups.add(currentRole to currentGroup)
-                    currentRole = msg.role
-                    currentGroup = mutableListOf(msg)
+    // ── Group messages by consecutive role (derived for recomposition efficiency) ──
+    val groupedMessages by remember {
+        derivedStateOf {
+            if (messages.isEmpty()) emptyList()
+            else {
+                val groups = mutableListOf<Pair<MessageRole, List<ChatMessage>>>()
+                var currentRole = messages[0].role
+                var currentGroup = mutableListOf<ChatMessage>()
+                for (msg in messages) {
+                    if (msg.role == currentRole && !msg.isLoading) {
+                        currentGroup.add(msg)
+                    } else {
+                        if (currentGroup.isNotEmpty()) groups.add(currentRole to currentGroup)
+                        currentRole = msg.role
+                        currentGroup = mutableListOf(msg)
+                    }
                 }
+                if (currentGroup.isNotEmpty()) groups.add(currentRole to currentGroup)
+                groups
             }
-            if (currentGroup.isNotEmpty()) groups.add(currentRole to currentGroup)
-            groups
         }
     }
 
@@ -259,8 +261,10 @@ fun HybridChatScreen(
                 if (messages.isEmpty()) {
                     item { PremiumWelcomeScreen { text -> inputText = text } }
                 } else {
-                    // Render grouped messages
-                    itemsIndexed(groupedMessages, key = { idx, _ -> "group_${idx}_${messages.size}" }) { groupIdx, (role, msgs) ->
+                    // Render grouped messages (stable key using first message ID of each group)
+                    itemsIndexed(groupedMessages, key = { _, group ->
+                        "group_${group.second.firstOrNull()?.id ?: group.hashCode()}"
+                    }) { groupIdx, (role, msgs) ->
                         MessageGroup(
                             role = role,
                             messages = msgs,

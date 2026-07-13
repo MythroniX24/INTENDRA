@@ -399,25 +399,25 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
 
 @Composable private fun HeadingBlock(b: EnhancedBlock.Heading) {
     val (sz, w, c) = when(b.level){1-> Triple(26.sp,FontWeight.Bold,TerminalWhite);2-> Triple(22.sp,FontWeight.Bold,Accent);3-> Triple(19.sp,FontWeight.SemiBold,TerminalWhite);4-> Triple(17.sp,FontWeight.Medium,TerminalWhite.copy(0.9f));5-> Triple(15.sp,FontWeight.Medium,TerminalWhite.copy(0.8f));else-> Triple(14.sp,FontWeight.Normal,TerminalWhite.copy(0.7f)) }
-    val result = parseInline(b.text); val align = if (b.style==HeadingStyle.CENTERED) TextAlign.Center else TextAlign.Start
+    val result = remember(b.text) { parseInline(b.text) }; val align = if (b.style==HeadingStyle.CENTERED) TextAlign.Center else TextAlign.Start
     val pad = when(b.style){HeadingStyle.CENTERED->Modifier.fillMaxWidth().padding(top=12.dp,bottom=4.dp);HeadingStyle.WITH_LINE->Modifier.fillMaxWidth().padding(top=12.dp,bottom=2.dp); else->Modifier.padding(top=10.dp,bottom=2.dp)}
     Column(pad) {
         Text(text=result.annotated,color=c,fontSize=sz,fontWeight=w,lineHeight=(sz.value*1.3f).sp,textAlign=align,modifier=Modifier.fillMaxWidth())
         if (b.style==HeadingStyle.WITH_LINE) { Spacer(Modifier.height(4.dp)); Box(Modifier.fillMaxWidth().height(2.dp).background(Accent.copy(alpha=0.3f))) } }
 }
 
-@Composable private fun ParagraphBlock(b: EnhancedBlock.Paragraph, onLinkClick: ((String)->Unit)?) { val r=parseInline(b.text); ClickableText(text=r.annotated,color=TerminalWhite,fontSize=15.sp,lineHeight=22.sp,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) }
+@Composable private fun ParagraphBlock(b: EnhancedBlock.Paragraph, onLinkClick: ((String)->Unit)?) { val r = remember(b.text) { parseInline(b.text) }; ClickableText(text=r.annotated,color=TerminalWhite,fontSize=15.sp,lineHeight=22.sp,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) }
 
 @Composable private fun BulletListBlock(b: EnhancedBlock.BulletList, onLinkClick: ((String)->Unit)?) {
     Column(Modifier.fillMaxWidth()) { b.items.forEachIndexed { idx,item -> val indent = b.indentLevels.getOrNull(idx)?:0; Row(Modifier.fillMaxWidth().padding(start=(indent*20).dp,bottom=3.dp),verticalAlignment=Alignment.Top){
         Text(text=when(indent%3){0->"•";1->"◦";else->"▪"},color=Accent,fontSize=16.sp,modifier=Modifier.padding(top=2.dp,end=8.dp).width(16.dp))
-        val r=parseInline(item); ClickableText(text=r.annotated,color=TerminalWhite,fontSize=15.sp,lineHeight=22.sp,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) } } }
+        val r=remember(item){parseInline(item)}; ClickableText(text=r.annotated,color=TerminalWhite,fontSize=15.sp,lineHeight=22.sp,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) } } }
 }
 
 @Composable private fun NumberedListBlock(b: EnhancedBlock.NumberedList, onLinkClick: ((String)->Unit)?) {
     Column(Modifier.fillMaxWidth()) { b.items.forEachIndexed{idx,item -> val num=b.numbers.getOrNull(idx)?:(idx+1); Row(Modifier.fillMaxWidth().padding(bottom=3.dp),verticalAlignment=Alignment.Top){
         Text("$num.",color=Accent,fontSize=15.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.width(28.dp))
-        val r=parseInline(item); ClickableText(text=r.annotated,color=TerminalWhite,fontSize=15.sp,lineHeight=22.sp,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) } } }
+        val r=remember(item){parseInline(item)}; ClickableText(text=r.annotated,color=TerminalWhite,fontSize=15.sp,lineHeight=22.sp,modifier=Modifier.fillMaxWidth(),onLinkClick=onLinkClick) } } }
 }
 
 @Composable private fun ChecklistBlock(b: EnhancedBlock.Checklist, onLinkClick: ((String)->Unit)?) {
