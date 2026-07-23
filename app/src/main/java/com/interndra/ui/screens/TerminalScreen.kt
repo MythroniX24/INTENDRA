@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.text.AnnotatedString
+import android.util.Log
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -291,6 +292,19 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
             } // end if/else
             } // end Box (terminal output)
         } // end Column (output area + jobs panel)
+
+        TerminalExtraKeysBar(
+            onInsert = { inputText += it },
+            onControl = { ctrlChar ->
+                scope.launch {
+                    try {
+                        vm.terminalAgent.sendControlChar(activeSession, ctrlChar)
+                    } catch (e: Exception) {
+                        Log.e("TerminalScreen", "Failed to send control char: ${e.message}")
+                    }
+                }
+            }
+        )
 
         TerminalInputBar(
             text = inputText,
@@ -898,6 +912,47 @@ private fun AnsiTerminalLine(
         softWrap = true,
         modifier = Modifier.padding(vertical = 1.dp)
     )
+}
+
+// ── Terminal Extra Keys Bar (Termux-style) ─────────────────────────────────
+@Composable
+private fun TerminalExtraKeysBar(
+    onInsert: (String) -> Unit,
+    onControl: (Char) -> Unit
+) {
+    val extraKeys = listOf(
+        "ESC" to { onInsert("\u001B") },
+        "TAB" to { onInsert("\t") },
+        "/" to { onInsert("/") },
+        "-" to { onInsert("-") },
+        "Ctrl+C" to { onControl(3.toChar()) },
+        "Ctrl+D" to { onControl(4.toChar()) },
+        "Ctrl+Z" to { onControl(26.toChar()) },
+        "Ctrl+L" to { onControl(12.toChar()) }
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        extraKeys.forEach { (label, action) ->
+            OutlinedButton(
+                onClick = action,
+                modifier = Modifier.height(32.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                border = BorderStroke(1.dp, SurfaceLight.copy(0.3f)),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = SurfaceCard.copy(0.5f),
+                    contentColor = TerminalWhite.copy(0.8f)
+                )
+            ) {
+                Text(label, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            }
+        }
+    }
 }
 
 // ── Terminal Input Bar ──────────────────────────────────────────────────────

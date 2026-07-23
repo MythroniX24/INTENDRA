@@ -346,6 +346,25 @@ class PersistentShell(
         text
     }
 
+    /**
+     * Write raw text directly to the shell's stdin without appending a newline
+     * or an exit marker. Useful for sending control characters (e.g. Ctrl+C).
+     * Returns true if the write succeeded.
+     */
+    fun sendRaw(text: String): Boolean {
+        val writer = stdinWriter ?: return false
+        return try {
+            synchronized(writer) {
+                writer.write(text)
+                writer.flush()
+            }
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "sendRaw failed: ${e.message}")
+            false
+        }
+    }
+
     /** Destroy the shell process and clean up resources. */
     fun destroy() {
         synchronized(startLock) {

@@ -351,6 +351,39 @@ class TerminalAgent(
     fun getJobOutput(jobId: Int): String = backgroundJobs[jobId]?.output ?: ""
     fun activeJobCount(): Int = backgroundJobs.values.count { it.isActive }
 
+    // ── Raw Control Character ─────────────────────────────────────────
+    /**
+     * Send a raw control character (e.g. Ctrl+C) directly to the persistent
+     * shell's stdin. This does not append a newline or an exit marker, so it
+     * behaves like pressing the key in a real terminal. Returns true if the
+     * character was written to a live shell.
+     */
+    suspend fun sendControlChar(sessionName: String, char: Char): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val shell = getShell()
+            if (shell != null && shell.isAlive) {
+                val written = shell.sendRaw(char.toString())
+                if (written) {
+                    _outputFlow.tryEmit(StreamEvent.Output(sessionName, "\u001b[90m<${char.controlName()}>\u001b[0m\n"))
+                }
+                written
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "sendControlChar failed: ${e.message}")
+            false
+        }
+    }
+
+    private fun Char.controlName(): String = when (this) {
+        '\u0003' -> "Ctrl+C"
+        '\u0004' -> "Ctrl+D"
+        '\u001A' -> "Ctrl+Z"
+        '\u000C' -> "Ctrl+L"
+        else -> "Ctrl+${this.uppercaseChar()}"
+    }
+
     // ── Command Execution ──────────────────────────────────────────────
     suspend fun execute(
         sessionName: String, command: String,
