@@ -225,6 +225,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     val shizukuPrivilegeLevel: String get() = shizukuManager.privilegeLevel
     val isShizukuElevated: Boolean get() = shizukuShell.isElevatedAvailable
 
+    // Cached runtime capabilities; invalidated when Shizuku status changes.
+    @Volatile private var cachedRuntimeCaps: AICommandRegistry.RuntimeCapabilities? = null
+
     // ── AI System Health Monitor ──────────────────────────────────────
     val healthMonitor = AiSystemHealthMonitor(app)
 
@@ -419,10 +422,8 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                     _shizukuUid.value = -1
                     Log.w(TAG, "Shizuku binder died — attempting re-auth on next command")
                 })
-                shizukuManager.refreshStatus()
-                _shizukuAvailable.value = shizukuManager.isBinderAlive
-                _shizukuAuthorized.value = shizukuManager.isAuthorized()
-                _shizukuUid.value = shizukuManager.shizukuUid
+                refreshShizukuStatus()
+                startShizukuHealthCheck()
                 Log.i(TAG, "Shizuku initialized: available=${_shizukuAvailable.value}, " +
                     "authorized=${_shizukuAuthorized.value}, UID=${_shizukuUid.value}")
             } catch (e: Exception) {
@@ -800,11 +801,13 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
 
                 val memoryContext = repo.buildMemoryContext()
                 val chatHistory  = repo.getChatHistory(limit = 16)
+                val runtimeContext = withContext(Dispatchers.IO) { buildTerminalRuntimeContext() }
                 val orchResult = orchestrator.process(
                     userInput   = augmentedInput,
                     memory      = memoryContext,
                     privacyMode = effectiveMode,
                     chatHistory = chatHistory,
+                    runtimeContext = runtimeContext,
                     onCloudConsentNeeded = { resumeCallback ->
                         _uiState.update { s ->
                             s.copy(pendingCloudConsent = CloudConsentRequest(
@@ -1205,10 +1208,10 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
 
     /**
      * Request Shizuku authorization from the user.
-     * This opens the Shizuku authorization dialog.
+     * This opens the Shizuku authorization dialog if not already authorized.
      */
     fun requestShizukuPermission() {
-        shizukuManager.requestPermission { granted ->
+        val started = shizukuManager.ensureAuthorized { granted ->
             _shizukuAuthorized.value = granted
             if (granted) {
                 shizukuManager.refreshStatus()
@@ -1218,6 +1221,10 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 Log.w(TAG, "Shizuku permission denied by user")
             }
         }
+        if (!started) {
+            // Binder not alive — guide user to start Shizuku first
+            _uiState.update { it.copy(error = "Shizuku is not running. Please open the Shizuku app and start it first.") }
+        }
     }
 
     /** Refresh Shizuku status. */
@@ -1226,10 +1233,69 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         _shizukuAvailable.value = shizukuManager.isBinderAlive
         _shizukuAuthorized.value = shizukuManager.isAuthorized()
         _shizukuUid.value = shizukuManager.shizukuUid
+        // Invalidate runtime capabilities cache so the next prompt sees fresh state.
+        cachedRuntimeCaps = null
+    }
+
+    /** Periodically re-check Shizuku health so the UI doesn't lie about authorization. */
+    private fun startShizukuHealthCheck(intervalMs: Long = 15_000L) {
+        viewModelScope.launch {
+            while (true) {
+                delay(intervalMs)
+                try {
+                    val previouslyAuthorized = _shizukuAuthorized.value
+                    refreshShizukuStatus()
+                    if (previouslyAuthorized && !_shizukuAuthorized.value) {
+                        Log.w(TAG, "Shizuku authorization lost — persistent shell may need restart")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Shizuku health check failed: ${e.message}")
+                }
+            }
+        }
     }
 
     /** Whether Shizuku is the active execution backend. */
     val executionBackendDescription: String get() = terminalAgent.executionBackendDescription
+
+    /**
+     * Build a runtime context block describing the current shell environment.
+     * This is injected into the AI system prompt so the model knows what
+     * commands are actually available before generating shell commands.
+     */
+    fun buildTerminalRuntimeContext(): String {
+        val sb = StringBuilder()
+        sb.appendLine("- Active shell backend: ${terminalAgent.executionBackendDescription}")
+        sb.appendLine("- Shizuku authorized: $isShizukuElevated")
+        sb.appendLine("- Shizuku privilege level: ${shizukuManager.privilegeLevel}")
+        sb.appendLine("- Current terminal session: ${activeTerminalSession.value}")
+        sb.appendLine("- Current workdir: ${terminalAgent.getWorkdir(activeTerminalSession.value)}")
+
+        val caps = cachedRuntimeCaps ?: AICommandRegistry.detectRuntimeCapabilities(app, shizukuShell).also { cachedRuntimeCaps = it }
+        sb.appendLine("- Environment: ${caps.environmentType}")
+        if (caps.hasTermux) sb.appendLine("- Termux installed: ${if (caps.hasTermuxPermission) "yes (permission granted)" else "yes (RUN_COMMAND permission denied)"}")
+        else sb.appendLine("- Termux installed: no")
+
+        val recentOutput = terminalAgent.getOutputLines(activeTerminalSession.value)
+            .takeLast(10)
+            .map { stripAnsi(it).take(120) }
+        if (recentOutput.isNotEmpty()) {
+            sb.appendLine("- Recent terminal output (last ${recentOutput.size} lines):")
+            recentOutput.forEach { line ->
+                sb.appendLine("    $line")
+            }
+        }
+
+        val envVars = terminalAgent.getEnv(activeTerminalSession.value, "PATH") ?: "/system/bin"
+        sb.appendLine("- PATH: $envVars")
+        sb.appendLine("- Instruction: Only generate commands that are available in this environment. Prefer ADB_SHELL. Use Termux-only commands (pkg/pip/npm/git/python/node) ONLY if a Termux app is installed and permission is granted.")
+        return sb.toString().trimEnd()
+    }
+
+    /** Strip ANSI escape sequences so terminal output doesn't confuse the AI. */
+    private fun stripAnsi(text: String): String {
+        return text.replace(Regex("\u001B\\[[0-9;]*[a-zA-Z]"), "")
+    }
 
     fun refreshStatus() {
         // Phase 2 FIX: previously read privacyMode.value which could still be

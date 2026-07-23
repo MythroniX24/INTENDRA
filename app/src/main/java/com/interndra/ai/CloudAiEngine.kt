@@ -43,15 +43,17 @@ class CloudAiEngine(
         memory: List<CommandMemory>,
         chatHistory: List<Pair<String, String>> = emptyList(),
         jailbreakActive: Boolean = false,
-        jailbreakLevel: JailbreakLevel = JailbreakLevel.OFF
+        jailbreakLevel: JailbreakLevel = JailbreakLevel.OFF,
+        runtimeContext: String = ""
     ): AiEngineResult = withContext(Dispatchers.IO) {
         val startMs = System.currentTimeMillis()
 
         // Inject jailbreak into system prompt if active
+        val basePrompt = Constants.aiSystemPrompt(runtimeContext)
         val systemPrompt = if (jailbreakActive && jailbreakLevel != JailbreakLevel.OFF) {
-            JailbreakEngine.injectJailbreak(Constants.AI_SYSTEM_PROMPT, jailbreakLevel)
+            JailbreakEngine.injectJailbreak(basePrompt, jailbreakLevel)
         } else {
-            Constants.AI_SYSTEM_PROMPT
+            basePrompt
         }
 
         val obfuscatedInput = if (jailbreakActive && jailbreakLevel != JailbreakLevel.OFF) {

@@ -108,6 +108,25 @@ class ShizukuManager(private val context: Context) {
 
     fun isAuthorized(): Boolean = isBinderAlive && isPermissionGranted
 
+    /**
+     * Ensures Shizuku is authorized, refreshing status and optionally requesting permission.
+     * Returns true if authorized; false otherwise. The caller can then prompt the user.
+     */
+    fun ensureAuthorized(onResult: ((Boolean) -> Unit)? = null): Boolean {
+        refreshStatus()
+        if (isAuthorized()) {
+            onResult?.invoke(true)
+            return true
+        }
+        return requestPermission(onResult)
+    }
+
+    /** Polls the Shizuku binder and permission state, returning the current authorization status. */
+    fun checkHealth(): Boolean {
+        refreshStatus()
+        return isAuthorized()
+    }
+
     fun requestPermission(onResult: ((Boolean) -> Unit)? = null): Boolean {
         if (!isBinderAlive) { onResult?.invoke(false); return false }
         if (isPermissionGranted) { onResult?.invoke(true); return true }

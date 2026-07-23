@@ -130,7 +130,8 @@ class LocalAiEngine(private val context: Context) {
     // ── Inference ──────────────────────────────────────────────────────────
     suspend fun parseIntent(
         userInput: String,
-        memory: List<CommandMemory>
+        memory: List<CommandMemory>,
+        runtimeContext: String = ""
     ): AiEngineResult = withContext(Dispatchers.IO) {
         val startMs = System.currentTimeMillis()
 
@@ -148,7 +149,7 @@ class LocalAiEngine(private val context: Context) {
         }
 
         return@withContext try {
-            val prompt = buildPrompt(userInput, memory)
+            val prompt = buildPrompt(userInput, memory, runtimeContext)
             val raw    = nativeInfer(modelHandle, prompt, maxTokens = 512, temp = 0.1f)
             val json   = extractJson(raw)
             Log.d(TAG, "Local inference ${System.currentTimeMillis() - startMs}ms")
@@ -171,11 +172,12 @@ class LocalAiEngine(private val context: Context) {
     }
 
     // ── Prompt builder — Qwen2.5 ChatML format ────────────────────────────
-    private fun buildPrompt(userInput: String, memory: List<CommandMemory>): String = buildString {
+    private fun buildPrompt(userInput: String, memory: List<CommandMemory>, runtimeContext: String = ""): String = buildString {
+        val basePrompt = Constants.aiSystemPrompt(runtimeContext)
         val systemPrompt = if (JailbreakEngine.activeLevel != JailbreakLevel.OFF) {
-            JailbreakEngine.injectJailbreak(Constants.AI_SYSTEM_PROMPT, JailbreakEngine.activeLevel)
+            JailbreakEngine.injectJailbreak(basePrompt, JailbreakEngine.activeLevel)
         } else {
-            Constants.AI_SYSTEM_PROMPT
+            basePrompt
         }
         val obfuscatedInput = if (JailbreakEngine.activeLevel != JailbreakLevel.OFF) {
             JailbreakEngine.obfuscateInput(userInput, JailbreakEngine.activeLevel)

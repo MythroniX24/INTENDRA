@@ -1,5 +1,11 @@
 package com.interndra.ai
 
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import com.interndra.service.AgentAccessibilityService
+import com.interndra.service.ShizukuShell
+
 /**
  * AICommandRegistry — command discovery and capability reporting for the AI.
  *
@@ -169,6 +175,43 @@ object AICommandRegistry {
 
     /** Get all registered commands. */
     fun getAllCommands(): List<CommandEntry> = commandsByName.values.distinct().toList()
+
+    /**
+     * Detect the current runtime environment capabilities.
+     * This should be called on-demand because it queries system state and
+     * Shizuku, which can be slow or change at runtime.
+     */
+    fun detectRuntimeCapabilities(context: Context, shizukuShell: ShizukuShell): RuntimeCapabilities {
+        val hasShizuku = shizukuShell.manager.isShizukuInstalled()
+        val isShizukuAuthorized = shizukuShell.isElevatedAvailable
+        val hasTermux = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo("com.termux", PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo("com.termux", 0)
+            }
+            true
+        }.getOrDefault(false)
+        val hasTermuxPermission = hasTermux &&
+            context.checkPermission("com.termux.permission.RUN_COMMAND", android.os.Process.myPid(), android.os.Process.myUid()) ==
+            PackageManager.PERMISSION_GRANTED
+
+        return RuntimeCapabilities(
+            hasShizuku = hasShizuku,
+            hasTermux = hasTermux,
+            hasTermuxPermission = hasTermuxPermission,
+            isShizukuAuthorized = isShizukuAuthorized,
+            shizukuPrivilegeLevel = shizukuShell.privilegeDescription,
+            hasAccessibilityService = AgentAccessibilityService.isEnabled(context),
+            environmentType = when {
+                isShizukuAuthorized -> "elevated"
+                else -> "sandboxed"
+            },
+            termuxHome = "/data/data/com.termux/files/home",
+            termuxUsrBin = "/data/data/com.termux/files/usr/bin"
+        )
+    }
 
     /**
      * Generate a human-readable capabilities report for the AI.

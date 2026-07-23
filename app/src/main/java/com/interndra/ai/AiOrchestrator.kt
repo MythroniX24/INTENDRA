@@ -59,19 +59,20 @@ class AiOrchestrator(
         memory: List<CommandMemory>,
         privacyMode: PrivacyMode,
         onCloudConsentNeeded: suspend ((allow: Boolean) -> Unit) -> Unit = { it(true) },
-        chatHistory: List<Pair<String, String>> = emptyList()
+        chatHistory: List<Pair<String, String>> = emptyList(),
+        runtimeContext: String = ""
     ): OrchestratorResult {
 
         val routingDecision = decideRoute(userInput, privacyMode)
         Log.d(TAG, "Routing: $routingDecision for '${userInput.take(60)}'")
 
         val result: AiEngineResult = when (routingDecision) {
-            RoutingDecision.LOCAL -> runLocal(userInput, memory)
+            RoutingDecision.LOCAL -> runLocal(userInput, memory, runtimeContext)
 
-            RoutingDecision.CLOUD -> runCloud(userInput, memory, chatHistory)
+            RoutingDecision.CLOUD -> runCloud(userInput, memory, chatHistory, runtimeContext)
 
             RoutingDecision.LOCAL_WITH_CLOUD_FALLBACK -> {
-                val localResult = runLocal(userInput, memory)
+                val localResult = runLocal(userInput, memory, runtimeContext)
                 if (isGoodResult(localResult.intentJson)) {
                     localResult
                 } else if (isInternetAvailable() && isCloudConfigured()) {
@@ -79,7 +80,7 @@ class AiOrchestrator(
                     onCloudConsentNeeded { allowed -> userAllowed = allowed }
                     if (userAllowed) {
                         try {
-                            runCloud(userInput, memory, chatHistory).copy(source = AiSource.FALLBACK)
+                            runCloud(userInput, memory, chatHistory, runtimeContext).copy(source = AiSource.FALLBACK)
                         } catch (e: Exception) { localResult }
                     } else {
                         Log.d(TAG, "Cloud escalation denied by user — using local result")
@@ -118,14 +119,16 @@ class AiOrchestrator(
     private suspend fun runCloud(
         userInput: String,
         memory: List<CommandMemory>,
-        chatHistory: List<Pair<String, String>> = emptyList()
+        chatHistory: List<Pair<String, String>> = emptyList(),
+        runtimeContext: String = ""
     ): AiEngineResult {
         return when (activeProvider) {
             Constants.AiProvider.OPENROUTER -> {
                 try {
                     cloudEngine.parseIntent(userInput, memory, chatHistory,
                         jailbreakActive = jailbreakActive,
-                        jailbreakLevel = jailbreakLevel
+                        jailbreakLevel = jailbreakLevel,
+                        runtimeContext = runtimeContext
                     )
                 } catch (e: Exception) {
                     Log.e(TAG, "OpenRouter error: ${e.message} — falling back to local")
@@ -139,17 +142,18 @@ class AiOrchestrator(
                     try {
                         cloudEngine.parseIntent(userInput, memory, chatHistory,
                             jailbreakActive = jailbreakActive,
-                            jailbreakLevel = jailbreakLevel
+                            jailbreakLevel = jailbreakLevel,
+                            runtimeContext = runtimeContext
                         ).copy(source = AiSource.FALLBACK)
                     } catch (e: Exception) {
                         runLocal(userInput, memory).copy(source = AiSource.FALLBACK)
                     }
                 } else {
-                    try {
-                        engine.parseIntent(userInput, memory, chatHistory,
-                            jailbreakActive = jailbreakActive,
-                            jailbreakLevel = jailbreakLevel
-                        )
+                    try {                            engine.parseIntent(userInput, memory, chatHistory,
+                                jailbreakActive = jailbreakActive,
+                                jailbreakLevel = jailbreakLevel,
+                                runtimeContext = runtimeContext
+                            )
                     } catch (geminiErr: Exception) {
                         val rawMsg = geminiErr.message ?: "Unknown Gemini error"
                         val geminiMsg = rawMsg
@@ -162,7 +166,8 @@ class AiOrchestrator(
                         try {
                             cloudEngine.parseIntent(userInput, memory, chatHistory,
                                 jailbreakActive = jailbreakActive,
-                                jailbreakLevel = jailbreakLevel
+                                jailbreakLevel = jailbreakLevel,
+                                runtimeContext = runtimeContext
                             ).copy(source = AiSource.FALLBACK)
                         } catch (e2: Exception) {
                             // Both Gemini AND OpenRouter failed — show Gemini error to user.
@@ -218,8 +223,8 @@ class AiOrchestrator(
         }
     }
 
-    private suspend fun runLocal(input: String, memory: List<CommandMemory>): AiEngineResult =
-        try { localEngine.parseIntent(input, memory) }
+    private suspend fun runLocal(input: String, memory: List<CommandMemory>, runtimeContext: String = ""): AiEngineResult =
+        try { localEngine.parseIntent(input, memory, runtimeContext) }
         catch (e: Exception) {
             Log.e(TAG, "Local engine error: ${e.message}")
             AiEngineResult(intentJson = """{"action":"unknown","commands":[]}""",
