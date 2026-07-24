@@ -1268,6 +1268,13 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         repo.updateWorkspace(workspace.copy(name = newName))
         if (workspace.id == _uiState.value.activeWorkspaceId) _uiState.update { it.copy(activeWorkspaceName = newName) }
     }
+
+    /** Rename a workspace by ID (fetches the workspace first to avoid data loss). */
+    fun renameWorkspaceById(workspaceId: Long, newName: String) = viewModelScope.launch {
+        val ws = workspaces.value.find { it.id == workspaceId } ?: return@launch
+        repo.updateWorkspace(ws.copy(name = newName))
+        if (workspaceId == _uiState.value.activeWorkspaceId) _uiState.update { it.copy(activeWorkspaceName = newName) }
+    }
     fun deleteWorkspace(workspace: Workspace) = viewModelScope.launch {
         repo.deleteWorkspace(workspace)
         if (workspace.id == _uiState.value.activeWorkspaceId) switchWorkspace(0L, "General")

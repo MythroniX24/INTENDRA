@@ -127,10 +127,7 @@ fun HybridChatScreen(
             onRename = { newName ->
                 val wsId = uiState.activeWorkspaceId
                 if (wsId > 0) {
-                    vm.renameWorkspace(
-                        com.interndra.data.model.Workspace(id = wsId, name = newName, emoji = "💬", color = "#00E5FF"),
-                        newName
-                    )
+                    vm.renameWorkspaceById(wsId, newName)
                 }
             }
         )
