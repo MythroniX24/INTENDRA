@@ -30,7 +30,11 @@ jobs:
       - name: Install Android SDK packages
         run: |
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platform-tools" "build-tools;35.0.0" "platforms;android-35"
+          sdkmanager "platform-tools" "build-tools;35.0.0" "platforms;android-35" "ndk;27.0.12077973"
+        shell: bash
+
+      - name: Set ANDROID_NDK_HOME
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
         shell: bash
 
       - name: Cache Gradle dependencies
