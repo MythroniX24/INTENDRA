@@ -149,14 +149,141 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
 
                 Spacer(Modifier.height(8.dp))
 
-                // ── Quick-access navigation ───────────────────────────────
-                DrawerSectionLabel("QUICK ACCESS")
+                // ── NEW CHAT button (prominent, like Claude) ──────────────
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Accent.copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.4f))
+                ) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val wsId = viewModel.createWorkspace("New Chat", "💬", "#00E5FF")
+                                selectedAppTab = AppTab.CHAT
+                                scope.launch { drawerState.close() }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Add, null, tint = Accent, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text("New Chat", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
 
-                DrawerItem(
-                    icon = Icons.AutoMirrored.Filled.Chat,
-                    label = "Chat",
-                    selected = selectedAppTab == AppTab.CHAT
-                ) { navigateToTab(AppTab.CHAT) }
+                Spacer(Modifier.height(12.dp))
+
+                // ── Conversations (workspaces) ─────────────────────────────
+                DrawerSectionLabel("CONVERSATIONS")
+
+                workspaces.forEach { ws ->
+                    var showRename by remember { mutableStateOf(false) }
+                    var renameText by remember(ws.id) { mutableStateOf(ws.name) }
+
+                    Surface(
+                        color = if (uiState.activeWorkspaceId == ws.id) Accent.copy(alpha = 0.1f) else Color.Transparent,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 1.dp)
+                            .clickable {
+                                viewModel.switchWorkspace(ws.id, ws.name)
+                                selectedAppTab = AppTab.CHAT
+                                scope.launch { drawerState.close() }
+                            }
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(ws.emoji, fontSize = 16.sp)
+                            Spacer(Modifier.width(10.dp))
+
+                            if (showRename) {
+                                TextField(
+                                    value = renameText,
+                                    onValueChange = { renameText = it.take(30) },
+                                    modifier = Modifier.weight(1f).height(40.dp),
+                                    singleLine = true,
+                                    colors = TextFieldDefaults.colors(
+                                        focusedContainerColor = SurfaceLight,
+                                        unfocusedContainerColor = SurfaceLight,
+                                        focusedTextColor = TerminalWhite,
+                                        unfocusedTextColor = TerminalWhite,
+                                        focusedIndicatorColor = Accent,
+                                        cursorColor = Accent
+                                    ),
+                                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(onDone = {
+                                        if (renameText.isNotBlank()) {
+                                            viewModel.renameWorkspace(
+                                                ws.copy(name = renameText.trim()),
+                                                renameText.trim()
+                                            )
+                                        }
+                                        showRename = false
+                                    })
+                                )
+                            } else {
+                                Text(
+                                    ws.name,
+                                    color = if (uiState.activeWorkspaceId == ws.id) TerminalWhite else TerminalWhite.copy(alpha = 0.7f),
+                                    fontSize = 14.sp,
+                                    fontWeight = if (uiState.activeWorkspaceId == ws.id) FontWeight.SemiBold else FontWeight.Normal,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            // Rename button (long-press to rename)
+                            if (!showRename) {
+                                IconButton(
+                                    onClick = { showRename = true; renameText = ws.name },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, "Rename",
+                                        tint = TerminalWhite.copy(alpha = 0.3f), modifier = Modifier.size(14.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (workspaces.isEmpty()) {
+                    Text(
+                        "No conversations yet",
+                        color = TerminalWhite.copy(alpha = 0.3f),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                    )
+                }
+
+                Spacer(Modifier.height(4.dp))
+
+                // ── Create Project button ───────────────────────────────────
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable {
+                            viewModel.createWorkspace("New Project", "📁", "#8AB4F8")
+                            selectedAppTab = AppTab.CHAT
+                            scope.launch { drawerState.close() }
+                        }
+                        .padding(vertical = 6.dp)
+                ) {
+                    Text("+ New Project", color = Accent.copy(alpha = 0.6f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+
+                // ── Quick-access navigation ───────────────────────────────
+                DrawerSectionLabel("TOOLS")
 
                 DrawerItem(
                     icon = Icons.Default.Terminal,
@@ -164,77 +291,12 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
                     selected = selectedAppTab == AppTab.TERMINAL
                 ) { navigateToTab(AppTab.TERMINAL) }
 
-                // ── Dashboards sub-navigation ──────────────────────────
-                DrawerSectionLabel("DASHBOARDS")
-
-                DrawerItem(
-                    icon = Icons.Default.Psychology,
-                    label = "Memory ($memCount)",
-                    selected = selectedAppTab == AppTab.DASHBOARDS && selectedDashboard == 0
-                ) { selectedDashboard = 0; navigateToTab(AppTab.DASHBOARDS) }
-
                 DrawerItem(
                     icon = Icons.Default.Book,
-                    label = "Knowledge Vault ($vaultCount)",
+                    label = "Knowledge Vault",
                     selected = selectedAppTab == AppTab.DASHBOARDS && selectedDashboard == 1
                 ) { selectedDashboard = 1; navigateToTab(AppTab.DASHBOARDS) }
-
-                DrawerItem(
-                    icon = Icons.Default.Science,
-                    label = "Research",
-                    selected = selectedAppTab == AppTab.DASHBOARDS && selectedDashboard == 2
-                ) { selectedDashboard = 2; navigateToTab(AppTab.DASHBOARDS) }
-
-                DrawerItem(
-                    icon = Icons.Default.Timeline,
-                    label = "Timeline",
-                    selected = selectedAppTab == AppTab.DASHBOARDS && selectedDashboard == 3
-                ) { selectedDashboard = 3; navigateToTab(AppTab.DASHBOARDS) }
-
-                // ── System ────────────────────────────────────────────────
-                DrawerSectionLabel("SYSTEM")
-
-                DrawerItem(
-                    icon = Icons.Default.Security,
-                    label = "Security & Privacy",
-                    selected = selectedAppTab == AppTab.DASHBOARDS && selectedDashboard == 4
-                ) { selectedDashboard = 4; navigateToTab(AppTab.DASHBOARDS) }
-
-                DrawerItem(
-                    icon = Icons.Default.Workspaces,
-                    label = "Workspaces",
-                    selected = selectedAppTab == AppTab.DASHBOARDS && selectedDashboard == 5
-                ) { selectedDashboard = 5; navigateToTab(AppTab.DASHBOARDS) }
-
-                // ── Workspace list ────────────────────────────────────────
-                if (workspaces.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    DrawerSectionLabel("WORKSPACES")
-                    workspaces.take(5).forEach { ws ->
-                        DrawerWorkspaceItem(
-                            workspace = ws,
-                            selected = uiState.activeWorkspaceId == ws.id
-                        ) {
-                            viewModel.switchWorkspace(ws.id, ws.name)
-                            navigateToTab(AppTab.CHAT)
-                        }
-                    }
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 4.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { selectedDashboard = 5; navigateToTab(AppTab.DASHBOARDS) }
-                            .padding(vertical = 6.dp)
-                    ) {
-                        Text(
-                            "+ Manage Workspaces",
-                            color = Accent,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
+                
 
                 Spacer(Modifier.weight(1f))
 

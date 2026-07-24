@@ -906,6 +906,10 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 val replyText = buildAiReply(intent, orchResult.explanation, suppressSteps = usingFallbackCommands) +
                     buildSourcesBlock(webSources)
                 repo.updateAiMessage(placeholderId, replyText)
+
+                // Auto-title: if workspace is still "New Chat", generate a title
+                autoTitleIfNeeded(trimmed)
+
                 // TTS: only speak if user has enabled it in Settings
                 if (!intent.reply.isNullOrBlank() && ttsEnabled.value) speak(intent.reply)
                 if (commands.isNotEmpty()) {
@@ -1191,6 +1195,69 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         val snapshot = deviceIntelligence.getSnapshot()
         _uiState.update { it.copy(deviceSnapshot = snapshot) }
     }
+
+    // ── Auto-title generation ────────────────────────────────────────────
+    /**
+     * If the current workspace is still named "New Chat", generate a short
+     * title (2-7 words) from the first user message and update the workspace.
+     * Uses keyword extraction for instant titles without additional API calls.
+     */
+    private fun autoTitleIfNeeded(firstUserMessage: String) {
+        val state = _uiState.value
+        val wsName = state.activeWorkspaceName
+        if (wsName != "New Chat" && !wsName.startsWith("New")) return
+
+        val title = generateChatTitle(firstUserMessage)
+        if (title.isBlank() || title == "New Chat") return
+
+        val wsId = state.activeWorkspaceId
+        if (wsId <= 0) return
+
+        viewModelScope.launch {
+            try {
+                val ws = workspaces.value.find { it.id == wsId }
+                if (ws != null) {
+                    repo.updateWorkspace(ws.copy(name = title))
+                    _uiState.update { it.copy(activeWorkspaceName = title) }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Auto-title failed: ${e.message}")
+            }
+        }
+    }
+
+    /** Generate a short chat title (2-7 words) from a user message. */
+    fun generateChatTitle(message: String): String {
+        val cleaned = message
+            .replace(Regex("[^a-zA-Z0-9\\s?.,!-]"), "")
+            .trim()
+        if (cleaned.isEmpty()) return "New Chat"
+
+        // Extract meaningful words
+        val words = cleaned.split(Regex("\\s+"))
+            .filter { it.length > 2 }
+            .filterNot { it.lowercase() in stopWords }
+
+        if (words.isEmpty()) return cleaned.take(40).trim()
+
+        // Build title from key words (max 7 words)
+        val titleWords = words.take(7)
+        val title = titleWords.joinToString(" ")
+            .replaceFirstChar { it.uppercase() }
+            .take(50)
+            .trim()
+
+        // Ensure at least 2 words
+        return if (title.split(" ").size >= 2) title
+        else cleaned.take(40).trim()
+    }
+
+    private val stopWords = setOf(
+        "the", "and", "for", "that", "this", "with", "was", "are", "can", "how",
+        "what", "when", "where", "which", "who", "will", "have", "has", "does",
+        "please", "just", "like", "from", "about", "than", "then", "also",
+        "very", "much", "some", "any", "each", "every", "only", "other"
+    )
 
     // ── Workspace management ──────────────────────────────────────────────
     fun createWorkspace(name: String, emoji: String = "📁", color: String = "#00E5FF") = viewModelScope.launch {
