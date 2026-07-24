@@ -39,6 +39,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interndra.agent.TerminalAgent
 import com.interndra.service.TerminalBuffer
+import com.interndra.terminal.TerminalEmulator
+import com.interndra.terminal.TerminalSession
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 import kotlinx.coroutines.delay
@@ -81,6 +83,32 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     var commandHistoryIndex by remember { mutableStateOf(-1) }
     var savedCurrentInput by remember { mutableStateOf("") }
     var showHistoryPanel by remember { mutableStateOf(false) }
+
+    // ── PTY Terminal Grid Mode ──────────────────────────────────────────────
+    var isPtyActive by remember { mutableStateOf(false) }
+    var ptyScreenText by remember { mutableStateOf("") }
+    var ptyGridTick by remember { mutableLongStateOf(0L) }
+
+    // PTY polling: read emulator screen buffer ~20 fps
+    LaunchedEffect(isPtyActive) {
+        if (!isPtyActive) return@LaunchedEffect
+        while (isActive) {
+            val session = vm.terminalAgent.getPtySession()
+            if (session?.isRunning == true) {
+                val emu = session.emulator
+                // Process pending input from ByteQueue into emulator
+                session.ptyToEmulatorQueue.let { q ->
+                    val buf = ByteArray(4096)
+                    val n = q.tryRead(buf, 0, buf.size)
+                    if (n > 0) emu.processBytes(buf, 0, n)
+                }
+                // Build screen text with ANSI colors
+                ptyScreenText = buildPtyScreenText(emu)
+                ptyGridTick = System.currentTimeMillis()
+            }
+            delay(50)
+        }
+    }
 
     // ── TerminalBuffer: per-session ANSI parser ──
     val terminalBuffer = remember { TerminalBuffer() }
@@ -245,7 +273,21 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
 
             // ── Terminal Output ────────────────────────────────────────
             Box(modifier = Modifier.weight(1f).fillMaxWidth().background(TerminalBg)) {
-            if (terminalLines.isEmpty()) {
+            // Check PTY mode periodically
+            LaunchedEffect(Unit) {
+                while (isActive) {
+                    isPtyActive = vm.terminalAgent.isPtyMode
+                    delay(2000)
+                }
+            }
+
+            if (isPtyActive && ptyScreenText.isNotEmpty()) {
+                // ── PTY Grid Mode: real character-grid rendering ────
+                PtyTerminalView(
+                    screenText = ptyScreenText,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else if (terminalLines.isEmpty()) {
                 // Empty state
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1267,4 +1309,84 @@ private fun MenuItem(
             }
         }
     }
+}
+
+// ── PTY Terminal View (Real Character Grid) ─────────────────────────────────
+
+/**
+ * Renders the PTY terminal emulator screen buffer as a monospace grid.
+ * Uses [TerminalEmulator.getScreenLines] to get plain text rows and renders
+ * them in a scrollable monospace container — exactly like a real terminal.
+ */
+@Composable
+private fun PtyTerminalView(
+    screenText: String,
+    modifier: Modifier = Modifier
+) {
+    val scrollState = rememberScrollState()
+    val autoScrollEnabled = remember { mutableStateOf(true) }
+
+    // Auto-scroll to bottom
+    LaunchedEffect(screenText) {
+        if (autoScrollEnabled.value) {
+            scrollState.animateScrollTo(scrollState.maxValue)
+        }
+    }
+
+    Box(modifier = modifier) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 4.dp, vertical = 2.dp)
+        ) {
+            // Render screen as a single monospace text block
+            // Split by newline, render each row
+            val lines = screenText.split('\n')
+            lines.forEachIndexed { idx, line ->
+                Text(
+                    text = line.ifEmpty { " " },
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    color = TerminalWhite,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.padding(vertical = 0.dp)
+                )
+            }
+        }
+
+        // Auto-scroll toggle (floating, bottom-right)
+        if (scrollState.maxValue > 0) {
+            SmallFloatingActionButton(
+                onClick = { autoScrollEnabled.value = !autoScrollEnabled.value },
+                containerColor = if (autoScrollEnabled.value) Accent.copy(0.3f) else TerminalBg.copy(0.7f),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(8.dp)
+                    .size(28.dp)
+            ) {
+                Icon(
+                    if (autoScrollEnabled.value) Icons.Default.ArrowDownward else Icons.Default.Pause,
+                    "Auto-scroll",
+                    tint = if (autoScrollEnabled.value) Accent else TerminalWhite.copy(0.5f),
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Build a plain-text screen representation from the [TerminalEmulator]'s
+ * screen buffer. Uses [TerminalEmulator.getScreenLines] for speed.
+ *
+ * For color rendering, iterate through cells with [TerminalEmulator.getCell]
+ * and build [AnnotatedString] per row.
+ */
+private fun buildPtyScreenText(emu: TerminalEmulator): String {
+    val lines = emu.getScreenLines()
+    return lines.joinToString("\n") { it }
 }

@@ -44,10 +44,12 @@ object AICommandRegistry {
         val hasShizuku: Boolean = false,
         val hasTermux: Boolean = false,
         val hasTermuxPermission: Boolean = false,
+        val hasEmbeddedTermux: Boolean = false,         // Embedded Termux bootstrap
         val isShizukuAuthorized: Boolean = false,
         val shizukuPrivilegeLevel: String = "none",
         val hasAccessibilityService: Boolean = false,
         val environmentType: String = "sandboxed",
+        val executionMode: String = "fallback",         // termux | shizuku | fallback
         val termuxHome: String = "/data/data/com.termux/files/home",
         val termuxUsrBin: String = "/data/data/com.termux/files/usr/bin"
     )
@@ -181,7 +183,11 @@ object AICommandRegistry {
      * This should be called on-demand because it queries system state and
      * Shizuku, which can be slow or change at runtime.
      */
-    fun detectRuntimeCapabilities(context: Context, shizukuShell: ShizukuShell): RuntimeCapabilities {
+    fun detectRuntimeCapabilities(
+        context: Context,
+        shizukuShell: ShizukuShell,
+        termuxEnvironment: Any? = null  // TermuxEnvironment or null
+    ): RuntimeCapabilities {
         val hasShizuku = shizukuShell.manager.isShizukuInstalled()
         val isShizukuAuthorized = shizukuShell.isElevatedAvailable
         val hasTermux = runCatching {
@@ -197,17 +203,49 @@ object AICommandRegistry {
             context.checkPermission("com.termux.permission.RUN_COMMAND", android.os.Process.myPid(), android.os.Process.myUid()) ==
             PackageManager.PERMISSION_GRANTED
 
+        // Detect embedded Termux bootstrap via reflection (avoids circular dependency)
+        val hasEmbeddedTermux = runCatching {
+            val envClass = Class.forName("com.interndra.service.TermuxEnvironment")
+            val hasTermuxMethod = envClass.getMethod("hasTermux")
+            if (termuxEnvironment != null && envClass.isInstance(termuxEnvironment)) {
+                hasTermuxMethod.invoke(termuxEnvironment) as? Boolean ?: false
+            } else {
+                // Check if the bootstrap marker files exist
+                val instClass = Class.forName("com.interndra.service.TermuxBootstrapInstaller")
+                val shizPrefixField = instClass.getField("SHIZUKU_PREFIX")
+                val shizPrefix = shizPrefixField.get(null) as? String ?: ""
+                if (shizPrefix.isNotBlank()) {
+                    shizukuShell.executeBlocking(
+                        "test -f '${shizPrefix}/.installed_v1' && echo yes || echo no",
+                        5000
+                    ).let { it.isSuccess && it.stdout.trim() == "yes" }
+                } else false
+            }
+        }.getOrDefault(false)
+
+        // Determine current execution mode
+        val executionMode = when {
+            hasEmbeddedTermux -> "termux"
+            isShizukuAuthorized -> "shizuku"
+            else -> "fallback"
+        }
+
+        val environmentType = when {
+            hasEmbeddedTermux -> "embedded_termux"
+            isShizukuAuthorized -> "elevated"
+            else -> "sandboxed"
+        }
+
         return RuntimeCapabilities(
             hasShizuku = hasShizuku,
             hasTermux = hasTermux,
             hasTermuxPermission = hasTermuxPermission,
+            hasEmbeddedTermux = hasEmbeddedTermux,
             isShizukuAuthorized = isShizukuAuthorized,
             shizukuPrivilegeLevel = shizukuShell.privilegeDescription,
             hasAccessibilityService = AgentAccessibilityService.isEnabled(context),
-            environmentType = when {
-                isShizukuAuthorized -> "elevated"
-                else -> "sandboxed"
-            },
+            environmentType = environmentType,
+            executionMode = executionMode,
             termuxHome = "/data/data/com.termux/files/home",
             termuxUsrBin = "/data/data/com.termux/files/usr/bin"
         )
@@ -223,12 +261,24 @@ object AICommandRegistry {
         sb.appendLine()
         sb.appendLine("### Environment")
         sb.appendLine("- Execution level: **${caps.environmentType}**")
+        sb.appendLine("- Active mode: **${caps.executionMode}**")
         if (caps.hasShizuku) sb.appendLine("- Shizuku: **${caps.shizukuPrivilegeLevel}** (${if (caps.isShizukuAuthorized) "✅ Authorized" else "❌ Not authorized"})")
         else sb.appendLine("- Shizuku: ❌ Not available")
-        sb.appendLine("- Termux: ${if (caps.hasTermux) "✅ Installed" else "❌ Not installed"}")
+        sb.appendLine("- Termux app: ${if (caps.hasTermux) "✅ Installed" else "❌ Not installed"}")
         if (caps.hasTermux) sb.appendLine("  - Permission: ${if (caps.hasTermuxPermission) "✅ Granted" else "❌ Denied"}")
+        sb.appendLine("- Embedded Termux: ${if (caps.hasEmbeddedTermux) "✅ Ready (bash + apt)" else "❌ Not installed"}")
         sb.appendLine("- Accessibility Service: ${if (caps.hasAccessibilityService) "✅ Enabled" else "❌ Not enabled"}")
         sb.appendLine()
+
+        if (caps.hasEmbeddedTermux) {
+            sb.appendLine("### 🐧 Embedded Termux Environment")
+            sb.appendLine("This app has a built-in Termux environment. You can:")
+            sb.appendLine("- Run `python3`, `git`, `node`, `npm`, `pip` immediately")
+            sb.appendLine("- Install packages with `pkg install <package>` (apt-based)")
+            sb.appendLine("- Use full bash shell with aliases, history, env vars")
+            sb.appendLine("- Switch to Shizuku mode for system commands (pm, settings)")
+            sb.appendLine()
+        }
 
         sb.appendLine("### Available Command Categories")
         for (category in CommandCategory.values()) {

@@ -8,6 +8,9 @@ import com.interndra.service.ShellExecutionResult
 import com.interndra.service.ShellExecutor
 import com.interndra.service.ShizukuShell
 import com.interndra.service.TerminalConfig
+import com.interndra.service.TermuxEnvironment
+import com.interndra.terminal.TerminalSession
+import com.interndra.terminal.TerminalEmulator
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.*
@@ -44,6 +47,7 @@ import java.util.concurrent.ConcurrentHashMap
 class TerminalAgent(
     private val context: Context,
     private val shizukuShell: ShizukuShell,
+    private val termuxEnvironment: TermuxEnvironment? = null,
     private val scope: CoroutineScope? = null
 ) {
     companion object {
@@ -56,6 +60,102 @@ class TerminalAgent(
         val TERMUX_HOME = "/data/data/com.termux/files/home"
         val TERMUX_USR_BIN = "/data/data/com.termux/files/usr/bin"
     }
+
+    /** Current execution mode — Termux (default), Shizuku, or Fallback. */
+    var currentMode: TermuxEnvironment.ExecMode = TermuxEnvironment.ExecMode.FALLBACK
+        private set
+
+    /** Has embedded Termux environment? */
+    val hasEmbeddedTermux: Boolean get() = termuxEnvironment?.hasTermux() == true
+
+    // ── PTY Terminal Session ───────────────────────────────────────────
+    @Volatile private var ptySession: TerminalSession? = null
+
+    /** Whether the REAL PTY terminal is active (bash via forkpty). */
+    val isPtyMode: Boolean get() = ptySession?.isRunning == true
+
+    /** Get the PTY session (for UI to read emulator screen buffer). */
+    fun getPtySession(): TerminalSession? = ptySession
+
+    /**
+     * Start a REAL PTY terminal session using forkpty() JNI.
+     * Creates bash inside the Termux bootstrap environment — full interactive
+     * terminal with proper TTY, colors, and signal handling.
+     *
+     * @param config  TermuxSessionConfig with prefix, homeDir, shellPath, etc.
+     * @return true if PTY session started successfully
+     */
+    suspend fun startPtySession(config: TerminalSession.TermuxSessionConfig): Boolean {
+        if (isPtyMode) {
+            Log.i(TAG, "PTY session already running (PID ${ptySession?.childPid})")
+            return true
+        }
+
+        return withContext(Dispatchers.IO) {
+            val session = config.createSession()
+
+            // Wire output callback → stream to UI
+            session.onOutput = { text ->
+                _outputFlow.tryEmit(StreamEvent.Output("default", text))
+            }
+
+            // Wire exit callback
+            session.onExit = { code ->
+                Log.i(TAG, "PTY session exited with code $code")
+                _outputFlow.tryEmit(StreamEvent.Output("default",
+                    "\n\u001b[33m[Process exited with code $code]\u001b[0m\n"))
+                _outputFlow.tryEmit(StreamEvent.CommandEnd("default", code))
+                ptySession = null
+            }
+
+            // Wire error callback
+            session.onError = { msg ->
+                Log.e(TAG, "PTY session error: $msg")
+                _outputFlow.tryEmit(StreamEvent.Error("default", msg))
+            }
+
+            val ok = session.start()
+            if (ok) {
+                ptySession = session
+                currentMode = TermuxEnvironment.ExecMode.TERMUX
+                Log.i(TAG, "✅ PTY terminal started: PID=${session.childPid}, fd=${session.ptmFd}")
+                _outputFlow.tryEmit(StreamEvent.Output("default",
+                    "\u001b[32m✓ Real PTY terminal ready — bash ${session.childPid}\u001b[0m\n"))
+                _outputFlow.tryEmit(StreamEvent.CommandEnd("default", 0))
+            } else {
+                Log.e(TAG, "Failed to start PTY session — falling back to pipe-based shell")
+                _outputFlow.tryEmit(StreamEvent.Output("default",
+                    "\u001b[33m⚠ PTY terminal unavailable — using fallback shell\u001b[0m\n"))
+            }
+            ok
+        }
+    }
+
+    /** Stop the PTY session if running. */
+    fun stopPtySession() {
+        ptySession?.stop()
+        ptySession = null
+    }
+
+    /** Switch execution mode (Termux ↔ Shizuku). */
+    suspend fun switchMode(mode: TermuxEnvironment.ExecMode): Boolean {
+        val prior = currentMode
+        val env = termuxEnvironment ?: return false
+        val ok = env.switchMode(mode)
+        if (ok) {
+            currentMode = mode
+            Log.i(TAG, "Mode switched: $prior → $mode")
+        }
+        return ok
+    }
+
+    /** Get the current mode's env vars for command wrapping. */
+    fun getEnvironmentVars(): Map<String, String> =
+        termuxEnvironment?.getEnvironmentVars() ?: mapOf()
+
+    /** Human-readable mode description. */
+    fun getModeDescription(): String =
+        "${currentMode.emoji} ${currentMode.label}"
 
     // ── Persistent Shell ───────────────────────────────────────────────
     @Volatile private var persistentShell: PersistentShell? = null
@@ -360,6 +460,19 @@ class TerminalAgent(
      */
     suspend fun sendControlChar(sessionName: String, char: Char): Boolean = withContext(Dispatchers.IO) {
         try {
+            // PTY mode: send control char directly to PTY
+            val pts = ptySession
+            if (pts != null && pts.isRunning) {
+                when (char) {
+                    '\u0003' -> pts.sendCtrlC()
+                    '\u0004' -> pts.sendCtrlD()
+                    '\u001A' -> pts.sendCtrlZ()
+                    else -> pts.writeInput(char.toString())
+                }
+                _outputFlow.tryEmit(StreamEvent.Output(sessionName, "\u001b[90m<${char.controlName()}>\u001b[0m\n"))
+                return@withContext true
+            }
+
             val shell = getShell()
             if (shell != null && shell.isAlive) {
                 val written = shell.sendRaw(char.toString())
@@ -416,6 +529,21 @@ class TerminalAgent(
         session.outputLines.add(prompt)
         _outputFlow.emit(StreamEvent.CommandStart(sessionName, trimmed))
         _outputFlow.emit(StreamEvent.Output(sessionName, prompt))
+
+        // ── PTY mode: write directly to PTY bash stdin ──
+        val pts = ptySession
+        if (pts != null && pts.isRunning) {
+            Log.d(TAG, "Executing via PTY: $trimmed")
+            pts.writeInput(trimmed + "\n")
+            // PTY output streams via onOutput callback → outputFlow
+            // Return a placeholder result (real output comes asynchronously)
+            val duration = System.currentTimeMillis() - startMs
+            session.lastActiveAt = System.currentTimeMillis()
+            session.outputLines.add("\u001b[32m\\$\u001b[0m $trimmed\n")
+            _outputFlow.tryEmit(StreamEvent.CommandEnd(sessionName, 0, ExecutionBackend.TERMUX))
+            scheduleAutoSave()
+            return@withContext SessionResult("", "", 0, true, sessionName, session.workdir, duration, backend = ExecutionBackend.TERMUX)
+        }
 
         // ── Try persistent shell first ──
         val shell = getShell()
@@ -643,6 +771,7 @@ class TerminalAgent(
     private fun scheduleAutoSave() { autoSaveJob?.cancel(); autoSaveJob = autoSaveScope.launch { delay(TerminalConfig.AUTO_SAVE_DELAY_MS); saveSessionsToDisk() } }
     fun shutdown() {
         autoSaveJob?.cancel(); autoSaveJob = null
+        stopPtySession()
         persistentShell?.destroy(); persistentShell = null
         backgroundJobs.values.filter { it.isActive }.forEach { cancelJob(it.id) }
         saveSessionsToDisk()

@@ -39,6 +39,9 @@ import com.interndra.services.AutomationEngine
 import com.interndra.services.AutomationWorker
 import com.interndra.service.ShellExecutor
 import com.interndra.service.PersistentShell
+import com.interndra.service.TermuxBootstrapInstaller
+import com.interndra.service.TermuxEnvironment
+import com.interndra.terminal.TerminalSession
 import com.interndra.services.InterndraNotificationListener
 import com.interndra.util.Constants
 import kotlinx.coroutines.*
@@ -231,8 +234,12 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     // ── AI System Health Monitor ──────────────────────────────────────
     val healthMonitor = AiSystemHealthMonitor(app)
 
+    // ── Embedded Termux Environment ─────────────────────────────────────
+    val termuxBootstrapInstaller = TermuxBootstrapInstaller(app, shizukuShell)
+    val termuxEnvironment = TermuxEnvironment(app, shizukuShell, termuxBootstrapInstaller, scope = viewModelScope)
+
     // ── Terminal Agent — uses PersistentShell (no Termux needed) ─────
-    val terminalAgent = TerminalAgent(app, shizukuShell, scope = viewModelScope)
+    val terminalAgent = TerminalAgent(app, shizukuShell, termuxEnvironment, scope = viewModelScope)
     private val _terminalSessions = MutableStateFlow(terminalAgent.getSessionNames())
     val terminalSessions: StateFlow<List<String>> = _terminalSessions.asStateFlow()
     private val _activeTerminalSession = MutableStateFlow("default")
@@ -439,6 +446,34 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 Log.i(TAG, "Restored ${_terminalSessions.value.size} terminal sessions")
             } catch (e: Exception) {
                 Log.e(TAG, "Init: session restore failed: ${e.message}")
+            }
+        }
+
+        // ── Initialize Termux Environment ───────────────────────────────
+        viewModelScope.launch {
+            try {
+                termuxEnvironment.init()
+                Log.i(TAG, "TermuxEnvironment initialized: ${termuxEnvironment.getMode()}")
+                // Update terminal agent's mode
+                terminalAgent.currentMode = termuxEnvironment.getMode()
+
+                // ── Start REAL PTY terminal session if Termux is available ──
+                if (termuxEnvironment.hasTermux()) {
+                    val envInfo = termuxEnvironment.info.value
+                    val config = TerminalSession.TermuxSessionConfig(
+                        prefix = envInfo.bootstrapPrefix,
+                        homeDir = "${envInfo.bootstrapPrefix}/home",
+                        shellPath = "${envInfo.bootstrapPrefix}/usr/bin/bash"
+                    )
+                    val started = terminalAgent.startPtySession(config)
+                    if (started) {
+                        Log.i(TAG, "✅ PTY terminal session started successfully")
+                    } else {
+                        Log.w(TAG, "⚠️ PTY session failed — falling back to pipe-based shell")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Init: TermuxEnvironment failed: ${e.message}")
             }
         }
     }
@@ -1266,15 +1301,33 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     fun buildTerminalRuntimeContext(): String {
         val sb = StringBuilder()
         sb.appendLine("- Active shell backend: ${terminalAgent.executionBackendDescription}")
+        sb.appendLine("- Execution mode: ${terminalAgent.getModeDescription()}")
         sb.appendLine("- Shizuku authorized: $isShizukuElevated")
         sb.appendLine("- Shizuku privilege level: ${shizukuManager.privilegeLevel}")
         sb.appendLine("- Current terminal session: ${activeTerminalSession.value}")
         sb.appendLine("- Current workdir: ${terminalAgent.getWorkdir(activeTerminalSession.value)}")
 
-        val caps = cachedRuntimeCaps ?: AICommandRegistry.detectRuntimeCapabilities(app, shizukuShell).also { cachedRuntimeCaps = it }
+        val envInfo = termuxEnvironment.info.value
+        val caps = cachedRuntimeCaps ?: AICommandRegistry.detectRuntimeCapabilities(app, shizukuShell, termuxEnvironment).also { cachedRuntimeCaps = it }
         sb.appendLine("- Environment: ${caps.environmentType}")
-        if (caps.hasTermux) sb.appendLine("- Termux installed: ${if (caps.hasTermuxPermission) "yes (permission granted)" else "yes (RUN_COMMAND permission denied)"}")
-        else sb.appendLine("- Termux installed: no")
+        if (caps.hasTermux) sb.appendLine("- Termux app installed: ${if (caps.hasTermuxPermission) "yes (permission granted)" else "yes (RUN_COMMAND permission denied)"}")
+        else sb.appendLine("- Termux app installed: no")
+        
+        // Embedded Termux info
+        if (envInfo.bootstrapInstalled) {
+            sb.appendLine("- Embedded Termux: ✅ ready")
+            sb.appendLine("- Termux prefix: `${envInfo.bootstrapPrefix}`")
+            sb.appendLine("- Bash available: ${if (envInfo.bashAvailable) "yes" else "no"}")
+            sb.appendLine("- APT/pkg available: ${if (envInfo.aptAvailable) "yes" else "no"}")
+            if (envInfo.installedPackages.isNotEmpty()) {
+                sb.appendLine("- Installed packages (${envInfo.installedPackages.size}): ${envInfo.installedPackages.take(10).joinToString(", ")}")
+            }
+            sb.appendLine("- Available commands: pkg install, apt, python3, git, node, npm, pip")
+            sb.appendLine("- To install: `pkg install python git nodejs` etc.")
+            sb.appendLine("- Switch mode: say \"switch to Shizuku\" for system commands")
+        } else {
+            sb.appendLine("- Embedded Termux: ❌ not installed (AI can install on demand)")
+        }
 
         val recentOutput = terminalAgent.getOutputLines(activeTerminalSession.value)
             .takeLast(10)
@@ -1286,9 +1339,13 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             }
         }
 
-        val envVars = terminalAgent.getEnv(activeTerminalSession.value, "PATH") ?: "/system/bin"
+        val envVars = if (envInfo.bootstrapInstalled && envInfo.bootstrapPrefix.isNotBlank()) {
+            "${envInfo.bootstrapPrefix}/usr/bin:/system/bin:/system/xbin"
+        } else {
+            terminalAgent.getEnv(activeTerminalSession.value, "PATH") ?: "/system/bin"
+        }
         sb.appendLine("- PATH: $envVars")
-        sb.appendLine("- Instruction: Only generate commands that are available in this environment. Prefer ADB_SHELL. Use Termux-only commands (pkg/pip/npm/git/python/node) ONLY if a Termux app is installed and permission is granted.")
+        sb.appendLine("- Instruction: Use ADB_SHELL for basic commands, TERMUX for dev tools, SHIZUKU for system commands. Embedded Termux has pkg/apt/python/git/node. Switch with \"switch to Shizuku\".")
         return sb.toString().trimEnd()
     }
 

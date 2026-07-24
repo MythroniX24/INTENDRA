@@ -36,11 +36,11 @@ android {
         buildConfigField("String", "OPENROUTER_DOMAIN",
             "\"openrouter.ai\"")
 
-        // NOTE: no ndk{} / externalNativeBuild block here.
-        // llama.cpp JNI (.so) is compiled separately and dropped into
-        // app/src/main/jniLibs/<abi>/ as a pre-built shared library.
-        // Build fails gracefully with a warning when .so is absent;
-        // LocalAiEngine falls back to rule-based responses.
+        // ── NDK: build libtermux.so for PTY terminal subprocesses ──────
+        ndk {
+            // Target the most common Android ABIs
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+        }
     }
 
     buildTypes {
@@ -95,6 +95,15 @@ android {
                 "META-INF/LICENSE.md",
                 "META-INF/LICENSE-notice.md"
             )
+        }
+    }
+
+    // ── NDK / CMake: build native C library (libtermux.so) from JNI sources ─
+    externalNativeBuild {
+        cmake {
+            // CMakeLists.txt is in app/src/main/jni/
+            path("src/main/jni/CMakeLists.txt")
+            // Use NDK's bundled CMake (version auto-detected)
         }
     }
 

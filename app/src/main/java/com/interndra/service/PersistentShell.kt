@@ -37,9 +37,9 @@ class PersistentShell(
 
         val DEFAULT_ENV = mapOf(
             "HOME" to "/",
-            "PATH" to "/system/bin:/system/xbin:/sbin:/vendor/bin:/data/local/tmp:/su/bin:/su/xbin:/data/data/com.termux/files/usr/bin:/usr/bin:/bin",
+            "PATH" to "/system/bin:/system/xbin:/sbin:/vendor/bin:/data/local/tmp",
             "TERM" to "xterm-256color",
-            "PS1" to "$ ",
+            "PS1" to "\\w $ ",
             "PWD" to "/",
             "SHELL" to "/system/bin/sh",
             "COLUMNS" to "120",
