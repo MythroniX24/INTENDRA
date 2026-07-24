@@ -17,6 +17,7 @@ plugins {
 android {
     namespace  = "com.interndra"
     compileSdk = 35
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId   = "com.interndra"
@@ -37,7 +38,6 @@ android {
             "\"openrouter.ai\"")
 
         // ── NDK: build libtermux.so for PTY terminal subprocesses ──────
-        ndkVersion = "27.0.12077973"
         ndk {
             // Target the most common Android ABIs
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")

@@ -1227,37 +1227,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     }
 
     /** Generate a short chat title (2-7 words) from a user message. */
-    fun generateChatTitle(message: String): String {
-        val cleaned = message
-            .replace(Regex("[^a-zA-Z0-9\\s?.,!-]"), "")
-            .trim()
-        if (cleaned.isEmpty()) return "New Chat"
-
-        // Extract meaningful words
-        val words = cleaned.split(Regex("\\s+"))
-            .filter { it.length > 2 }
-            .filterNot { it.lowercase() in stopWords }
-
-        if (words.isEmpty()) return cleaned.take(40).trim()
-
-        // Build title from key words (max 7 words)
-        val titleWords = words.take(7)
-        val title = titleWords.joinToString(" ")
-            .replaceFirstChar { it.uppercase() }
-            .take(50)
-            .trim()
-
-        // Ensure at least 2 words
-        return if (title.split(" ").size >= 2) title
-        else cleaned.take(40).trim()
-    }
-
-    private val stopWords = setOf(
-        "the", "and", "for", "that", "this", "with", "was", "are", "can", "how",
-        "what", "when", "where", "which", "who", "will", "have", "has", "does",
-        "please", "just", "like", "from", "about", "than", "then", "also",
-        "very", "much", "some", "any", "each", "every", "only", "other"
-    )
+    fun generateChatTitle(message: String): String = ChatTitleGenerator.generate(message)
 
     // ── Workspace management ──────────────────────────────────────────────
     fun createWorkspace(name: String, emoji: String = "📁", color: String = "#00E5FF") = viewModelScope.launch {
