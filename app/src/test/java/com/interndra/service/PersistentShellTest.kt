@@ -108,9 +108,9 @@ class PersistentShellTest {
     }
 
     @Test
-    fun `getWorkdir returns default when not alive`() = runTest {
+    fun `getWorkdir returns initial workdir when not alive`() = runTest {
         val dir = shell.getWorkdir()
-        assertNotNull(dir)
+        assertEquals("/tmp", dir)
     }
 
     // ── Complete Deletion ─────────────────────────────────────────────

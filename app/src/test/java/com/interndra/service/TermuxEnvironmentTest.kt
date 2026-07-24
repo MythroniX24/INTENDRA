@@ -157,6 +157,7 @@ class TermuxEnvironmentTest {
     fun `buildExecutionCommand wraps command for current mode`() {
         val cmd = env.buildExecutionCommand("ls -la")
         assertNotNull(cmd)
+        assertTrue(cmd.contains("ls"))
     }
 
     // ── Health / Status ──────────────────────────────────────────────
