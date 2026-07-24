@@ -132,7 +132,7 @@ class MainActivity : ComponentActivity() {
         requestRequiredPermissions()
 
         setContent {
-            InterndraTheme {
+            InterndraTheme(themeMode = ThemeMode.DARK, dynamicColor = false) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color    = MaterialTheme.colorScheme.background
