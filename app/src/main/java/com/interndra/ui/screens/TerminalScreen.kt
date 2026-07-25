@@ -85,14 +85,14 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     var showHistoryPanel by remember { mutableStateOf(false) }
 
     // ── PTY Terminal Grid Mode ──────────────────────────────────────────────
-    var isPtyActive by remember { mutableStateOf(false) }
+    var isPtyModeActive by remember { mutableStateOf(false) }
     var ptyScreenText by remember { mutableStateOf("") }
     var ptyGridTick by remember { mutableLongStateOf(0L) }
 
     // PTY polling: read emulator screen buffer ~20 fps
-    LaunchedEffect(isPtyActive) {
-        if (!isPtyActive) return@LaunchedEffect
-        while (kotlinx.coroutines.isActive) {
+    LaunchedEffect(isPtyModeActive) {
+        if (!isPtyModeActive) return@LaunchedEffect
+        while (isActive) {
             val session = vm.terminalAgent.getPtySession()
             if (session?.isRunning == true) {
                 val emu = session.emulator
@@ -275,8 +275,8 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth().background(TerminalBg)) {
             // Check PTY mode periodically
             LaunchedEffect(Unit) {
-                while (kotlinx.coroutines.isActive) {
-                    isPtyActive = vm.terminalAgent.isPtyMode
+                while (isActive) {
+                    isPtyModeActive = vm.terminalAgent.isPtyMode
                     delay(2000)
                 }
             }

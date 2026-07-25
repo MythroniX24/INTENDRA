@@ -73,15 +73,15 @@ class ByteQueue(
      */
     fun write(src: ByteArray, offset: Int = 0, len: Int = src.size): Int {
         var written = 0
-        outer@ while (written < len) {
+        while (written < len) {
             synchronized(this) {
-                // Wait for space
+                // Wait for space — waitForSpace() ensures count < capacity
                 val spaceAvailable = waitForSpace()
                 if (!spaceAvailable) return written
 
+                // After waitForSpace(), at least 1 byte is available, so batchSize > 0
                 val remaining = len - written
                 val batchSize = minOf(remaining, MAX_WRITE_SIZE, capacity - count)
-                if (batchSize <= 0) return@outer // continue outer
 
                 // Copy data into circular buffer
                 for (i in 0 until batchSize) {
