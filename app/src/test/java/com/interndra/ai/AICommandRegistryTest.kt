@@ -23,10 +23,12 @@ class AICommandRegistryTest {
     fun setUp() {
         context = mockk(relaxed = true)
         shizukuShell = mockk(relaxed = true)
-        termuxEnv = mockk(relaxed = true)
+        termuxEnv = mockk()
 
         every { shizukuShell.isElevatedAvailable } returns false
-        every { shizukuShell.manager } returns mockk(relaxed = true)
+        every { shizukuShell.manager } returns mockk(relaxed = true) {
+            every { isShizukuInstalled() } returns false
+        }
         every { termuxEnv.hasTermux() } returns false
         every { termuxEnv.getMode() } returns TermuxEnvironment.ExecMode.FALLBACK
     }
