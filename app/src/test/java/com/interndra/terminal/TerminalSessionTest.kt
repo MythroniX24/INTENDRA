@@ -26,7 +26,7 @@ class TerminalSessionTest {
         mockkStatic(JniTermux::class)
         every { JniTermux.isLoaded } returns true
         every { JniTermux.safeCreateSubprocess(any(), any(), any(), any(), any(), any(), any(), any()) } returns null
-        every { JniTermux.safeSetPtyUTF8Mode(any()) } returns Unit
+        every { JniTermux.setPtyUTF8Mode(any()) } returns Unit
         every { JniTermux.safeSetPtyWindowSize(any(), any(), any()) } returns Unit
         every { JniTermux.safeClose(any()) } returns Unit
         every { JniTermux.safeWaitFor(any()) } returns 0
