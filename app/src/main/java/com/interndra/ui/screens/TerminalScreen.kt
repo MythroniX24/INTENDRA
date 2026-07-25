@@ -281,7 +281,7 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                 }
             }
 
-            if (isPtyActive && ptyScreenText.isNotEmpty()) {
+            if (isPtyModeActive && ptyScreenText.isNotEmpty()) {
                 // ── PTY Grid Mode: real character-grid rendering ────
                 PtyTerminalView(
                     screenText = ptyScreenText,
