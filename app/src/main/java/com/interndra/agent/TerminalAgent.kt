@@ -9,7 +9,7 @@ import com.interndra.service.ShellExecutor
 import com.interndra.service.ShizukuShell
 import com.interndra.service.TerminalConfig
 import com.interndra.service.TermuxEnvironment
-import com.interndra.terminal.TerminalSession
+import com.interndra.terminal.TerminalSession as PtyTerminalSession
 import com.interndra.terminal.TerminalEmulator
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -69,13 +69,13 @@ class TerminalAgent(
     val hasEmbeddedTermux: Boolean get() = termuxEnvironment?.hasTermux() == true
 
     // ── PTY Terminal Session ───────────────────────────────────────────
-    @Volatile private var ptySession: TerminalSession? = null
+    @Volatile private var ptySession: PtyTerminalSession? = null
 
     /** Whether the REAL PTY terminal is active (bash via forkpty). */
     val isPtyMode: Boolean get() = ptySession?.isRunning == true
 
     /** Get the PTY session (for UI to read emulator screen buffer). */
-    fun getPtySession(): TerminalSession? = ptySession
+    fun getPtySession(): PtyTerminalSession? = ptySession
 
     /**
      * Start a REAL PTY terminal session using forkpty() JNI.
@@ -85,7 +85,7 @@ class TerminalAgent(
      * @param config  TermuxSessionConfig with prefix, homeDir, shellPath, etc.
      * @return true if PTY session started successfully
      */
-    suspend fun startPtySession(config: TerminalSession.TermuxSessionConfig): Boolean {
+    suspend fun startPtySession(config: PtyTerminalSession.TermuxSessionConfig): Boolean {
         if (isPtyMode) {
             Log.i(TAG, "PTY session already running (PID ${ptySession?.childPid})")
             return true
