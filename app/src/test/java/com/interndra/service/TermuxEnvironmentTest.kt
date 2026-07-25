@@ -31,7 +31,7 @@ class TermuxEnvironmentTest {
 
         every { shizukuShell.isElevatedAvailable } returns false
         every { shizukuShell.manager } returns mockk(relaxed = true)
-        every { installer.isInstalled } returns false
+        every { installer.isInstalled() } returns false
         every { installer.bootstrapPrefix } returns "/data/local/tmp/intendra_bootstrap"
 
         testScope = CoroutineScope(StandardTestDispatcher() + SupervisorJob())
