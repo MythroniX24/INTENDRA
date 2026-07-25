@@ -84,7 +84,10 @@ jobs:
         shell: bash
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon --console=plain --stacktrace
+        run: |
+          echo "=== Gradle version ===" && ./gradlew --version --no-daemon 2>&1
+          echo "=== Compile Kotlin only (skip native) ===" && ./gradlew :app:compileDebugKotlin --no-daemon --console=plain --stacktrace 2>&1 | tail -80
+          echo "=== Build full APK with native ===" && ./gradlew assembleDebug --no-daemon --console=plain --stacktrace 2>&1 | tail -80
         shell: bash
 
       - name: Run unit tests
