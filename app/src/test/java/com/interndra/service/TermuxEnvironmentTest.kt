@@ -65,17 +65,17 @@ class TermuxEnvironmentTest {
     // ── Mode Switching ─────────────────────────────────────────────────
 
     @Test
-    fun `switchMode to same mode returns true`() {
+    fun `switchMode to same mode returns true`() = runTest {
         assertTrue(env.switchMode(TermuxEnvironment.ExecMode.FALLBACK))
     }
 
     @Test
-    fun `switchMode to TERMUX when not installed returns false`() {
+    fun `switchMode to TERMUX when not installed returns false`() = runTest {
         assertFalse(env.switchMode(TermuxEnvironment.ExecMode.TERMUX))
     }
 
     @Test
-    fun `switchMode returns false for null TermuxEnvironment`() {
+    fun `switchMode returns false for null TermuxEnvironment`() = runTest {
         // Testing that mode switching requires valid environment
         assertFalse(env.switchMode(TermuxEnvironment.ExecMode.SHIZUKU))
         // Stays in FALLBACK
@@ -156,7 +156,7 @@ class TermuxEnvironmentTest {
     fun `buildExecutionCommand wraps command for current mode`() {
         val cmd = env.buildExecutionCommand("ls -la")
         assertNotNull(cmd)
-        assertTrue(cmd.contains("ls"))
+        assertTrue(cmd.command.contains("ls"))
     }
 
     // ── Health / Status ──────────────────────────────────────────────
