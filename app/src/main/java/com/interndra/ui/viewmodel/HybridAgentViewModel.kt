@@ -455,7 +455,8 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 termuxEnvironment.init()
                 Log.i(TAG, "TermuxEnvironment initialized: ${termuxEnvironment.getMode()}")
                 // Update terminal agent's mode
-                terminalAgent.currentMode = termuxEnvironment.getMode()
+                val envMode = termuxEnvironment.getMode()
+                terminalAgent.switchMode(envMode)
 
                 // ── Start REAL PTY terminal session if Termux is available ──
                 if (termuxEnvironment.hasTermux()) {

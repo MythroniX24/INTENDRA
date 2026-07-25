@@ -204,7 +204,7 @@ class TerminalSession(
             }, "tsession-waiter-$childPid").apply { isDaemon = true; start() }
 
             // ── 5. Enable UTF-8 mode on PTY ─────────────────────────
-            JniTermux.safeSetPtyUTF8Mode(ptmFd)
+            JniTermux.setPtyUTF8Mode(ptmFd)
 
             Log.i(TAG, "✅ Terminal session started (PID $childPid)")
             return true

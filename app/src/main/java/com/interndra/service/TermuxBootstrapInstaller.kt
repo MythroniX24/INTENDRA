@@ -340,7 +340,7 @@ class TermuxBootstrapInstaller(
 
         } catch (e: Exception) {
             Log.e(TAG, "Shizuku install error: ${e.message}")
-            InstallResult(false, Mode.SHIZUKU, "", "Shizuku error: ${e.message}")
+            return InstallResult(false, Mode.SHIZUKU, "", "Shizuku error: ${e.message}")
         }
     }
 
@@ -416,7 +416,7 @@ class TermuxBootstrapInstaller(
 
         } catch (e: Exception) {
             Log.e(TAG, "Shizuku copy error: ${e.message}")
-            InstallResult(false, Mode.SHIZUKU, "", "Copy error: ${e.message}")
+            return InstallResult(false, Mode.SHIZUKU, "", "Copy error: ${e.message}")
         }
     }
 
@@ -561,7 +561,7 @@ class TermuxBootstrapInstaller(
 
         } catch (e: Exception) {
             Log.e(TAG, "Proot install error: ${e.message}")
-            InstallResult(false, Mode.PROOT, "", "Proot error: ${e.message}")
+            return InstallResult(false, Mode.PROOT, "", "Proot error: ${e.message}")
         }
     }
 

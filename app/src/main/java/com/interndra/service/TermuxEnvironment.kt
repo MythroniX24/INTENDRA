@@ -312,9 +312,9 @@ class TermuxEnvironment(
 
             when (targetMode) {
                 ExecMode.TERMUX -> {
-                    if (!installer?.isInstalled() ?: false) {
+                    if (installer?.isInstalled() != true) {
                         // Auto-install if needed
-                        val result = installer?.install { progress ->
+                        val result = installer?.install { progress: String ->
                             _installProgress.value = progress
                         }
                         if (result?.success != true) {
@@ -479,7 +479,7 @@ class TermuxEnvironment(
     ): Boolean = installMutex.withLock {
         if (!hasTermux()) {
             // Try to install Termux first
-            val result = installer?.install { p -> progress?.invoke(p) }
+            val result = installer?.install { p: String -> progress?.invoke(p) }
             if (result?.success != true) {
                 progress?.invoke("❌ Cannot install packages: Termux not available")
                 return@withLock false

@@ -92,7 +92,7 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     // PTY polling: read emulator screen buffer ~20 fps
     LaunchedEffect(isPtyActive) {
         if (!isPtyActive) return@LaunchedEffect
-        while (isActive) {
+        while (kotlinx.coroutines.isActive) {
             val session = vm.terminalAgent.getPtySession()
             if (session?.isRunning == true) {
                 val emu = session.emulator
@@ -275,7 +275,7 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth().background(TerminalBg)) {
             // Check PTY mode periodically
             LaunchedEffect(Unit) {
-                while (isActive) {
+                while (kotlinx.coroutines.isActive) {
                     isPtyActive = vm.terminalAgent.isPtyMode
                     delay(2000)
                 }
