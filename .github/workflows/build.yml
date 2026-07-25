@@ -83,23 +83,26 @@ jobs:
         run: chmod +x gradlew
         shell: bash
 
-      - name: Build debug APK (save log)
+      - name: STEP 1 - Kotlin compile only (no native)
+        id: kotlin
         run: |
-          set +e
-          mkdir -p build-logs
-          echo "=== STEP 1: Kotlin compile (no native) ===" | tee build-logs/build-output.txt
-          ./gradlew :app:compileDebugKotlin --no-daemon --console=plain --stacktrace 2>&1 | tee -a build-logs/build-output.txt
-          KOTLIN_EXIT=${PIPESTATUS[0]}
-          echo "KOTLIN_EXIT=$KOTLIN_EXIT" >> build-logs/build-output.txt
-          echo "" >> build-logs/build-output.txt
-          echo "=== STEP 2: Full APK with native ===" | tee -a build-logs/build-output.txt
-          ./gradlew assembleDebug --no-daemon --console=plain --stacktrace 2>&1 | tee -a build-logs/build-output.txt
-          BUILD_EXIT=${PIPESTATUS[0]}
-          echo "BUILD_EXIT=$BUILD_EXIT" >> build-logs/build-output.txt
-          # Show the last 60 lines for quick diagnosis
-          echo "=== LAST 60 LINES ===" && tail -60 build-logs/build-output.txt
-          # Exit with the build result
-          exit $BUILD_EXIT
+          echo "=== Compiling Kotlin sources only ==="
+          ./gradlew :app:compileDebugKotlin --no-daemon --console=plain --stacktrace 2>&1
+          echo "KOTLIN_EXIT=$?"
+        shell: bash
+
+      - name: STEP 2 - Full APK with native (only if Kotlin passed)
+        if: success()
+        id: native
+        run: |
+          echo "=== Full APK build with native code ==="
+          ./gradlew assembleDebug --no-daemon --console=plain --stacktrace 2>&1
+          echo "ASSEMBLE_EXIT=$?"
+        shell: bash
+
+      - name: Run unit tests
+        if: success()
+        run: ./gradlew testDebugUnitTest --no-daemon --console=plain
         shell: bash
 
       - name: Upload build logs (always)
@@ -107,14 +110,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
-          path: build-logs/
+          path: |
+            app/build/outputs/logs/
+            app/build/reports/
           if-no-files-found: ignore
           retention-days: 7
-
-      - name: Run unit tests
-        if: success()
-        run: ./gradlew testDebugUnitTest --no-daemon --console=plain
-        shell: bash
 
       - name: Upload debug APK
         if: success()
