@@ -78,6 +78,8 @@ fun HybridChatScreen(
     onOpenDrawer: () -> Unit = {},
     onNavigateToTerminal: () -> Unit = {}
 ) {
+    // Note: The top bar (AppTopBar) is rendered by AppShell.kt, so we
+    // don't include a ChatHeaderBar here — that would create a duplicate heading.
     val messages by vm.messages.collectAsState()
     val uiState  by vm.uiState.collectAsState()
     val mode     by vm.privacyMode.collectAsState()
@@ -127,18 +129,6 @@ fun HybridChatScreen(
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).imePadding()) {
-
-        // ── Chat Header Bar ──────────────────────────────────────────────
-        ChatHeaderBar(
-            workspaceName = uiState.activeWorkspaceName,
-            onOpenDrawer = onOpenDrawer,
-            onRename = { newName ->
-                val wsId = uiState.activeWorkspaceId
-                if (wsId > 0) {
-                    vm.renameWorkspaceById(wsId, newName)
-                }
-            }
-        )
 
         // ── Emergency lock banner ─────────────────────────────────────────
         AnimatedVisibility(visible = uiState.emergencyLockActive) {
@@ -830,66 +820,6 @@ private fun FeatureBadge(emoji: String, label: String) {
             )
         }
     }
-}
-
-// Chat Header Bar
-@Composable
-private fun ChatHeaderBar(
-    workspaceName: String,
-    onOpenDrawer: () -> Unit,
-    onRename: (String) -> Unit
-) {
-    var isRenaming by remember { mutableStateOf(false) }
-    var renameText by remember(workspaceName) { mutableStateOf(workspaceName) }
-
-    Surface(color = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onOpenDrawer) {
-                Icon(Icons.Default.Menu, "Menu", tint = TerminalWhite)
-            }
-            Spacer(Modifier.width(4.dp))
-
-            if (isRenaming) {
-                TextField(
-                    value = renameText,
-                    onValueChange = { renameText = it.take(40) },
-                    modifier = Modifier.weight(1f).height(40.dp),
-                    singleLine = true,
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedTextColor = TerminalWhite,
-                        unfocusedTextColor = TerminalWhite,
-                        focusedIndicatorColor = Accent,
-                        cursorColor = Accent
-                    ),
-                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = {
-                        if (renameText.isNotBlank()) onRename(renameText.trim())
-                        isRenaming = false
-                    })
-                )
-            } else {
-                Text(
-                    workspaceName,
-                    color = TerminalWhite,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f).clickable { isRenaming = true; renameText = workspaceName }
-                )
-                IconButton(onClick = { isRenaming = true; renameText = workspaceName }, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.Edit, "Rename", tint = TerminalWhite.copy(alpha = 0.3f), modifier = Modifier.size(14.dp))
-                }
-            }
-        }
-    }
-    Divider(color = SurfaceLight.copy(alpha = 0.2f))
 }
 
 // ── Command Execution Display (like Claude's command indicator) ────────────
