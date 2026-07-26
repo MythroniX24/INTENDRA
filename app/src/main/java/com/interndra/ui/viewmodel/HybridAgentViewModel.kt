@@ -1470,29 +1470,30 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             sb.appendLine("- Shizuku app installed: ❌ No")
         }
         
-        // ── What AI can ALWAYS do (basic shell always works) ──
+        // ── Execution backend priority ──
         sb.appendLine()
-        sb.appendLine("**You ALWAYS have basic shell access (ShellExecutor):**")
-        sb.appendLine("- ✅ `ls`, `cd`, `cat`, `echo`, `pwd`, `grep`, `find` — file operations")
-        sb.appendLine("- ✅ `df -h`, `free -h`, `ps -A`, `uname -a`, `dumpsys battery` — system info")
-        sb.appendLine("- ✅ `ping`, `curl`, `wget` — network commands")
-        sb.appendLine("- ✅ `pm`, `am`, `input`, `settings` — Android shell tools")
-        sb.appendLine("- ✅ `/storage/emulated/0/Download` — shared storage access")
-        sb.appendLine()
-        
+        sb.appendLine("**📊 EXECUTION BACKEND PRIORITY:**")
         if (caps.isShizukuAuthorized) {
-            sb.appendLine("**With Shizuku, you get ADDITIONAL access:**")
-            sb.appendLine("- 🔑 Run ANY shell command system-wide")
-            sb.appendLine("- 🔑 Access all device storage, settings, installed packages")
-            sb.appendLine("- 🔑 Use elevated `pm install`, `settings put`, system_service commands")
+            sb.appendLine("🚀 **1. Shizuku 🛡️ [PRIMARY] ✅ Authorized** — ${caps.shizukuPrivilegeLevel}")
+            sb.appendLine("   - Run ANY shell command system-wide")
+            sb.appendLine("   - Access all device storage, settings, installed packages")
+            sb.appendLine("   - Elevated `pm install`, `settings put`, system_service commands")
+            sb.appendLine("   - Embedded Termux available as secondary")
         } else if (caps.hasEmbeddedTermux) {
-            sb.appendLine("**With Embedded Termux, you get ADDITIONAL access:**")
-            sb.appendLine("- 🐧 Run python3, git, node, npm, pip")
-            sb.appendLine("- 🐧 Install packages via apt/pkg")
+            sb.appendLine("🐧 **1. Shizuku ❌ Not authorized** — user needs to authorize in Shizuku app")
+            sb.appendLine("🚀 **2. Embedded Termux 🐧 [ACTIVE] ✅ Installed** — python3, git, node, npm, pip")
+            sb.appendLine("   - Install packages via apt/pkg")
+            sb.appendLine("   - Full bash environment")
         } else {
-            sb.appendLine("**Shizuku: ❌ Not authorized** — commands run sandboxed (basic shell only).")
-            sb.appendLine("**Embedded Termux: ❌ Not installed** — python/git/node not available.")
-            sb.appendLine("User can authorize Shizuku in the drawer menu for full access.")
+            sb.appendLine("🚫 **1. Shizuku 🛡️ ❌ Not authorized** — user needs to authorize in Shizuku app")
+            sb.appendLine("🚫 **2. Embedded Termux 🐧 ❌ Not installed** — python/git/node unavailable")
+            sb.appendLine("⚠️ **3. ShellExecutor ⚠️ [FALLBACK ONLY] ✅ Available** — basic commands only")
+            sb.appendLine("   - `ls`, `cd`, `cat`, `echo`, `pwd`, `grep`, `find`")
+            sb.appendLine("   - `df -h`, `free -h`, `ps -A`, `dumpsys battery`")
+            sb.appendLine("   - `ping`, `curl`, `wget` — network")
+            sb.appendLine("   - `pm`, `am`, `input`, `settings` — Android tools")
+            sb.appendLine("   - Limited to app dirs + shared storage")
+            sb.appendLine("   - User can authorize Shizuku in the drawer menu for full access")
         }
         sb.appendLine()
         
