@@ -190,6 +190,16 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     private var commandIdCounter = 0L
     private fun nextCommandId() = ++commandIdCounter
 
+    // ── Workflow deduplication ───────────────────────────────────────
+    // Prevents the same workflow from being executed repeatedly for similar
+    // user inputs within a short time window.
+    private data class LastWorkflowRun(
+        val workflowName: String,
+        val description: String,
+        val timestampMs: Long
+    )
+    private var lastWorkflowRun: LastWorkflowRun? = null
+
     // ── Persistent preferences ────────────────────────────────────────────
     // UPGRADE: All stateIn() flows use `lazy {}` so that if DataStore or
     // Database access fails during ViewModel construction, the constructor
@@ -729,9 +739,19 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             // Falls through to the AI orchestrator if no confident match.
             try {
                 val detected = workflowPlanner.detect(trimmed)
-                if (detected != null && detected.confidence >= 0.75f) {
+                if (detected != null && detected.confidence >= 0.82f) {
                     val workflow = workflowPlanner.plan(detected)
                     if (workflow != null) {
+                        // ── Deduplication: skip if same workflow ran recently ──
+                        val now = System.currentTimeMillis()
+                        val last = lastWorkflowRun
+                        if (last != null &&
+                            last.workflowName == workflow.name &&
+                            last.description == workflow.description &&
+                            now - last.timestampMs < 30_000L) {
+                            Log.d(TAG, "⏭️ Skipping duplicate workflow '${workflow.name}' (ran ${now - last.timestampMs}ms ago)")
+                            return
+                        }
                         repo.log(session, LogType.INFO, "⚙️ Workflow detected: ${workflow.name} (confidence ${(detected.confidence * 100).toInt()}%)")
                         val narrationLines = mutableListOf<String>()
                         val result = workflowEngine.run(workflow, session) { level, msg ->
@@ -783,6 +803,13 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
 
                         repo.updateAiMessage(placeholderId, sb.toString().trim())
                         _uiState.update { it.copy(isLoading = false) }
+
+                        // ── Track last workflow run for deduplication ──
+                        lastWorkflowRun = LastWorkflowRun(
+                            workflowName = workflow.name,
+                            description = workflow.description,
+                            timestampMs = System.currentTimeMillis()
+                        )
 
                         if (result.overallSuccess) {
                             repo.rememberSuccess(trimmed, workflow.name,

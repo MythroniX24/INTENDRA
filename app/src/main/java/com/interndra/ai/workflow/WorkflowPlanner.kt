@@ -153,10 +153,13 @@ class WorkflowPlanner {
     }
 
     private fun detectFileSearch(lower: String, raw: String): DetectedIntent? {
-        val findKeywords = listOf("find", "search for", "locate", "show me", "list all")
-        val matches = findKeywords.any { lower.contains(it) }
-        if (!matches) return null
+        // STRICT: require an explicit file-finding intent, not just casual words
+        val findKeywords = listOf("find", "search for", "locate", "list all")
+        val hasFindKeyword = findKeywords.any { lower.contains(it) }
+        if (!hasFindKeyword) return null
 
+        // Require at least one explicit file-type extension OR the words "file"/"files"
+        // This prevents casual phrases like "find karo" or "show me" from triggering.
         val extensions = mutableListOf<String>()
         if (lower.contains("pdf")) extensions += "pdf"
         if (lower.contains("image") || lower.contains("photo") || lower.contains("picture"))
@@ -172,8 +175,11 @@ class WorkflowPlanner {
         if (lower.contains("zip") || lower.contains("archive"))
             extensions += listOf("zip", "tar", "gz")
 
-        if (extensions.isEmpty() && !lower.contains("file") && !lower.contains("files")) return null
+        // STRICT: Require EITHER a specific extension OR the word "file"/"files" with a directory
+        val hasFileRef = lower.contains("file") || lower.contains("files")
+        if (extensions.isEmpty() && !hasFileRef) return null
 
+        // If only "file"/"files" (no specific extension), require a directory reference too
         val directory = when {
             lower.contains("download") -> "/storage/emulated/0/Download"
             lower.contains("document") -> "/storage/emulated/0/Documents"
@@ -181,8 +187,9 @@ class WorkflowPlanner {
             lower.contains("dcim") || lower.contains("camera") -> "/storage/emulated/0/DCIM"
             lower.contains("music") -> "/storage/emulated/0/Music"
             lower.contains("movie") || lower.contains("video") -> "/storage/emulated/0/Movies"
-            else -> "/storage/emulated/0"
+            else -> if (hasFileRef) "/storage/emulated/0" else null
         }
+        if (directory == null) return null
 
         val namePattern = Regex(
             """(?:named|called|containing|matching)\s+["']?(\w[\w\s.-]*?)["']?(?:\s|$|,|and)"""
