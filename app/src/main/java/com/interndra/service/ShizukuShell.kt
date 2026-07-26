@@ -19,7 +19,10 @@ import kotlinx.coroutines.withContext
  * 1. **Shizuku** (elevated) — UID 2000 or 0, can access system APIs
  * 2. **SmartShell** (fallback) — Sandboxed app process via Runtime.exec()
  */
-class ShizukuShell(private val context: Context) {
+class ShizukuShell(
+    private val context: Context,
+    private val shizukuManager: ShizukuManager? = null
+) {
 
     companion object {
         private const val TAG = "ShizukuShell"
@@ -31,15 +34,19 @@ class ShizukuShell(private val context: Context) {
             }
     }
 
-    private val shizukuManager by lazy { ShizukuManager(context) }
+    /**
+     * ShizukuManager instance. If provided via constructor, uses that (preferred).
+     * Otherwise creates a local lazy instance (which needs separate init() call).
+     */
+    private val managerInstance: ShizukuManager = shizukuManager ?: ShizukuManager(context)
 
     /** Whether Shizuku is currently available and authorized. */
-    val isElevatedAvailable: Boolean get() = shizukuManager.isAuthorized()
+    val isElevatedAvailable: Boolean get() = managerInstance.isAuthorized()
 
     /** Human-readable privilege level. */
-    val privilegeDescription: String get() = shizukuManager.privilegeLevel
+    val privilegeDescription: String get() = managerInstance.privilegeLevel
 
-    val manager: ShizukuManager get() = shizukuManager
+    val manager: ShizukuManager get() = managerInstance
 
     /**
      * Execute a shell command using the best available backend.
@@ -52,12 +59,12 @@ class ShizukuShell(private val context: Context) {
     ): ShellExecutionResult = withContext(Dispatchers.IO) {
         Log.d(TAG, "Executing: ${command.take(100)}")
 
-        if (shizukuManager.isAuthorized()) {
-            Log.d(TAG, "Using Shizuku backend (UID ${shizukuManager.shizukuUid})")
+        if (managerInstance.isAuthorized()) {
+            Log.d(TAG, "Using Shizuku backend (UID ${managerInstance.shizukuUid})")
             val result = if (onOutput != null) {
-                shizukuManager.executeShellStreaming(command, timeoutMs, onOutput)
+                managerInstance.executeShellStreaming(command, timeoutMs, onOutput)
             } else {
-                shizukuManager.executeShell(command, timeoutMs)
+                managerInstance.executeShell(command, timeoutMs)
             }
             // Only use Shizuku result if it actually worked (including non-zero exit)
             if (result.backend == ExecutionBackend.SHIZUKU_ROOT ||
@@ -84,8 +91,8 @@ class ShizukuShell(private val context: Context) {
         timeoutMs: Long = TerminalConfig.DEFAULT_TIMEOUT_MS
     ): ShellExecutionResult {
         Log.d(TAG, "Executing blocking: ${command.take(100)}")
-        if (shizukuManager.isAuthorized()) {
-            val result = shizukuManager.executeShell(command, timeoutMs)
+        if (managerInstance.isAuthorized()) {
+            val result = managerInstance.executeShell(command, timeoutMs)
             if (result.backend == ExecutionBackend.SHIZUKU_ROOT ||
                 result.backend == ExecutionBackend.SHIZUKU_ADB) {
                 return result
@@ -98,8 +105,8 @@ class ShizukuShell(private val context: Context) {
      * Test that the shell is working by running a simple echo command.
      */
     suspend fun testConnection(): Int = withContext(Dispatchers.IO) {
-        if (shizukuManager.isAuthorized()) {
-            val uid = shizukuManager.testConnection()
+        if (managerInstance.isAuthorized()) {
+            val uid = managerInstance.testConnection()
             if (uid != null) return@withContext uid
         }
         val result = ShellExecutor.runAsync("echo \$USER && id -u", TerminalConfig.DEFAULT_TIMEOUT_MS)

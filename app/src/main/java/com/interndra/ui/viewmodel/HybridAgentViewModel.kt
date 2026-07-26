@@ -248,7 +248,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
 
     // ── Shizuku — elevated shell access ───────────────────────────────────
     val shizukuManager = ShizukuManager(app)
-    val shizukuShell = ShizukuShell(app)
+    @Volatile var shizukuShell = ShizukuShell(app, shizukuManager)
     private val _shizukuAvailable = MutableStateFlow(false)
     val shizukuAvailable: StateFlow<Boolean> = _shizukuAvailable.asStateFlow()
     private val _shizukuAuthorized = MutableStateFlow(false)
