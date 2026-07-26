@@ -262,12 +262,11 @@ class TerminalSession(
      * @param columns New number of columns
      */
     fun resize(rows: Int, columns: Int) {
-        if (!isRunning || ptmFd < 0) return
-
-        // Update emulator
+        // Always update the emulator dimensions
         emulator.resize(rows, columns)
 
-        // Update PTY window size via JNI
+        // Only update PTY window size if session is running
+        if (!isRunning || ptmFd < 0) return
         JniTermux.safeSetPtyWindowSize(ptmFd, rows, columns)
     }
 

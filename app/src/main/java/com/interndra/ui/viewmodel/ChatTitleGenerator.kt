@@ -24,7 +24,7 @@ object ChatTitleGenerator {
      */
     fun generate(message: String): String {
         val cleaned = message
-            .replace(Regex("[^a-zA-Z0-9\\s?.,!-]"), "")
+            .replace(Regex("[^a-zA-Z0-9\\s]"), "")
             .trim()
         if (cleaned.isEmpty()) return "New Chat"
 
