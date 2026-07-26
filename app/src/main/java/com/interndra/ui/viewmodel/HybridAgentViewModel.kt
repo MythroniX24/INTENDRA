@@ -1442,18 +1442,60 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
      */
     fun buildTerminalRuntimeContext(): String {
         val sb = StringBuilder()
-        sb.appendLine("- Active shell backend: ${terminalAgent.executionBackendDescription}")
-        sb.appendLine("- Execution mode: ${terminalAgent.getModeDescription()}")
-        sb.appendLine("- Shizuku authorized: $isShizukuElevated")
-        sb.appendLine("- Shizuku privilege level: ${shizukuManager.privilegeLevel}")
-        sb.appendLine("- Current terminal session: ${activeTerminalSession.value}")
-        sb.appendLine("- Current workdir: ${terminalAgent.getWorkdir(activeTerminalSession.value)}")
-
-        val envInfo = termuxEnvironment.info.value
+        sb.appendLine("### ⚡ CURRENT TERMINAL STATE (live from device)")
+        sb.appendLine()
+        
         val caps = cachedRuntimeCaps ?: AICommandRegistry.detectRuntimeCapabilities(app, shizukuShell, termuxEnvironment).also { cachedRuntimeCaps = it }
-        sb.appendLine("- Environment: ${caps.environmentType}")
-        if (caps.hasTermux) sb.appendLine("- Termux app installed: ${if (caps.hasTermuxPermission) "yes (permission granted)" else "yes (RUN_COMMAND permission denied)"}")
-        else sb.appendLine("- Termux app installed: no")
+        val envInfo = termuxEnvironment.info.value
+        
+        // ── Direct terminal access status (most important for AI) ──
+        val accessLevel = when {
+            caps.isShizukuAuthorized && caps.shizukuPrivilegeLevel.contains("Root", ignoreCase = true) -> "✅ FULL ROOT ACCESS (Shizuku authorized)"
+            caps.isShizukuAuthorized -> "✅ ELEVATED ACCESS (Shizuku authorized — UID ${shizukuManager.shizukuUid})"
+            caps.hasEmbeddedTermux -> "✅ EMBEDDED TERMUX (bash + packages)"
+            else -> "⚠️ SANDBOXED (basic shell, no elevated access)"
+        }
+        sb.appendLine("- **Terminal Access**: $accessLevel")
+        sb.appendLine("- **Execution Backend**: ${terminalAgent.executionBackendDescription}")
+        sb.appendLine("- **Execution Mode**: ${terminalAgent.getModeDescription()}")
+        sb.appendLine("- **Shizuku**: ${if (caps.isShizukuAuthorized) "✅ Authorized (${caps.shizukuPrivilegeLevel})" else "❌ Not authorized"}")
+        sb.appendLine()
+        
+        // ── Shizuku details ──
+        if (caps.hasShizuku) {
+            sb.appendLine("- Shizuku app installed: ✅")
+            sb.appendLine("- Shizuku authorized: ${if (caps.isShizukuAuthorized) "✅ YES — You have elevated shell access" else "❌ NO — User needs to authorize in Shizuku app"}")
+            sb.appendLine("- Privilege: ${caps.shizukuPrivilegeLevel}")
+        } else {
+            sb.appendLine("- Shizuku app installed: ❌ No")
+        }
+        
+        // ── What AI can do with current access ──
+        sb.appendLine()
+        if (caps.isShizukuAuthorized) {
+            sb.appendLine("**With current Shizuku access, you CAN:**")
+            sb.appendLine("- Run ANY shell command (system commands, file operations, etc.)")
+            sb.appendLine("- Access device storage, settings, installed packages")
+            sb.appendLine("- Use pm, am, dumpsys, settings, input, and other Android tools")
+        } else if (caps.hasEmbeddedTermux) {
+            sb.appendLine("**With Embedded Termux, you CAN:**")
+            sb.appendLine("- Run bash, python3, git, node, npm, pip")
+            sb.appendLine("- Install packages via apt/pkg")
+            sb.appendLine("- Access app-private storage and shared storage")
+        } else {
+            sb.appendLine("**With current sandboxed access, you CAN:**")
+            sb.appendLine("- Run basic Linux commands (ls, cat, echo, pwd, etc.)")
+            sb.appendLine("- Access app-private directories")
+            sb.appendLine("- Access shared storage (if user granted permission)")
+        }
+        sb.appendLine()
+        
+        // ── Session details ──
+        sb.appendLine("- **Current workdir**: `${terminalAgent.getWorkdir(activeTerminalSession.value)}`")
+        
+        // ── Termux info ──
+        if (caps.hasTermux) sb.appendLine("- Termux app installed: ${if (caps.hasTermuxPermission) "✅ yes (permission granted)" else "yes (RUN_COMMAND permission denied)"}")
+        else sb.appendLine("- Termux app installed: ❌ no")
         
         // Embedded Termux info
         if (envInfo.bootstrapInstalled) {

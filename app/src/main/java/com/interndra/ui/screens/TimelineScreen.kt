@@ -106,7 +106,6 @@ fun TimelineScreen(
                     item { Spacer(Modifier.height(80.dp)) }
                 }
             }
-        }
     }
 }
 
