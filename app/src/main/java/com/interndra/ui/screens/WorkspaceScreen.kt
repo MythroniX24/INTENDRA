@@ -152,18 +152,10 @@ fun WorkspaceScreen(
 
     Column(Modifier.fillMaxSize().background(Background800)) {
 
-        Surface(color = SurfaceCard, tonalElevation = 2.dp) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onOpenDrawer) {
-                    Icon(Icons.Default.Menu, "Menu", tint = TerminalWhite)
-                }
-                Text("Workspaces", color = TerminalWhite, fontSize = 18.sp,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                    modifier = Modifier.weight(1f))
-                IconButton(onClick = { showCreateDialog = true }) {
-                    Icon(Icons.Default.Add, "New workspace", tint = Accent)
-                }
+        // ── New workspace button (title is in AppShell) ────────────────────
+        Box(Modifier.fillMaxWidth().padding(end = 8.dp, top = 4.dp), contentAlignment = Alignment.CenterEnd) {
+            IconButton(onClick = { showCreateDialog = true }) {
+                Icon(Icons.Default.Add, "New workspace", tint = Accent)
             }
         }
 

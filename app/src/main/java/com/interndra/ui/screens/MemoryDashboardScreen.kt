@@ -41,22 +41,11 @@ fun MemoryDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {
 
     Column(Modifier.fillMaxSize().background(Background800)) {
 
-        // ── Top bar ───────────────────────────────────────────────────────
-        Surface(color = SurfaceCard, tonalElevation = 2.dp) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onOpenDrawer) {
-                    Icon(Icons.Default.Menu, contentDescription = "Menu", tint = TerminalWhite)
-                }
-                Column(Modifier.weight(1f)) {
-                    Text("Memory Dashboard", color = TerminalWhite, fontSize = 18.sp,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                    Text("${uiState.memoryCount} memories stored",
-                        color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp)
-                }
-                IconButton(onClick = { vm.clearMemory() }) {
-                    Icon(Icons.Default.DeleteSweep, contentDescription = "Clear all", tint = TerminalRed.copy(alpha = 0.7f))
-                }
+        // ── Subtitle bar (actions only, title is in AppShell) ─────────────
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.End) {
+            IconButton(onClick = { vm.clearMemory() }) {
+                Icon(Icons.Default.DeleteSweep, contentDescription = "Clear all", tint = TerminalRed.copy(alpha = 0.7f))
             }
         }
 

@@ -75,8 +75,7 @@ private fun nextStreamId() = ++streamIdCounter
 @Composable
 fun HybridChatScreen(
     vm: HybridAgentViewModel,
-    onOpenDrawer: () -> Unit = {},
-    onNavigateToTerminal: () -> Unit = {}
+    onOpenDrawer: () -> Unit = {}
 ) {
     // Note: The top bar (AppTopBar) is rendered by AppShell.kt, so we
     // don't include a ChatHeaderBar here — that would create a duplicate heading.

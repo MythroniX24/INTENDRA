@@ -45,27 +45,9 @@ fun ResearchDashboardScreen(
     val totalWords  = remember(knowledge) { knowledge.sumOf { it.wordCount } }
     val researchEntries = remember(knowledge) { knowledge.filter { it.type == KnowledgeType.RESEARCH } }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Research Dashboard", color = TerminalWhite, fontWeight = FontWeight.Bold)
-                        Text("${knowledge.size} entries · $totalWords words", color = VaultCyan, fontSize = 12.sp)
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onOpenDrawer) {
-                        Icon(Icons.Default.Menu, contentDescription = "Menu", tint = TerminalWhite)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceCard)
-            )
-        },
-        containerColor = Background800
-    ) { padding ->
+    Column(Modifier.fillMaxSize().background(Background800)) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {

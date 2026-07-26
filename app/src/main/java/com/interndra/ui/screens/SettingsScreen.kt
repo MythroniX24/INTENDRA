@@ -58,17 +58,6 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
 
     Column(Modifier.fillMaxSize().background(Background800)) {
 
-        Surface(color = SurfaceCard, tonalElevation = 2.dp) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onOpenDrawer) {
-                    Icon(Icons.Default.Menu, "Menu", tint = TerminalWhite)
-                }
-                Text("Settings", color = TerminalWhite, fontSize = 20.sp,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-            }
-        }
-
         Column(
             Modifier.fillMaxWidth().padding(16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)

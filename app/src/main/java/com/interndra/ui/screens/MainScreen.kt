@@ -292,12 +292,6 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
                 DrawerSectionLabel("TOOLS")
 
                 DrawerItem(
-                    icon = Icons.Default.Terminal,
-                    label = "Terminal",
-                    selected = selectedAppTab == AppTab.TERMINAL
-                ) { navigateToTab(AppTab.TERMINAL) }
-
-                DrawerItem(
                     icon = Icons.Default.Book,
                     label = "Knowledge Vault",
                     selected = selectedAppTab == AppTab.DASHBOARDS && selectedDashboard == 1
@@ -364,7 +358,6 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
                 selectedAppTab = tab
             },
             onOpenDrawer = { scope.launch { drawerState.open() } },
-            onOpenTerminal = { selectedAppTab = AppTab.TERMINAL }
         ) { paddingValues ->
             Surface(
                 modifier = Modifier
@@ -390,11 +383,6 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
                 ) { (tab, dashIdx) ->
                     when (tab) {
                         AppTab.CHAT -> HybridChatScreen(
-                            vm = viewModel,
-                            onOpenDrawer = { scope.launch { drawerState.open() } },
-                            onNavigateToTerminal = { selectedAppTab = AppTab.TERMINAL }
-                        )
-                        AppTab.TERMINAL -> TerminalScreen(
                             vm = viewModel,
                             onOpenDrawer = { scope.launch { drawerState.open() } }
                         )

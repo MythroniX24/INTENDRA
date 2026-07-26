@@ -36,7 +36,6 @@ enum class AppTab(
     val badge: ((HybridAgentViewModel) -> String)? = null
 ) {
     CHAT(Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Filled.Chat, "Chat"),
-    TERMINAL(Icons.Default.Terminal, Icons.Default.Terminal, "Terminal"),
     VAULT(Icons.Default.Book, Icons.Default.Book, "Vault", { vm ->
         val count = vm.uiState.value.knowledgeCount
         if (count > 0) count.toString() else ""
@@ -52,7 +51,6 @@ fun AppShell(
     selectedTab: AppTab,
     onTabSelected: (AppTab) -> Unit,
     onOpenDrawer: () -> Unit,
-    onOpenTerminal: () -> Unit = {},
     content: @Composable (PaddingValues) -> Unit
 ) {
     val uiState by vm.uiState.collectAsState()
@@ -78,8 +76,7 @@ fun AppShell(
         bottomBar = {
             AppBottomNav(
                 selectedTab = selectedTab,
-                onTabSelected = onTabSelected,
-                onOpenTerminal = onOpenTerminal
+                onTabSelected = onTabSelected
             )
         },
         content = content
@@ -200,8 +197,7 @@ private fun StatusChip(text: String, color: Color) {
 @Composable
 private fun AppBottomNav(
     selectedTab: AppTab,
-    onTabSelected: (AppTab) -> Unit,
-    onOpenTerminal: () -> Unit
+    onTabSelected: (AppTab) -> Unit
 ) {
     Surface(
         color = Background800,
@@ -231,10 +227,7 @@ private fun AppBottomNav(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(12.dp))
-                            .clickable {
-                                if (tab == AppTab.TERMINAL) onOpenTerminal()
-                                onTabSelected(tab)
-                            }
+                            .clickable { onTabSelected(tab) }
                             .padding(vertical = 4.dp),
                         contentAlignment = Alignment.Center
                     ) {

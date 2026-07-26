@@ -53,31 +53,14 @@ fun TimelineScreen(
         }.entries.toList().sortedByDescending { it.key }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Timeline", color = TerminalWhite, fontWeight = FontWeight.Bold)
-                        Text("${timeline.size} events recorded", color = TerminalBlue, fontSize = 12.sp)
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onOpenDrawer) {
-                        Icon(Icons.Default.Menu, contentDescription = "Menu", tint = TerminalWhite)
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { vm.purgeOldTimeline(30) }) {
-                        Icon(Icons.Default.CleaningServices, contentDescription = "Purge old", tint = TerminalWhite.copy(alpha = 0.5f))
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceCard)
-            )
-        },
-        containerColor = Background800
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+    Column(Modifier.fillMaxSize().background(Background800)) {
+
+            // ── Purge button (title is in AppShell) ────────────────────────
+        Row(Modifier.fillMaxWidth().padding(end = 8.dp, top = 4.dp), horizontalArrangement = Arrangement.End) {
+            IconButton(onClick = { vm.purgeOldTimeline(30) }) {
+                Icon(Icons.Default.CleaningServices, contentDescription = "Purge old", tint = TerminalWhite.copy(alpha = 0.5f))
+            }
+        }
 
             // ── Search ────────────────────────────────────────────────
             SearchBar(

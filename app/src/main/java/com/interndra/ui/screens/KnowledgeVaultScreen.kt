@@ -49,40 +49,8 @@ fun KnowledgeVaultScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Knowledge Vault", color = TerminalWhite, fontWeight = FontWeight.Bold)
-                        Text("${knowledge.size} entries", color = VaultGold, fontSize = 12.sp)
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onOpenDrawer) {
-                        Icon(Icons.Default.Menu, contentDescription = "Menu", tint = TerminalWhite)
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { showAddDialog = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "Add", tint = VaultGold)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceCard)
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showAddDialog = true },
-                containerColor = VaultGold,
-                contentColor = Background800
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add knowledge")
-            }
-        },
-        containerColor = Background800
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+    Box(Modifier.fillMaxSize().background(Background800)) {
+        Column(Modifier.fillMaxSize()) {
 
             // ── Search bar ────────────────────────────────────────────
             SearchBar(
@@ -127,6 +95,16 @@ fun KnowledgeVaultScreen(
                     item { Spacer(Modifier.height(80.dp)) }
                 }
             }
+        }
+
+        // ── FAB aligned to bottom-end ──────────────────────────────────────
+        FloatingActionButton(
+            onClick = { showAddDialog = true },
+            containerColor = VaultGold,
+            contentColor = Background800,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "Add knowledge")
         }
     }
 

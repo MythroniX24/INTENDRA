@@ -32,19 +32,10 @@ fun SecurityDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit =
 
     Column(Modifier.fillMaxSize().background(Background800)) {
 
-        // ── Top bar ───────────────────────────────────────────────────────
-        Surface(color = SurfaceCard, tonalElevation = 2.dp) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onOpenDrawer) {
-                    Icon(Icons.Default.Menu, "Menu", tint = TerminalWhite)
-                }
-                Text("Security & Privacy", color = TerminalWhite, fontSize = 18.sp,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                    modifier = Modifier.weight(1f))
-                if (uiState.emergencyLockActive) {
-                    Icon(Icons.Default.Lock, null, tint = TerminalRed)
-                }
+        // ── Emergency lock icon badge (title is in AppShell) ──────────────
+        if (uiState.emergencyLockActive) {
+            Box(Modifier.fillMaxWidth().padding(end = 16.dp, top = 4.dp), contentAlignment = Alignment.CenterEnd) {
+                Icon(Icons.Default.Lock, null, tint = TerminalRed, modifier = Modifier.size(18.dp))
             }
         }
 
