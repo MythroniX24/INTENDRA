@@ -1501,8 +1501,8 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         sb.appendLine("- **Current workdir**: `${terminalAgent.getWorkdir(activeTerminalSession.value)}`")
         
         // ── Termux info ──
-        if (caps.hasTermux) sb.appendLine("- Termux app installed: ${if (caps.hasTermuxPermission) "✅ yes (permission granted)" else "yes (RUN_COMMAND permission denied)"}")
-        else sb.appendLine("- Termux app installed: ❌ no")
+        if (caps.hasTermux) sb.appendLine("- External Termux app (optional): ✅ installed${if (!caps.hasTermuxPermission) " (RUN_COMMAND not granted — Embedded Termux used instead)" else ""}")
+        else sb.appendLine("- External Termux app: ❌ not installed (not needed — Embedded Termux handles all packages)")
         
         // Embedded Termux info
         if (envInfo.bootstrapInstalled) {
@@ -1657,7 +1657,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             sb.append("Got it! Let me handle this for you. 🔧")
         }
 
-        sb.append("\n\n*$explanation*")
         return sb.toString().trim()
     }
 

@@ -110,7 +110,7 @@ You help users control their Android device, organize files, run development tas
 - **Embedded Termux 🐧**: SECONDARY backend. Full bash + apt + python3 + git + node + npm + pip.
 - **ShellExecutor ⚠️**: FALLBACK ONLY. Used only when Shizuku AND Termux are unavailable.
 
-**Termux**: The `com.termux` app is supported ONLY if installed and RUN_COMMAND permission granted. Otherwise, pkg/pip/npm/git/python/node are NOT available.
+**EXTERNAL Termux app (optional)**: The `com.termux` app is NOT required — Embedded Termux handles everything. If the external app is also installed, it can be used for additional isolation but RUN_COMMAND permission is needed for that.
 
 **OTHER CAPABILITIES**:
 - **Android Intents**: Launch apps (`open:pkg`), send texts (`sendtext:pkg:msg`), dial (`dial:+phone`), open files (`openfile:/path`)
@@ -159,7 +159,7 @@ You help users control their Android device, organize files, run development tas
 1. **Shell** (ADB_SHELL): `ls`, `cd`, `cat`, `echo`, `pwd`, `grep`, `find`, `mkdir`, `rm`, `cp`, `mv`, `chmod`
 2. **System Info** (ADB_SHELL): `df -h` (disk), `dumpsys battery` (battery), `free -h` (RAM), `ps -A` (processes), `uname -a` (device)
 3. **Network** (ADB_SHELL): `ping -c 4 8.8.8.8`, `curl -s https://...`, `wget -O ...`
-4. **Termux** (TERMUX, only if com.termux is installed & permission granted): `pkg install`, `pip install`, `git`, `python3`, `npm`
+4. **Termux** (TERMUX, requires Embedded Termux bootstrap ✅): `pkg install`, `pip install`, `git`, `python3`, `npm`
 5. **Android Intents**: `open:com.package.name`, `sendtext:pkg:msg`, `dial:+phone`, `sms:+phone:body`, `openfile:/path`, `sharefile:/path`
 6. **Automation**: Schedule with `delayMinutes`, triggers with `triggerCondition` like `on_whatsapp_message:name`
 
