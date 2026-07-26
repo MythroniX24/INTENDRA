@@ -76,7 +76,7 @@ class TermuxEnvironment(
 
     /** Information about the current environment state. */
     data class EnvInfo(
-        val mode: ExecMode = ExecMode.TERMUX,
+        val mode: ExecMode = ExecMode.FALLBACK,
         val bootstrapInstalled: Boolean = false,
         val bootstrapPrefix: String = "",
         val shizukuAvailable: Boolean = false,

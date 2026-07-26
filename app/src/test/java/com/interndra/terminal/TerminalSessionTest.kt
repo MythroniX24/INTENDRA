@@ -23,7 +23,7 @@ class TerminalSessionTest {
         tempDir.mkdirs()
 
         // Mock JNI — native code not available in unit tests
-        mockkStatic(JniTermux::class)
+        mockkObject(JniTermux::class)
         every { JniTermux.isLoaded } returns true
         every { JniTermux.safeCreateSubprocess(any(), any(), any(), any(), any(), any(), any(), any()) } returns null
         every { JniTermux.setPtyUTF8Mode(any()) } returns Unit
