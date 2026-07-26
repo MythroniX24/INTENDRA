@@ -129,9 +129,7 @@ fun TerminalScreen(
     // Auto-scroll to bottom when new output arrives
     LaunchedEffect(outputLines.size) {
         if (outputLines.isNotEmpty()) {
-            kotlinx.coroutines.launch {
-                outputScrollState.scrollTo(outputScrollState.maxValue)
-            }
+            outputScrollState.scrollTo(outputScrollState.maxValue)
         }
     }
 
