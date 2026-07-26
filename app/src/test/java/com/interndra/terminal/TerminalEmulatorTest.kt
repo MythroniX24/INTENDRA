@@ -66,7 +66,8 @@ class TerminalEmulatorTest {
     fun `word wrap at end of line`() {
         val line = "A".repeat(80) // exactly fills row
         emu.processString(line)
-        assertEquals(0, emu.cursorRow) // auto-wrap moves to next line
+        // After filling 80 columns (0-79), the 80th char triggers wrap: cursorRow becomes 1
+        assertEquals(1, emu.cursorRow) // auto-wrap moves to next line
         assertEquals(0, emu.cursorCol)
     }
 

@@ -75,7 +75,7 @@ class PersistentShellTest {
     @Test
     fun `custom shell is created with correct backend description`() {
         val sh = PersistentShell(shellPath = "/bin/bash", initialWorkdir = "/home")
-        assertTrue(sh.backendDescription.contains("PersistentShell"))
+        assertTrue(sh.backendDescription.contains("Persistent Shell"))
         sh.destroy()
     }
 

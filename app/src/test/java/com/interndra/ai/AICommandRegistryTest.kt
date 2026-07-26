@@ -1,13 +1,16 @@
 package com.interndra.ai
 
 import android.content.Context
+import android.os.Build
 import com.interndra.service.ShizukuShell
-import com.interndra.service.TermuxEnvironment
 import io.mockk.*
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * AICommandRegistryTest — tests for runtime capability detection and
@@ -18,15 +21,17 @@ class AICommandRegistryTest {
     private lateinit var context: Context
     private lateinit var shizukuShell: ShizukuShell
 
+    private val managerMock = mockk<ShizukuShell.ShizukuManager>(relaxed = true)
+
     @Before
     fun setUp() {
         context = mockk(relaxed = true)
         shizukuShell = mockk(relaxed = true)
 
         every { shizukuShell.isElevatedAvailable } returns false
-        every { shizukuShell.manager } returns mockk(relaxed = true) {
-            every { isShizukuInstalled() } returns false
-        }
+        every { managerMock.isShizukuInstalled() } returns false
+        every { managerMock.shizukuUid } returns -1
+        every { shizukuShell.manager } returns managerMock
     }
 
     @After
@@ -54,6 +59,7 @@ class AICommandRegistryTest {
     @Test
     fun `detectRuntimeCapabilities with Shizuku available`() {
         every { shizukuShell.isElevatedAvailable } returns true
+        every { managerMock.isShizukuInstalled() } returns true
         val caps = AICommandRegistry.detectRuntimeCapabilities(context, shizukuShell, null)
         assertTrue(caps.hasShizuku)
     }
@@ -136,7 +142,13 @@ class AICommandRegistryTest {
 
     @Test
     fun `detectRuntimeCapabilities does not crash on null Shizuku`() {
-        val caps = AICommandRegistry.detectRuntimeCapabilities(context, mockk(relaxed = true), null)
+        val mockShizuku = mockk<ShizukuShell>(relaxed = true)
+        every { mockShizuku.manager } returns mockk(relaxed = true) {
+            every { isShizukuInstalled() } returns false
+        }
+        every { mockShizuku.isElevatedAvailable } returns false
+        every { mockShizuku.privilegeDescription } returns "none"
+        val caps = AICommandRegistry.detectRuntimeCapabilities(context, mockShizuku, null)
         assertNotNull(caps)
     }
 }

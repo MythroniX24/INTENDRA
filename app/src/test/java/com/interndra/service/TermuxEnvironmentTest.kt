@@ -32,6 +32,7 @@ class TermuxEnvironmentTest {
         every { shizukuShell.isElevatedAvailable } returns false
         every { shizukuShell.manager } returns mockk(relaxed = true)
         every { installer.isInstalled() } returns false
+        every { context.filesDir } returns File("/data")
 
         testScope = CoroutineScope(StandardTestDispatcher() + SupervisorJob())
         env = TermuxEnvironment(context, shizukuShell, installer, scope = testScope)

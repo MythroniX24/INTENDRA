@@ -325,7 +325,10 @@ class TerminalEmulator(
             ')'.code -> { /* G1 character set - ignore */ }
             '*'.code -> { /* G2 character set - ignore */ }
             '+'.code -> { /* G3 character set - ignore */ }
-            else -> { /* Unknown escape - ignore */ }
+            else -> {
+                /* Unknown escape sequence or incomplete ESC — re-process byte */
+                processNormalByte(b)
+            }
         }
     }
 
