@@ -22,15 +22,6 @@ class TerminalSessionTest {
         tempDir = File(System.getProperty("java.io.tmpdir"), "pty-test-${System.nanoTime()}")
         tempDir.mkdirs()
 
-        // Mock JNI — native code not available in unit tests
-        mockkObject(JniTermux::class)
-        every { JniTermux.isLoaded } returns true
-        every { JniTermux.safeCreateSubprocess(any(), any(), any(), any(), any(), any(), any(), any()) } returns null
-        every { JniTermux.setPtyUTF8Mode(any()) } returns Unit
-        every { JniTermux.safeSetPtyWindowSize(any(), any(), any()) } returns Unit
-        every { JniTermux.safeClose(any()) } returns Unit
-        every { JniTermux.safeWaitFor(any()) } returns 0
-
         session = TerminalSession(
             shellPath = "/bin/sh",
             cwd = tempDir.absolutePath,
@@ -39,6 +30,20 @@ class TerminalSessionTest {
             rows = 24,
             columns = 80
         )
+    }
+
+    /**
+     * Set up JNI mock — needed only for tests that call session.start().
+     * Initial state + callback tests don't need JNI.
+     */
+    private fun mockJni() {
+        mockkObject(JniTermux::class)
+        every { JniTermux.isLoaded } returns true
+        every { JniTermux.safeCreateSubprocess(any(), any(), any(), any(), any(), any(), any(), any()) } returns null
+        every { JniTermux.setPtyUTF8Mode(any()) } returns Unit
+        every { JniTermux.safeSetPtyWindowSize(any(), any(), any()) } returns Unit
+        every { JniTermux.safeClose(any()) } returns Unit
+        every { JniTermux.safeWaitFor(any()) } returns 0
     }
 
     @After
@@ -74,6 +79,7 @@ class TerminalSessionTest {
 
     @Test
     fun `start returns false when JNI not loaded`() {
+        mockJni()
         every { JniTermux.isLoaded } returns false
         var errorMsg: String? = null
         session.onError = { errorMsg = it }
@@ -85,7 +91,7 @@ class TerminalSessionTest {
 
     @Test
     fun `start returns false when subprocess creation fails`() {
-        every { JniTermux.safeCreateSubprocess(any(), any(), any(), any(), any(), any(), any(), any()) } returns null
+        mockJni()
         var errorCalled = false
         session.onError = { errorCalled = true }
         val result = session.start()
@@ -98,6 +104,7 @@ class TerminalSessionTest {
         // Session is already in a non-running state after first failed start
         assertFalse(session.isRunning)
         // Calling start again should just return false again
+        mockJni()
         every { JniTermux.isLoaded } returns false
         assertFalse(session.start())
     }
