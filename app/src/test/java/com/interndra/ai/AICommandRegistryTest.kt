@@ -1,6 +1,7 @@
 package com.interndra.ai
 
 import android.content.Context
+import com.interndra.service.ShizukuManager
 import com.interndra.service.ShizukuShell
 import io.mockk.*
 import org.junit.After
@@ -17,7 +18,7 @@ class AICommandRegistryTest {
     private lateinit var context: Context
     private lateinit var shizukuShell: ShizukuShell
 
-    private val managerMock = mockk<ShizukuShell.ShizukuManager>(relaxed = true)
+    private val managerMock = mockk<ShizukuManager>(relaxed = true)
 
     @Before
     fun setUp() {
