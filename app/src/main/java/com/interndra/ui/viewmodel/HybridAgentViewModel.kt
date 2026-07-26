@@ -1493,6 +1493,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             sb.appendLine("**Shizuku: ❌ Not authorized** — commands run sandboxed (basic shell only).")
             sb.appendLine("**Embedded Termux: ❌ Not installed** — python/git/node not available.")
             sb.appendLine("User can authorize Shizuku in the drawer menu for full access.")
+        }
         sb.appendLine()
         
         // ── Session details ──
