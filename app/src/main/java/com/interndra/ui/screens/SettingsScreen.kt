@@ -524,7 +524,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
 
             // ── About ──────────────────────────────────────────────────────
             DashboardCard {
-                SectionHeader("About INTERNDRA", modifier = Modifier.padding(bottom = 6.dp))
+                SectionHeader("About INTENDRA", modifier = Modifier.padding(bottom = 6.dp))
                 Text("Version 2.1.0 — Privacy-First AI OS", color = TerminalWhite.copy(0.7f), fontSize = 13.sp)
                 Text("Local model: Qwen2.5 Q4_K_M via llama.cpp",
                     color = TerminalWhite.copy(0.5f), fontSize = 12.sp)

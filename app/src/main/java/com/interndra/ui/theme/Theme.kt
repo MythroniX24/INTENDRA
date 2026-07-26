@@ -14,7 +14,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// INTERNDRA Theme — v4.0 Dynamic + Dual-Palette
+// INTENDRA Theme — v4.0 Dynamic + Dual-Palette
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
@@ -27,7 +27,7 @@ enum class ThemeMode { SYSTEM, DARK, LIGHT }
 
 /**
  * Material3 color schemes — hand-crafted dark + light variants.
- * These use INTERNDRA's semantic colors while mapping to Material3 roles.
+ * These use INTENDRA's semantic colors while mapping to Material3 roles.
  */
 private val InterndraDarkScheme = darkColorScheme(
     primary          = Accent,
@@ -90,7 +90,7 @@ private val InterndraLightScheme = lightColorScheme(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * INTERNDRA's main theme composable.
+ * INTENDRA's main theme composable.
  *
  * @param themeMode force a specific mode; if null, follows system.
  * @param dynamicColor use Material You dynamic colors (Android 12+).

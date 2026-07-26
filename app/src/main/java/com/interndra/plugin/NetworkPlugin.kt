@@ -8,7 +8,7 @@ class NetworkPlugin(context: Context) : IPlugin {
     companion object { private const val TAG = "NetworkPlugin"; private const val CMD_PREFIX = "net:" }
     override val id = "network"; override val name = "Network Toolkit"
     override val description = "Network diagnostics, HTTP, DNS via built-in shell"
-    override val version = "2.1.0"; override val author = "INTERNDRA"
+    override val version = "2.1.0"; override val author = "INTENDRA"
 
     override suspend fun initialize(context: Context) = true
     override fun getSupportedCommands() = listOf("${CMD_PREFIX}ping","${CMD_PREFIX}curl","${CMD_PREFIX}dns","${CMD_PREFIX}wifi","${CMD_PREFIX}connectivity","${CMD_PREFIX}traceroute","${CMD_PREFIX}port","${CMD_PREFIX}public_ip","${CMD_PREFIX}http_header")
@@ -30,7 +30,7 @@ class NetworkPlugin(context: Context) : IPlugin {
         val url = args["url"] ?: return PluginResult(false, "", error = "Missing 'url'")
         val method = if (args["method"] != null && args["method"] != "GET") "-X ${args["method"]}" else ""
         val data = args["data"]?.let { "-d '$it'" } ?: ""
-        return shell("curl -s -m ${args["timeout"] ?: "10"} $method $data -H 'User-Agent: INTERNDRA/2.0' '$url' 2>&1 | head -100")
+        return shell("curl -s -m ${args["timeout"] ?: "10"} $method $data -H 'User-Agent: INTENDRA/2.0' '$url' 2>&1 | head -100")
     }
     private suspend fun dns(args: Map<String, String>): PluginResult {
         val r = shell("nslookup -type=${args["type"] ?: "A"} ${args["domain"] ?: "google.com"} 2>&1 | head -25")

@@ -1,6 +1,6 @@
-# Contributing to INTERNDRA
+# Contributing to INTENDRA
 
-First off, thank you for considering contributing to INTERNDRA! We welcome contributions from everyone, whether you're fixing a bug, adding a feature, or improving documentation.
+First off, thank you for considering contributing to INTENDRA! We welcome contributions from everyone, whether you're fixing a bug, adding a feature, or improving documentation.
 
 ## Code of Conduct
 
@@ -13,7 +13,7 @@ This project and everyone participating in it is governed by our [Code of Conduc
 1. **Check existing issues** — Search the [issue tracker](https://github.com/MythroniX24/INTENDRA/issues) to see if the bug has already been reported.
 2. **Create a new issue** — Use the bug report template and include:
    - Device model and Android version
-   - INTERNDRA version (from Settings → About)
+   - INTENDRA version (from Settings → About)
    - Steps to reproduce
    - Expected vs actual behavior
    - Logcat output (if applicable)
@@ -22,7 +22,7 @@ This project and everyone participating in it is governed by our [Code of Conduc
 
 1. Open a [feature request](https://github.com/MythroniX24/INTENDRA/issues/new) with:
    - Clear description of the feature
-   - Why it's useful for INTERNDRA
+   - Why it's useful for INTENDRA
    - Any implementation ideas you have
 
 ### Pull Request Process

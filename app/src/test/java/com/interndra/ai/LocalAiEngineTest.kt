@@ -243,7 +243,7 @@ class LocalAiEngineTest {
         val paths = LocalAiEngine.getSearchPaths(mockContext)
         assertThat(paths).isNotEmpty()
         assertThat(paths[0]).isEqualTo("/data/data/com.interndra/files/models")
-        assertThat(paths).contains("/sdcard/INTERNDRA/models")
+        assertThat(paths).contains("/sdcard/INTENDRA/models")
         assertThat(paths).contains("/sdcard/INTENTRA/models")
     }
 

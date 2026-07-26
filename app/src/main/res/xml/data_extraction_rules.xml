@@ -3,7 +3,7 @@
   Data Extraction Rules (Android 12+ / API 31+)
   Controls what the system can extract for cloud backup.
 
-  Policy: EXCLUDE everything — INTERNDRA is a local-first private OS.
+  Policy: EXCLUDE everything — INTENDRA is a local-first private OS.
   User data (chat history, memory, workspaces) stays on-device only.
   The user can manually export logs via Settings → Export Logs.
 -->

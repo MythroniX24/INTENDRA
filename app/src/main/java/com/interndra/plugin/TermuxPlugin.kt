@@ -7,7 +7,7 @@ class TermuxPlugin(context: Context) : IPlugin {
     companion object { private const val CMD_PREFIX = "shell:" }
     override val id = "shell"; override val name = "Shell Bridge"
     override val description = "Execute shell commands via built-in terminal"
-    override val version = "2.1.0"; override val author = "INTERNDRA"
+    override val version = "2.1.0"; override val author = "INTENDRA"
 
     override suspend fun initialize(context: Context) = true
     override fun getSupportedCommands() = listOf("${CMD_PREFIX}exec","${CMD_PREFIX}python","${CMD_PREFIX}pip_install","${CMD_PREFIX}pip_list","${CMD_PREFIX}git","${CMD_PREFIX}npm","${CMD_PREFIX}clipboard_get","${CMD_PREFIX}clipboard_set","${CMD_PREFIX}toast","${CMD_PREFIX}vibrate","${CMD_PREFIX}sensor")

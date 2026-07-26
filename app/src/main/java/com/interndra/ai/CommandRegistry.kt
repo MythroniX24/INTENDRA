@@ -27,7 +27,7 @@ object CommandRegistry {
         CommandTemplate(keywords = listOf("battery","charge","power level"),action="battery_info",
             commands=listOf(ShellCommand(CommandType.TERMUX,"termux-battery-status 2>/dev/null || dumpsys battery | grep -E 'level|status|health|temperature'","Battery status"))),
         CommandTemplate(keywords = listOf("screenshot","capture screen"),action="screenshot",
-            commands=listOf(ShellCommand(CommandType.ADB_SHELL,"screencap -p /sdcard/INTERNDRA/screenshots/shot_${System.currentTimeMillis()}.png","Take screenshot"))),
+            commands=listOf(ShellCommand(CommandType.ADB_SHELL,"screencap -p /sdcard/INTENDRA/screenshots/shot_${System.currentTimeMillis()}.png","Take screenshot"))),
         CommandTemplate(keywords = listOf("storage","disk space","free space","storage info"),action="storage_info",
             commands=listOf(ShellCommand(CommandType.ADB_SHELL,"df -h /sdcard && df -h /data","Storage usage"))),
         CommandTemplate(keywords = listOf("list files","ls","show files","what's in"),action="list_files",
@@ -79,7 +79,7 @@ object CommandRegistry {
         CommandTemplate(keywords = listOf("pip install","install python package"),action="pip_install",
             commands=listOf(ShellCommand(CommandType.TERMUX,"pip install requests 2>&1 || pip3 install requests 2>&1; echo 'Usage: pip install <package>'","Install Python package"))),
         CommandTemplate(keywords = listOf("run python","python script","python3 -c"),action="run_python",
-            commands=listOf(ShellCommand(CommandType.TERMUX,"python3 -c 'print(\"Hello from INTERNDRA AI!\")' 2>&1","Run Python code"))),
+            commands=listOf(ShellCommand(CommandType.TERMUX,"python3 -c 'print(\"Hello from INTENDRA AI!\")' 2>&1","Run Python code"))),
 
         // ── Git Operations ─────────────────────────────────────────────────
         CommandTemplate(keywords = listOf("git status"),action="git_status",
@@ -117,13 +117,13 @@ object CommandRegistry {
 
         // ── File Operations ────────────────────────────────────────────────
         CommandTemplate(keywords = listOf("create directory","mkdir"),action="mkdir",
-            commands=listOf(ShellCommand(CommandType.TERMUX,"mkdir -p /storage/emulated/0/INTERNDRA/newfolder 2>&1; echo 'Usage: mkdir -p <path>'","Create directory"))),
+            commands=listOf(ShellCommand(CommandType.TERMUX,"mkdir -p /storage/emulated/0/INTENDRA/newfolder 2>&1; echo 'Usage: mkdir -p <path>'","Create directory"))),
         CommandTemplate(keywords = listOf("create file","touch file"),action="touch",
-            commands=listOf(ShellCommand(CommandType.TERMUX,"touch /storage/emulated/0/INTERNDRA/newfile.txt 2>&1; echo 'Usage: touch <file>'","Create file"))),
+            commands=listOf(ShellCommand(CommandType.TERMUX,"touch /storage/emulated/0/INTENDRA/newfile.txt 2>&1; echo 'Usage: touch <file>'","Create file"))),
         CommandTemplate(keywords = listOf("copy file","cp","duplicate file"),action="copy_file",
-            commands=listOf(ShellCommand(CommandType.TERMUX,"cp -r /storage/emulated/0/INTERNDRA /storage/emulated/0/INTERNDRA_BACKUP 2>&1; echo 'Usage: cp -r <source> <dest>'","Copy file/dir"))),
+            commands=listOf(ShellCommand(CommandType.TERMUX,"cp -r /storage/emulated/0/INTENDRA /storage/emulated/0/INTENDRA_BACKUP 2>&1; echo 'Usage: cp -r <source> <dest>'","Copy file/dir"))),
         CommandTemplate(keywords = listOf("move file","mv","rename file"),action="move_file",
-            commands=listOf(ShellCommand(CommandType.TERMUX,"mv /storage/emulated/0/INTERNDRA/oldname.txt /storage/emulated/0/INTERNDRA/newname.txt 2>&1; echo 'Usage: mv <source> <dest>'","Move/rename file"))),
+            commands=listOf(ShellCommand(CommandType.TERMUX,"mv /storage/emulated/0/INTENDRA/oldname.txt /storage/emulated/0/INTENDRA/newname.txt 2>&1; echo 'Usage: mv <source> <dest>'","Move/rename file"))),
         CommandTemplate(keywords = listOf("delete file","rm","remove file"),action="remove_file",
             commands=listOf(ShellCommand(CommandType.TERMUX,"ls -la /storage/emulated/0/Download/; echo 'Usage: rm -rf <file_or_dir>'","Remove file/dir"))),
         CommandTemplate(keywords = listOf("cat file","show file","read file"),action="cat_file",
@@ -135,9 +135,9 @@ object CommandRegistry {
         CommandTemplate(keywords = listOf("chmod","change permissions","make executable"),action="chmod",
             commands=listOf(ShellCommand(CommandType.TERMUX,"ls -la /data/data/com.termux/files/home/; echo 'Usage: chmod +x <file>'","Make executable"))),
         CommandTemplate(keywords = listOf("zip","compress","archive"),action="zip_files",
-            commands=listOf(ShellCommand(CommandType.TERMUX,"cd /storage/emulated/0 && zip -r INTERNDRA_backup.zip INTERNDRA/ 2>&1; echo 'Usage: zip -r <archive>.zip <source>'","Create zip archive"))),
+            commands=listOf(ShellCommand(CommandType.TERMUX,"cd /storage/emulated/0 && zip -r INTENDRA_backup.zip INTENDRA/ 2>&1; echo 'Usage: zip -r <archive>.zip <source>'","Create zip archive"))),
         CommandTemplate(keywords = listOf("unzip","extract zip","decompress"),action="unzip",
-            commands=listOf(ShellCommand(CommandType.TERMUX,"cd /storage/emulated/0 && unzip -o INTERNDRA_backup.zip -d /storage/emulated/0/INTERNDRA_RESTORED 2>&1; echo 'Usage: unzip -o <file>.zip -d <dir>'","Extract zip archive"))),
+            commands=listOf(ShellCommand(CommandType.TERMUX,"cd /storage/emulated/0 && unzip -o INTENDRA_backup.zip -d /storage/emulated/0/INTENDRA_RESTORED 2>&1; echo 'Usage: unzip -o <file>.zip -d <dir>'","Extract zip archive"))),
         CommandTemplate(keywords = listOf("download file","wget","curl download"),action="download_file",
             commands=listOf(ShellCommand(CommandType.TERMUX,"curl -L -o /storage/emulated/0/Download/downloaded_file.txt 'https://example.com/file.txt' 2>&1 || wget -O /storage/emulated/0/Download/downloaded_file.txt 'https://example.com/file.txt' 2>&1","Download file"))),
 
@@ -145,9 +145,9 @@ object CommandRegistry {
         CommandTemplate(keywords = listOf("termux clipboard","clipboard get","copy from clipboard"),action="clipboard_get",
             commands=listOf(ShellCommand(CommandType.TERMUX,"termux-clipboard-get 2>&1","Get clipboard content"))),
         CommandTemplate(keywords = listOf("termux clipboard set","clipboard set","copy to clipboard"),action="clipboard_set",
-            commands=listOf(ShellCommand(CommandType.TERMUX,"termux-clipboard-set 'Hello from INTERNDRA' 2>&1; echo 'Usage: termux-clipboard-set <text>'","Set clipboard content"))),
+            commands=listOf(ShellCommand(CommandType.TERMUX,"termux-clipboard-set 'Hello from INTENDRA' 2>&1; echo 'Usage: termux-clipboard-set <text>'","Set clipboard content"))),
         CommandTemplate(keywords = listOf("termux toast","show notification","toast"),action="termux_toast",
-            commands=listOf(ShellCommand(CommandType.TERMUX,"termux-toast -b '#00E5FF' 'Hello from INTERNDRA' 2>&1","Show toast notification"))),
+            commands=listOf(ShellCommand(CommandType.TERMUX,"termux-toast -b '#00E5FF' 'Hello from INTENDRA' 2>&1","Show toast notification"))),
         CommandTemplate(keywords = listOf("termux vibrate","vibrate phone"),action="termux_vibrate",
             commands=listOf(ShellCommand(CommandType.TERMUX,"termux-vibrate -d 500 2>&1; echo 'Usage: termux-vibrate -d <duration_ms>'","Vibrate device"))),
         CommandTemplate(keywords = listOf("termux torch","flashlight","turn on flashlight"),action="termux_torch_on",
@@ -157,7 +157,7 @@ object CommandRegistry {
         CommandTemplate(keywords = listOf("termux sensor","sensor data","read sensor"),action="termux_sensor",
             commands=listOf(ShellCommand(CommandType.TERMUX,"termux-sensor -s 'all' -n 1 2>&1","Read sensor data"))),
         CommandTemplate(keywords = listOf("termux tts","text to speech","speak"),action="termux_tts",
-            commands=listOf(ShellCommand(CommandType.TERMUX,"termux-tts-speak 'Hello from INTERNDRA' 2>&1; echo 'Usage: termux-tts-speak <text>'","Text to speech"))),
+            commands=listOf(ShellCommand(CommandType.TERMUX,"termux-tts-speak 'Hello from INTENDRA' 2>&1; echo 'Usage: termux-tts-speak <text>'","Text to speech"))),
 
         // ── Network ────────────────────────────────────────────────────────
         CommandTemplate(keywords = listOf("ping","check connectivity"),action="ping",

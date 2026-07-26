@@ -3,7 +3,7 @@
   Backup Rules (legacy — Android < 12 / API < 31)
   Companion to data_extraction_rules.xml for older API levels.
 
-  Policy: EXCLUDE everything. INTERNDRA is local-first and private.
+  Policy: EXCLUDE everything. INTENDRA is local-first and private.
   No user data should ever leave the device via Android's backup system.
 -->
 <full-backup-content>

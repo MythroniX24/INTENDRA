@@ -1525,7 +1525,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             val messages = messages.value
             val vault    = knowledgeEntries.value
             val sb       = StringBuilder()
-            sb.appendLine("=== INTERNDRA Export ===")
+            sb.appendLine("=== INTENDRA Export ===")
             sb.appendLine("Exported: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}")
             sb.appendLine("Chat messages: ${messages.size} | Logs: ${logs.size} | Knowledge: ${vault.size}")
             sb.appendLine("\n=== Chat Messages ===")

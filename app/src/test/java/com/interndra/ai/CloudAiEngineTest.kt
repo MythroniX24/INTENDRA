@@ -101,10 +101,10 @@ class CloudAiEngineTest {
 
     @Test
     fun `cleanJson wraps plain text as chat reply`() {
-        val raw = "Hello! I'm INTERNDRA. How can I help you today?"
+        val raw = "Hello! I'm INTENDRA. How can I help you today?"
         val result = invokeCleanJson(engine, raw)
         assertThat(result).contains("\"action\":\"chat\"")
-        assertThat(result).contains("Hello! I'm INTERNDRA")
+        assertThat(result).contains("Hello! I'm INTENDRA")
     }
 
     @Test

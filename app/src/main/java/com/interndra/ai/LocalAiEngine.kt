@@ -38,7 +38,7 @@ class LocalAiEngine(private val context: Context) {
         // then legacy external paths for users who already downloaded
         fun getSearchPaths(context: Context) = listOf(
             "${context.filesDir.absolutePath}/models",          // PRIMARY — no permission
-            "/sdcard/INTERNDRA/models",                         // current canonical path
+            "/sdcard/INTENDRA/models",                         // current canonical path
             "/sdcard/INTENTRA/models",                          // legacy fallback (pre-rename)
             "/sdcard/Download",
             "/sdcard/Android/data/com.interndra/files/models"
@@ -210,11 +210,11 @@ class LocalAiEngine(private val context: Context) {
         val lo = input.lowercase().trim()
         return when {
             lo in listOf("hi","hello","hey","hii","helo") ->
-                """{"action":"greeting","reply":"Hello! I'm INTERNDRA. How can I help you today?","commands":[]}"""
+                """{"action":"greeting","reply":"Hello! I'm INTENDRA. How can I help you today?","commands":[]}"""
             lo.contains("battery") ->
                 """{"action":"battery_info","reply":"Checking battery status...","commands":[{"type":"ADB_SHELL","command":"dumpsys battery | grep -E 'level|status|temperature'","description":"Battery info"}]}"""
             lo.contains("screenshot") || lo.contains("capture") ->
-                """{"action":"screenshot","reply":"Taking screenshot...","commands":[{"type":"ADB_SHELL","command":"screencap -p /sdcard/INTERNDRA/screenshot_${System.currentTimeMillis()}.png","description":"Capture screen"}]}"""
+                """{"action":"screenshot","reply":"Taking screenshot...","commands":[{"type":"ADB_SHELL","command":"screencap -p /sdcard/INTENDRA/screenshot_${System.currentTimeMillis()}.png","description":"Capture screen"}]}"""
             lo.contains("storage") || lo.contains("space") ->
                 """{"action":"storage_info","reply":"Checking storage...","commands":[{"type":"ADB_SHELL","command":"df -h /sdcard","description":"Storage info"}]}"""
             lo.contains("whatsapp") ->

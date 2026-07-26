@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  INTERNDRA – Privacy-First AI OS
+  INTENDRA – Privacy-First AI OS
   AndroidManifest.xml  v2.2.0
 
   PERMISSION AUDIT (privacy-first):
@@ -78,7 +78,7 @@
         tools:ignore="ProtectedPermissions" />
 
     <!-- ── Termux IPC ───────────────────────────────────────────────────── -->
-    <!-- Allows INTERNDRA to execute commands in Termux's Linux environment  -->
+    <!-- Allows INTENDRA to execute commands in Termux's Linux environment  -->
     <!-- for package management (pkg, pip, npm), git, Python, etc.           -->
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
 
@@ -136,7 +136,7 @@
         <!-- ── Accessibility Service ──────────────────────────────────── -->
         <!--
           Provides UI automation (tap, scroll, fill forms).
-          Must be enabled by user in: Settings → Accessibility → INTERNDRA.
+          Must be enabled by user in: Settings → Accessibility → INTENDRA.
           PRIVACY: does not read on-screen text for logging.
         -->
         <service
@@ -165,7 +165,7 @@
         </provider>
 
         <!-- ── ShizukuProvider — elevated shell access via Shizuku ───────── -->
-        <!-- Allows INTERNDRA to execute shell commands with ADB-level (UID 2000)
+        <!-- Allows INTENDRA to execute shell commands with ADB-level (UID 2000)
              or root (UID 0) privileges when Shizuku is running and authorized.
              Provides access to system APIs and file paths beyond app sandbox. -->
         <provider

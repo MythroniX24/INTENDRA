@@ -7,7 +7,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// INTERNDRA Typography — v4.0 Full Material3 Scale
+// INTENDRA Typography — v4.0 Full Material3 Scale
 // ═══════════════════════════════════════════════════════════════════════════════
 
 val InterndraTypography = Typography(

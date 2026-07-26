@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Accessibility Service configuration for INTERNDRA.
+  Accessibility Service configuration for INTENDRA.
 
   event types: WINDOW_STATE_CHANGED + NOTIFICATION_STATE_CHANGED only.
   No TYPE_VIEW_TEXT_CHANGED, TYPE_VIEW_CLICKED, or TYPE_WINDOWS_CHANGED —

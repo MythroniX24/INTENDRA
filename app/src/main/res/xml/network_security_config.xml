@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Network Security Config — INTERNDRA privacy-first policy.
+  Network Security Config — INTENDRA privacy-first policy.
 
   Policy summary:
   • Production: TLS 1.2+ enforced on ALL domains. No cleartext. No user CAs.

@@ -206,7 +206,7 @@ class MainActivity : ComponentActivity() {
                 )
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    "INTERNDRA couldn't start",
+                    "INTENDRA couldn't start",
                     color = TerminalWhite,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold

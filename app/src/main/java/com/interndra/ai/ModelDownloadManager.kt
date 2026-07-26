@@ -167,7 +167,7 @@ class ModelDownloadManager(private val context: Context) {
         var conn = URL(url).openConnection() as HttpURLConnection
         conn.connectTimeout = 15_000
         conn.readTimeout    = 30_000
-        conn.setRequestProperty("User-Agent", "INTERNDRA-Android/2.1")
+        conn.setRequestProperty("User-Agent", "INTENDRA-Android/2.1")
         conn.instanceFollowRedirects = true
         if (existingBytes > 0) conn.setRequestProperty("Range", "bytes=$existingBytes-")
 
@@ -180,7 +180,7 @@ class ModelDownloadManager(private val context: Context) {
                 conn = URL(location).openConnection() as HttpURLConnection
                 conn.connectTimeout = 15_000
                 conn.readTimeout    = 30_000
-                conn.setRequestProperty("User-Agent", "INTERNDRA-Android/2.1")
+                conn.setRequestProperty("User-Agent", "INTENDRA-Android/2.1")
                 conn.instanceFollowRedirects = true
                 if (existingBytes > 0) conn.setRequestProperty("Range", "bytes=$existingBytes-")
                 redirectCount++

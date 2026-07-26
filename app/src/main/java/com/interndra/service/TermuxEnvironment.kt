@@ -240,7 +240,7 @@ class TermuxEnvironment(
             "TERMUX_VERSION" to "0.118.0",
             "TERMUX_APK_RELEASE" to "F-Droid",
             "TERMUX_MAIN_PACKAGE_FORMAT" to "apt",
-            "INTERNDRA_TERMUX" to "1"
+            "INTENDRA_TERMUX" to "1"
         )
     }
 

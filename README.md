@@ -1,7 +1,7 @@
-# INTERNDRA ⚡ — Private AI Operating System for Android
+# INTENDRA ⚡ — Private AI Operating System for Android
 
 <p align="center">
-  <img src="app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" alt="INTERNDRA Logo" width="128" height="128"/>
+  <img src="app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" alt="INTENDRA Logo" width="128" height="128"/>
 </p>
 
 <p align="center">
@@ -160,7 +160,7 @@ The APK will be at `app/build/outputs/apk/debug/app-debug.apk`.
 1. Open app → Settings → Model Download
 2. Tap "Download Qwen2.5-3B" (or download manually from HuggingFace)
 3. Wait for download to complete (~2GB)
-4. The app auto-detects the model at `internal storage/INTERNDRA/models/`
+4. The app auto-detects the model at `internal storage/INTENDRA/models/`
 
 ---
 
@@ -303,7 +303,7 @@ The project includes **672+ unit tests** covering all major components.
 
 ## 🔐 Privacy
 
-INTERNDRA is designed with privacy as a core principle:
+INTENDRA is designed with privacy as a core principle:
 
 - **All AI processing is on-device by default** — no data leaves your phone
 - **Cloud mode requires explicit opt-in** — per-session consent for cloud AI
@@ -322,7 +322,7 @@ A: Termux provides a full Linux terminal environment (bash, Python, git). Shizuk
 A: Yes! In Termux mode, use `pkg install python`, `pkg install nodejs`, etc. The embedded bootstrap supports apt/pkg package management.
 
 **Q: How do I get Shizuku working?**
-A: Install Shizuku from [GitHub](https://github.com/RikkaApps/Shizuku), enable it via ADB (`adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/files/start.sh`) or root, then authorize INTERNDRA in Shizuku app.
+A: Install Shizuku from [GitHub](https://github.com/RikkaApps/Shizuku), enable it via ADB (`adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/files/start.sh`) or root, then authorize INTENDRA in Shizuku app.
 
 **Q: Will the local model work on my device?**
 A: Qwen2.5-3B requires ~2GB storage and 4GB RAM. Devices with 6GB+ RAM are recommended. The app gracefully falls back to cloud AI if the local model fails to load.
@@ -365,5 +365,5 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 <p align="center">
   Made with ❤️ by <a href="https://github.com/MythroniX24">MythroniX24</a>
   <br/>
-  <sub>Version 2.1.0 — INTERNDRA: Your Private AI Operating System</sub>
+  <sub>Version 2.1.0 — INTENDRA: Your Private AI Operating System</sub>
 </p>

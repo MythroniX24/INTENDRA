@@ -7,7 +7,7 @@ class GitPlugin(context: Context) : IPlugin {
     companion object { private const val CMD_PREFIX = "git:" }
     override val id = "git"; override val name = "Git Automation"
     override val description = "Git operations via built-in shell"
-    override val version = "2.1.0"; override val author = "INTERNDRA"
+    override val version = "2.1.0"; override val author = "INTENDRA"
 
     override suspend fun initialize(context: Context) = true
     override fun getSupportedCommands() = listOf("${CMD_PREFIX}status","${CMD_PREFIX}push","${CMD_PREFIX}pull","${CMD_PREFIX}clone","${CMD_PREFIX}init","${CMD_PREFIX}commit","${CMD_PREFIX}log","${CMD_PREFIX}branch","${CMD_PREFIX}checkout","${CMD_PREFIX}diff","${CMD_PREFIX}stash","${CMD_PREFIX}auth_setup","${CMD_PREFIX}config","${CMD_PREFIX}ssh_key")

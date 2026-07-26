@@ -5,7 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// INTERNDRA Design System — v4.0 Dual-Palette (Dark + Light)
+// INTENDRA Design System — v4.0 Dual-Palette (Dark + Light)
 // ═══════════════════════════════════════════════════════════════════════════════
 // Usage: Instantiate InterndraColors(isLight = ...) and access colors directly.
 // Compose-level helpers (colors(), isDarkTheme()) are in Colors.kt

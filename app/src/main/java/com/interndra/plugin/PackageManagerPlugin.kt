@@ -7,7 +7,7 @@ class PackageManagerPlugin(context: Context) : IPlugin {
     companion object { private const val CMD_PREFIX = "pkg:" }
     override val id = "pkgmgr"; override val name = "Package Manager"
     override val description = "Package management via built-in shell"
-    override val version = "2.1.0"; override val author = "INTERNDRA"
+    override val version = "2.1.0"; override val author = "INTENDRA"
 
     override suspend fun initialize(context: Context) = true
     override fun getSupportedCommands() = listOf("${CMD_PREFIX}install","${CMD_PREFIX}update","${CMD_PREFIX}upgrade","${CMD_PREFIX}list","${CMD_PREFIX}search","${CMD_PREFIX}uninstall","${CMD_PREFIX}info","${CMD_PREFIX}detect")

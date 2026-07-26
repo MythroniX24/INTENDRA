@@ -209,7 +209,7 @@ class TerminalSessionTest {
         assertTrue(envVars.any { it.startsWith("PATH=") })
         assertTrue(envVars.any { it.contains("LD_PRELOAD=") })
         assertTrue(envVars.any { it == "TERM=xterm-256color" })
-        assertTrue(envVars.any { it == "INTERNDRA_TERMUX=1" })
+        assertTrue(envVars.any { it == "INTENDRA_TERMUX=1" })
     }
 
     @Test

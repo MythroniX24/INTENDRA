@@ -96,9 +96,9 @@ class HybridExecutionEngine(
                     stepIndex = index,
                     success   = false,
                     output    = "",
-                    error     = "Accessibility actions require the INTERNDRA Accessibility " +
+                    error     = "Accessibility actions require the INTENDRA Accessibility " +
                                 "Service to be enabled in Android Settings → Accessibility → " +
-                                "INTERNDRA. UI automation is opt-in and must be turned on manually."
+                                "INTENDRA. UI automation is opt-in and must be turned on manually."
                 )
             }
 
@@ -195,7 +195,7 @@ class HybridExecutionEngine(
      *
      * Opens the target app's share sheet (or WhatsApp's contact picker) with
      * the message pre-filled. The user picks the contact and taps Send —
-     * INTERNDRA never auto-sends to an auto-picked contact.
+     * INTENDRA never auto-sends to an auto-picked contact.
      */
     private fun handleSendText(index: Int, cmdStr: String): ExecutionResult {
         val rest = cmdStr.substringAfter(":")
@@ -386,7 +386,7 @@ class HybridExecutionEngine(
      * A file path is "safe" if it lives under:
      *  - app-private internal/external files dir
      *  - shared storage (Download, Documents, Pictures, DCIM, Music, Movies)
-     *  - INTERNDRA's legacy /sdcard/INTERNDRA/ folder
+     *  - INTENDRA's legacy /sdcard/INTENDRA/ folder
      * Rejects /system, /proc, /dev, /data/data of OTHER apps, etc.
      */
     private fun isPathSafe(file: File): Boolean {
@@ -402,14 +402,14 @@ class HybridExecutionEngine(
             "/storage/emulated/0/DCIM",
             "/storage/emulated/0/Music",
             "/storage/emulated/0/Movies",
-            "/storage/emulated/0/INTERNDRA",
+            "/storage/emulated/0/INTENDRA",
             "/sdcard/Download",
             "/sdcard/Documents",
             "/sdcard/Pictures",
             "/sdcard/DCIM",
             "/sdcard/Music",
             "/sdcard/Movies",
-            "/sdcard/INTERNDRA"
+            "/sdcard/INTENDRA"
         ).filter { it.isNotBlank() }
         return allowedRoots.any { abs.startsWith(it) }
     }

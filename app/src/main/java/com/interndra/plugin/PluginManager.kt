@@ -16,7 +16,7 @@ import kotlinx.coroutines.withContext
 // Plugins are instantiated in registerBuiltInPlugins() below.
 
 /**
- * PluginManager — lightweight plugin registry for INTERNDRA.
+ * PluginManager — lightweight plugin registry for INTENDRA.
  *
  * Plugins extend the app with new commands, data sources, or integrations.
  * This is a local-first plugin system: plugins are Kotlin interfaces loaded

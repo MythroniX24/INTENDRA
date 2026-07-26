@@ -9,7 +9,7 @@
 
 ## Reporting a Vulnerability
 
-INTERNDRA takes security seriously. The app runs AI-powered shell commands on your device, making security a top priority.
+INTENDRA takes security seriously. The app runs AI-powered shell commands on your device, making security a top priority.
 
 ### How to Report
 
@@ -45,7 +45,7 @@ Instead, report them directly to the maintainers:
 
 ## Built-in Security Features
 
-INTERNDRA includes several security mechanisms designed to protect users:
+INTENDRA includes several security mechanisms designed to protect users:
 
 ### Safety Engine
 - **Command Validation** — 40+ regex patterns block destructive commands (`rm -rf`, `chmod 777`, etc.)

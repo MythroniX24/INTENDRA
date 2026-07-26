@@ -86,7 +86,7 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
                     Spacer(Modifier.width(12.dp))
                     Column {
                         Text(
-                            "INTERNDRA",
+                            "INTENDRA",
                             color = TerminalWhite,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.ExtraBold

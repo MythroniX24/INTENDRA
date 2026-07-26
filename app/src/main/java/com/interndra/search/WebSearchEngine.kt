@@ -164,7 +164,7 @@ class WebSearchEngine(private val dao: AgentDao) {
         return try {
             val request = Request.Builder()
                 .url(result.url)
-                .header("User-Agent", "Mozilla/5.0 (compatible; INTERNDRA-ResearchBot/1.0)")
+                .header("User-Agent", "Mozilla/5.0 (compatible; INTENDRA-ResearchBot/1.0)")
                 .header("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8")
                 .build()
             val response = pageClient.newCall(request).execute()

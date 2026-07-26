@@ -719,7 +719,7 @@ private fun PremiumWelcomeScreen(onTextChange: (String) -> Unit) {
         Spacer(Modifier.height(16.dp))
 
         Text(
-            "INTERNDRA",
+            "INTENDRA",
             color = TerminalWhite,
             fontSize = 28.sp,
             fontWeight = FontWeight.ExtraBold

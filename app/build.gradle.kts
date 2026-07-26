@@ -1,5 +1,5 @@
 /*
- * INTERNDRA — Privacy-First AI OS
+ * INTENDRA — Privacy-First AI OS
  * app/build.gradle.kts  v2.1.0
  *
  * Kotlin  1.9.22  (matches root build.gradle.kts)

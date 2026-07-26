@@ -1,29 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- ── App identity ─────────────────────────────────────────────── -->
-    <string name="app_name">INTERNDRA</string>
+    <string name="app_name">INTENDRA</string>
     <string name="app_tagline">Private AI Operating System</string>
     <string name="app_version">v2.1.0</string>
 
     <!-- ── Accessibility service ────────────────────────────────────── -->
-    <string name="accessibility_service_label">INTERNDRA AI Agent</string>
+    <string name="accessibility_service_label">INTENDRA AI Agent</string>
     <string name="accessibility_service_description">
-        Enables INTERNDRA to perform UI automation tasks on your behalf —
+        Enables INTENDRA to perform UI automation tasks on your behalf —
         such as tapping buttons, filling forms, and navigating apps —
         only when you explicitly issue a command.\n\n
-        INTERNDRA does not read, record, or transmit the content of
+        INTENDRA does not read, record, or transmit the content of
         other apps\' screens or text fields.
     </string>
     <string name="accessibility_service_summary">
-        AI-driven UI automation for INTERNDRA commands
+        AI-driven UI automation for INTENDRA commands
     </string>
 
     <!-- ── Notification listener ─────────────────────────────────────── -->
-    <string name="notification_listener_label">INTERNDRA Automation Triggers</string>
+    <string name="notification_listener_label">INTENDRA Automation Triggers</string>
     <string name="notification_listener_description">
         Monitors incoming notifications to trigger automations you have
         set up (e.g., "when I get a WhatsApp message, reply with X").\n\n
-        INTERNDRA logs only the app name and notification title —
+        INTENDRA logs only the app name and notification title —
         never the notification body or message content.
     </string>
 
@@ -47,8 +47,8 @@
 
     <!-- ── Chat UI ────────────────────────────────────────────────────── -->
     <string name="chat_hint">Ask anything…</string>
-    <string name="chat_disclaimer">INTERNDRA AI can make mistakes. Verify critical output.</string>
-    <string name="chat_empty_title">INTERNDRA</string>
+    <string name="chat_disclaimer">INTENDRA AI can make mistakes. Verify critical output.</string>
+    <string name="chat_empty_title">INTENDRA</string>
     <string name="chat_empty_subtitle">Private AI Operating System</string>
 
     <!-- ── Terminal ───────────────────────────────────────────────────── -->
@@ -112,7 +112,7 @@
     <string name="settings_export_logs">Export Logs to File</string>
     <string name="settings_clear_memory">Clear Memory &amp; Context</string>
     <string name="settings_clear_all">Clear All Messages &amp; Logs</string>
-    <string name="settings_about">About INTERNDRA</string>
+    <string name="settings_about">About INTENDRA</string>
     <string name="settings_version">Version 2.1.0 — Privacy-First AI OS</string>
     <string name="settings_model_info">Local model: Qwen2.5-3B-Instruct Q4_K_M via llama.cpp</string>
     <string name="settings_cloud_info">Cloud: OpenRouter (only when you allow it)</string>
@@ -120,7 +120,7 @@
     <!-- ── Model download ─────────────────────────────────────────────── -->
     <string name="download_cancel">Cancel Download</string>
     <string name="download_channel_name">Model Download</string>
-    <string name="download_channel_desc">Notifications for INTERNDRA model download progress</string>
+    <string name="download_channel_desc">Notifications for INTENDRA model download progress</string>
     <string name="download_notification_title">Downloading AI Model</string>
     <string name="download_notification_text">Qwen2.5-3B-Instruct Q4_K_M</string>
 

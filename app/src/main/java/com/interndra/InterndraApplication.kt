@@ -56,7 +56,7 @@ class InterndraApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.i(TAG, "INTERNDRA starting — ${BuildConfig.VERSION_NAME}")
+        Log.i(TAG, "INTENDRA starting — ${BuildConfig.VERSION_NAME}")
 
         // ── Application-level crash handler ──────────────────────────────
         // Replaces the default Android crash dialog with our own handler.

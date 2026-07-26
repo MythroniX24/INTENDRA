@@ -440,7 +440,7 @@ class TerminalSession(
             "TERMUX_VERSION=0.118.0",
             "TERMUX_APK_RELEASE=F-Droid",
             "TERMUX_MAIN_PACKAGE_FORMAT=apt",
-            "INTERNDRA_TERMUX=1",
+            "INTENDRA_TERMUX=1",
             "PS1=\\w $ "
         )
 

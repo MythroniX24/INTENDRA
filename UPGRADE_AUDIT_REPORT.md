@@ -1,11 +1,11 @@
-# INTERNDRA Upgrade Audit Report
+# INTENDRA Upgrade Audit Report
 _Generated: 2026-05-31_
 
 ---
 
 ## Summary
 
-Full audit of the original INTENTRA/INTERNDRA Kotlin codebase. **14 bugs fixed**, **30+ feature improvements** added across all layers. All upgraded `.kt` files are in:
+Full audit of the original INTENTRA/INTENDRA Kotlin codebase. **14 bugs fixed**, **30+ feature improvements** added across all layers. All upgraded `.kt` files are in:
 
 ```
 attached_assets/extracted/upgraded/app/src/main/java/com/interndra/
