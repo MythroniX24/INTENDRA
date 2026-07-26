@@ -964,6 +964,30 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                     return
                 }
 
+                // ── Special: Install Embedded Termux Bootstrap ──────────
+                if (intent.action == "install_bootstrap") {
+                    val statusMsg = intent.reply?.take(200) ?: "📦 Installing Embedded Termux bootstrap..."
+                    repo.updateAiMessage(placeholderId, statusMsg)
+                    _uiState.update { it.copy(isLoading = true) }
+                    viewModelScope.launch(Dispatchers.IO) {
+                        val result = termuxBootstrapInstaller.install(progressCallback = { progress ->
+                            viewModelScope.launch {
+                                repo.updateAiMessage(placeholderId, "📦 $progress")
+                            }
+                        })
+                        if (result.success) {
+                            termuxEnvironment.refreshStatus()
+                            val msg = "✅ Embedded Termux installed! You can now use python3, git, node, npm, pip, apt."
+                            repo.updateAiMessage(placeholderId, msg)
+                        } else {
+                            val err = "❌ Installation failed: ${result.error?.take(200) ?: "Unknown error"}"
+                            repo.updateAiMessage(placeholderId, err)
+                        }
+                        _uiState.update { it.copy(isLoading = false) }
+                    }
+                    return
+                }
+
                 // ── Execute ───────────────────────────────────────────────
                 val replyText = buildAiReply(intent, orchResult.explanation, suppressSteps = usingFallbackCommands) +
                     buildSourcesBlock(webSources)
@@ -1517,7 +1541,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             sb.appendLine("- To install: `pkg install python git nodejs` etc.")
             sb.appendLine("- Switch mode: say \"switch to Shizuku\" for system commands")
         } else {
-            sb.appendLine("- Embedded Termux: ❌ not installed (AI can install on demand)")
+            sb.appendLine("- Embedded Termux: ❌ not installed — use action \"install_bootstrap\" to install it now (25MB download, 30-60s)")
         }
 
         val recentOutput = terminalAgent.getOutputLines(activeTerminalSession.value)

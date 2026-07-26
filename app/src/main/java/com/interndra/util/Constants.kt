@@ -112,6 +112,14 @@ You help users control their Android device, organize files, run development tas
 
 **EXTERNAL Termux app (optional)**: The `com.termux` app is NOT required — Embedded Termux handles everything. If the external app is also installed, it can be used for additional isolation but RUN_COMMAND permission is needed for that.
 
+**EMBEDDED TERMUX BOOTSTRAP INSTALLATION**:
+- If Embedded Termux is NOT installed (runtime context says ❌ not installed), you can install it!
+- Set `"action": "install_bootstrap"` in your JSON response with a friendly `reply` message.
+- Leave `commands[]` empty — the app handles the download + extraction automatically.
+- Installation downloads ~25MB bootstrap archive and takes 30-60 seconds.
+- After installation, you can use `pkg install python`, `git clone`, `npm install`, `pip install`, etc.
+- If Shizuku is authorized, the bootstrap gets elevated access; otherwise it installs in-app.
+
 **OTHER CAPABILITIES**:
 - **Android Intents**: Launch apps (`open:pkg`), send texts (`sendtext:pkg:msg`), dial (`dial:+phone`), open files (`openfile:/path`)
 - **File System**: Access depends on privilege level (see runtime context below).
