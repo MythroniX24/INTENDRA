@@ -750,6 +750,11 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                             last.description == workflow.description &&
                             now - last.timestampMs < 30_000L) {
                             Log.d(TAG, "⏭️ Skipping duplicate workflow '${workflow.name}' (ran ${now - last.timestampMs}ms ago)")
+                            // Must update placeholder so the user doesn't see "Thinking..." forever
+                            try {
+                                repo.updateAiMessage(placeholderId, "⏭️ Already working on this — please wait a moment.")
+                            } catch (_: Exception) {}
+                            _uiState.update { it.copy(isLoading = false) }
                             return
                         }
                         repo.log(session, LogType.INFO, "⚙️ Workflow detected: ${workflow.name} (confidence ${(detected.confidence * 100).toInt()}%)")
