@@ -644,10 +644,18 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         // where the rule-based fallback returns "Unable to process this request"
         // instead of using Gemini/OpenRouter.
         // LOCAL_ONLY is always respected — never override user's privacy choice.
+        //
+        // RACE CONDITION FIX: DataStore-backed StateFlows may still return their
+        // default value ("" for keys) when first accessed, even though the actual
+        // saved value exists. If the API key is blank but the provider matches,
+        // don't force CLOUD_ENHANCED — stay in HYBRID so the error check below
+        // doesn't falsely report "set your API key". The user can just re-send.
         val effectiveMode = when {
             mode == PrivacyMode.LOCAL_ONLY -> PrivacyMode.LOCAL_ONLY
             provider == Constants.AiProvider.GEMINI && geminiKey.isNotBlank() -> PrivacyMode.CLOUD_ENHANCED
+            provider == Constants.AiProvider.GEMINI -> PrivacyMode.HYBRID  // key not loaded yet
             provider == Constants.AiProvider.OPENROUTER && key.isNotBlank() -> PrivacyMode.CLOUD_ENHANCED
+            provider == Constants.AiProvider.OPENROUTER -> PrivacyMode.HYBRID  // key not loaded yet
             else -> mode
         }
 
