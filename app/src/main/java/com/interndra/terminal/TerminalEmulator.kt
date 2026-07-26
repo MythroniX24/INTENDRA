@@ -55,6 +55,20 @@ class TerminalEmulator(
         const val COLOR_CYAN    = 6
         const val COLOR_WHITE   = 7
         const val COLOR_DEFAULT = 9
+
+        /** Convert an ANSI color code (0-7, 9) to an ARGB color int. */
+        fun colorInt(code: Int): Int = when (code) {
+            0 -> 0xFF1E1E1E.toInt()  // Black
+            1 -> 0xFFE06C75.toInt()  // Red
+            2 -> 0xFF98C379.toInt()  // Green
+            3 -> 0xFFE5C07B.toInt()  // Yellow
+            4 -> 0xFF61AFEF.toInt()  // Blue
+            5 -> 0xFFC678DD.toInt()  // Magenta
+            6 -> 0xFF56B6C2.toInt()  // Cyan
+            7 -> 0xFFABB2BF.toInt()  // White
+            9 -> 0xFFABB2BF.toInt()  // Default → white
+            else -> 0xFFABB2BF.toInt()
+        }
     }
 
     // ── Screen cell ─────────────────────────────────────────────────────
@@ -173,6 +187,16 @@ class TerminalEmulator(
     fun getScreenLines(): List<String> {
         return screenBuffer.map { row ->
             row.joinToString("") { cell -> cell.char.toString() }
+        }
+    }
+
+    /**
+     * Get the screen buffer as a list of CharArrays for grid rendering.
+     * Each CharArray represents one row, with padding to fill the terminal width.
+     */
+    fun getScreenChars(): List<CharArray> {
+        return screenBuffer.map { row ->
+            CharArray(columns) { c -> if (c < row.size) row[c].char else ' ' }
         }
     }
 
