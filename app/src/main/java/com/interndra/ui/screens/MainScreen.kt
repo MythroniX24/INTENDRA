@@ -386,6 +386,10 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
                             vm = viewModel,
                             onOpenDrawer = { scope.launch { drawerState.open() } }
                         )
+                        AppTab.TERMINAL -> TerminalScreen(
+                            vm = viewModel,
+                            onOpenDrawer = { scope.launch { drawerState.open() } }
+                        )
                         AppTab.VAULT -> KnowledgeVaultScreen(
                             vm = viewModel,
                             onOpenDrawer = { scope.launch { drawerState.open() } }

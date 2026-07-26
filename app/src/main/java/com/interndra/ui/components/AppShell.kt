@@ -36,6 +36,10 @@ enum class AppTab(
     val badge: ((HybridAgentViewModel) -> String)? = null
 ) {
     CHAT(Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Filled.Chat, "Chat"),
+    TERMINAL(Icons.Default.Code, Icons.Default.Code, "Terminal", { vm ->
+        val isActive = vm.terminalAgent.getPtySession()?.isRunning == true
+        if (isActive) "▶" else ""
+    }),
     VAULT(Icons.Default.Book, Icons.Default.Book, "Vault", { vm ->
         val count = vm.uiState.value.knowledgeCount
         if (count > 0) count.toString() else ""
