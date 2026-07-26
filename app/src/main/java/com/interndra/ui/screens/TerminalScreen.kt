@@ -76,6 +76,7 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     var showSessionMenu by remember { mutableStateOf<String?>(null) }
     var commandHistoryIndex by remember { mutableStateOf(-1) }
     var savedCurrentInput by remember { mutableStateOf("") }
+    var showHistoryPanel by remember { mutableStateOf(false) }
 
     // ── PTY state ────────────────────────────────────────────────────────
     val ptySession = remember { vm.terminalAgent.getPtySession() }
@@ -281,13 +282,15 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                             .animateFloat(0f, 1f,
                                 infiniteRepeatable(tween(500), RepeatMode.Reverse), label = "cursor")
                         Text(
-                            cursorChar,
+                            text = cursorChar,
                             color = TerminalBg,
-                            background = TerminalGreen.copy(alpha = blinkAlpha.value),
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             maxLines = 1,
-                            softWrap = false
+                            softWrap = false,
+                            modifier = Modifier.background(
+                                TerminalGreen.copy(alpha = blinkAlpha.value)
+                            )
                         )
                     }
                 }
