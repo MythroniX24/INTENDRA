@@ -504,6 +504,30 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                         Log.w(TAG, "⚠️ PTY session failed — falling back to pipe-based shell")
                     }
                 }
+                // ⚡ FIX: Auto-install Termux bootstrap on first launch if Shizuku is available
+                else if (shizukuShell.isElevatedAvailable && termuxBootstrapInstaller.isInstalled().not()) {
+                    Log.i(TAG, "📦 Auto-installing Termux bootstrap via Shizuku...")
+                    val result = termuxBootstrapInstaller.install(progressCallback = { progress ->
+                        Log.i(TAG, "Bootstrap progress: $progress")
+                    })
+                    if (result.success) {
+                        termuxEnvironment.refreshStatus()
+                        val newMode = termuxEnvironment.getMode()
+                        terminalAgent.switchMode(newMode)
+                        if (termuxEnvironment.hasTermux()) {
+                            val envInfo = termuxEnvironment.info.value
+                            val config = TerminalSession.TermuxSessionConfig(
+                                prefix = envInfo.bootstrapPrefix,
+                                homeDir = "${envInfo.bootstrapPrefix}/home",
+                                shellPath = "${envInfo.bootstrapPrefix}/usr/bin/bash"
+                            )
+                            terminalAgent.startPtySession(config)
+                            Log.i(TAG, "✅ Auto-installed Termux + PTY session started")
+                        }
+                    } else {
+                        Log.w(TAG, "Auto-install failed: ${result.error}")
+                    }
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Init: TermuxEnvironment failed: ${e.message}")
             }
@@ -977,6 +1001,19 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                         })
                         if (result.success) {
                             termuxEnvironment.refreshStatus()
+                            // ⚡ FIX: Sync TerminalAgent mode → Termux and start PTY session
+                            val envMode = termuxEnvironment.getMode()
+                            terminalAgent.switchMode(envMode)
+                            if (termuxEnvironment.hasTermux()) {
+                                val envInfo = termuxEnvironment.info.value
+                                val config = TerminalSession.TermuxSessionConfig(
+                                    prefix = envInfo.bootstrapPrefix,
+                                    homeDir = "${envInfo.bootstrapPrefix}/home",
+                                    shellPath = "${envInfo.bootstrapPrefix}/usr/bin/bash"
+                                )
+                                terminalAgent.startPtySession(config)
+                                Log.i(TAG, "✅ Post-install: PTY started, mode=${termuxEnvironment.getMode()}")
+                            }
                             val msg = "✅ Embedded Termux installed! You can now use python3, git, node, npm, pip, apt."
                             repo.updateAiMessage(placeholderId, msg)
                         } else {
@@ -1404,6 +1441,47 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     fun clearMessages() = viewModelScope.launch { repo.clearMessages() }
     fun clearAll()      = viewModelScope.launch { repo.clearMessages(); repo.clearLogs() }
     fun dismissError()  = _uiState.update { it.copy(error = null) }
+
+        // ══════════════════════════════════════════════════════════════════════
+    //  EMBEDDED TERMUX INSTALL (from TerminalScreen button)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Install Embedded Termux bootstrap manually (triggered from TerminalScreen).
+     * After successful install, syncs TerminalAgent mode and starts PTY session.
+     */
+    fun installEmbeddedTermux(
+        onProgress: ((String) -> Unit)? = null,
+        onComplete: ((Boolean, String) -> Unit)? = null
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                withContext(Dispatchers.Main) { onProgress?.invoke("📦 Installing Embedded Termux bootstrap...") }
+                val result = termuxBootstrapInstaller.install(progressCallback = { progress ->
+                    viewModelScope.launch(Dispatchers.Main) { onProgress?.invoke(progress) }
+                })
+                if (result.success) {
+                    termuxEnvironment.refreshStatus()
+                    val envMode = termuxEnvironment.getMode()
+                    terminalAgent.switchMode(envMode)
+                    if (termuxEnvironment.hasTermux()) {
+                        val envInfo = termuxEnvironment.info.value
+                        val config = TerminalSession.TermuxSessionConfig(
+                            prefix = envInfo.bootstrapPrefix,
+                            homeDir = "${envInfo.bootstrapPrefix}/home",
+                            shellPath = "${envInfo.bootstrapPrefix}/usr/bin/bash"
+                        )
+                        terminalAgent.startPtySession(config)
+                    }
+                    withContext(Dispatchers.Main) { onComplete?.invoke(true, "✅ Embedded Termux installed!") }
+                } else {
+                    withContext(Dispatchers.Main) { onComplete?.invoke(false, "❌ Installation failed: ${result.error?.take(200) ?: "Unknown error"}") }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { onComplete?.invoke(false, "❌ Error: ${e.message?.take(200) ?: "Unknown error"}") }
+            }
+        }
+    }
 
     // ── Shizuku management ────────────────────────────────────────────────
 

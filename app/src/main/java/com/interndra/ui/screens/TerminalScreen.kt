@@ -208,7 +208,17 @@ fun TerminalScreen(
 
                 // ── Empty state ────────────────────────────────
                 if (!isPtyActive.value && outputLines.isEmpty()) {
-                    TerminalWelcomeMessage()
+                    TerminalWelcomeMessage(
+                        mode = vm.terminalAgent.currentMode,
+                        onInstallTermux = { vm.installEmbeddedTermux(
+                            onProgress = { progress ->
+                                outputLines.add("📦 $progress")
+                            },
+                            onComplete = { success, msg ->
+                                outputLines.add(if (success) "\u001b[32m$msg\u001b[0m" else "\u001b[31m$msg\u001b[0m")
+                            }
+                        )}
+                    )
                 }
 
                 Spacer(Modifier.height(4.dp))
@@ -521,10 +531,14 @@ private fun ExecutionModeBar(vm: HybridAgentViewModel) {
 
 // ── Terminal Welcome Message ────────────────────────────────────────────
 @Composable
-private fun TerminalWelcomeMessage() {
+private fun TerminalWelcomeMessage(
+    mode: TermuxEnvironment.ExecMode,
+    onInstallTermux: () -> Unit = {}
+) {
     Column(
         modifier = Modifier.padding(8.dp)
     ) {
+        // ── ASCII Art Header ────────────────────────────────────
         Text(
             text = """
 ╔══════════════════════════════════════╗
@@ -538,12 +552,106 @@ private fun TerminalWelcomeMessage() {
             lineHeight = 16.sp
         )
         Spacer(Modifier.height(4.dp))
-        Text(
-            text = "Available backends: 🐧 Termux | 🔑 Shizuku | ⚙️ Fallback",
-            color = TerminalWhite.copy(alpha = 0.3f),
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace
-        )
+
+        // ── Mode-specific message ──────────────────────────────
+        when (mode) {
+            TermuxEnvironment.ExecMode.FALLBACK -> {
+                Text(
+                    text = "⚠️ Fallback Mode — No Termux environment detected",
+                    color = TerminalYellow,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Install Embedded Termux to unlock:",
+                    color = TerminalWhite.copy(alpha = 0.5f),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = "  • Full Linux bash environment",
+                    color = TerminalWhite.copy(alpha = 0.4f),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = "  • apt, pkg package manager",
+                    color = TerminalWhite.copy(alpha = 0.4f),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = "  • python3, git, node, npm, pip",
+                    color = TerminalWhite.copy(alpha = 0.4f),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Spacer(Modifier.height(8.dp))
+
+                // Install button
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = TerminalGreen.copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, TerminalGreen.copy(alpha = 0.4f)),
+                    modifier = Modifier
+                        .clickable { onInstallTermux() }
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(4.dp)
+                    ) {
+                        Text(
+                            text = "📥",
+                            fontSize = 14.sp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "Install Embedded Termux (~25MB)",
+                            color = TerminalGreen,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Or ask AI: \"install embedded termux bootstrap\"",
+                    color = TerminalWhite.copy(alpha = 0.3f),
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+            TermuxEnvironment.ExecMode.TERMUX -> {
+                Text(
+                    text = "🐧 Termux mode active — bash ready",
+                    color = TerminalGreen,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+            TermuxEnvironment.ExecMode.SHIZUKU -> {
+                Text(
+                    text = "🔑 Shizuku ADB — elevated shell ready",
+                    color = TerminalBlue,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+            TermuxEnvironment.ExecMode.ROOT -> {
+                Text(
+                    text = "🛡️ Root shell — full system access",
+                    color = TerminalRed.copy(alpha = 0.8f),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
         Text(
             text = "Commands: Ctrl+C=Interrupt  Ctrl+D=EOF  Ctrl+L=Clear  Type 'help'",
             color = TerminalWhite.copy(alpha = 0.25f),
