@@ -1,16 +1,12 @@
 package com.interndra.ai
 
 import android.content.Context
-import android.os.Build
 import com.interndra.service.ShizukuShell
 import io.mockk.*
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
 /**
  * AICommandRegistryTest — tests for runtime capability detection and
