@@ -190,7 +190,7 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                 val session = vm.terminalAgent.getPtySession()
                 session?.let { s ->
                     val emu = s.emulator
-                    emu.reset()
+                    emu.clearScreen()
                     screenLines = emu.getScreenChars()
                 }
             }
@@ -244,8 +244,8 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                             while (col < chars.size) {
                                 val cell = currentEmu?.getCell(row, col)
                                 val ch = chars[col]
-                                val fgColor = cell?.foreground?.let { fg -> TerminalEmulator.Companion.colorInt(fg) } ?: TerminalWhite
-                                val bgColor = cell?.background?.let { bg -> TerminalEmulator.Companion.colorInt(bg) }
+                                val fgColor = cell?.foreground?.let { fg -> Color(TerminalEmulator.colorInt(fg)) } ?: TerminalWhite
+                                val bgColor = cell?.background?.let { bg -> Color(TerminalEmulator.colorInt(bg)) }
                                 val isBold = cell?.bold == true
 
                                 // Find run of same-attribute cells
@@ -608,6 +608,7 @@ private fun TerminalExtraKeysBar(
         "Ctrl+L" to { onControl(12.toChar()) },
         "📋" to {
             // Toggle history panel
+            showHistoryPanel = !showHistoryPanel
         }
     )
 
