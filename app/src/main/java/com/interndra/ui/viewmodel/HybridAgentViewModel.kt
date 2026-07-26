@@ -1066,8 +1066,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         // runs its callback synchronously inside its forEachIndexed loop, so
         // all results are already collected by the time we reach this point.
         try {
-            // Brief delay so user sees the final status before clearing
-            delay(1500)
             if (chatMessageId != null && chatOutputLines.isNotEmpty()) {
                 val allOutput = chatOutputLines.joinToString("\n\n")
                 val existing  = repo.getMessageText(chatMessageId) ?: ""
@@ -1075,6 +1073,8 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                                 else "$existing\n\n$allOutput"
                 repo.updateAiMessage(chatMessageId, updated)
             }
+            // Brief delay so user sees the final status before clearing
+            delay(1500)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update chat message with command output: ${e.message}")
         } finally {
