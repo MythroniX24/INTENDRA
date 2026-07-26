@@ -105,9 +105,7 @@ fun TerminalScreen(
         }
     }
 
-    // ── Emulator screen buffer ───────────────────────────────────
-    val ptySession = remember { vm.terminalAgent.getPtySession() }
-    val emulator = remember { ptySession?.emulator }
+    // ── Emulator screen buffer (polled fresh each frame) ──────────
     val screenChars = remember { mutableStateOf<List<CharArray>>(emptyList()) }
     val cursorPosition = remember { mutableIntStateOf(0) }
 
@@ -131,7 +129,9 @@ fun TerminalScreen(
     // Auto-scroll to bottom when new output arrives
     LaunchedEffect(outputLines.size) {
         if (outputLines.isNotEmpty()) {
-            outputScrollState.animateScrollTo(outputScrollState.maxValue)
+            kotlinx.coroutines.launch {
+                outputScrollState.scrollTo(outputScrollState.maxValue)
+            }
         }
     }
 
