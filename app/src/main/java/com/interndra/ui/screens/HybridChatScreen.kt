@@ -57,6 +57,8 @@ import com.interndra.data.model.*
 import com.interndra.ui.components.*
 import com.interndra.ui.theme.LocalInterndraColors
 import com.interndra.ui.theme.*
+import com.interndra.ui.viewmodel.ActiveCommand
+import com.interndra.ui.viewmodel.CommandStatus
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 import com.interndra.ui.viewmodel.HybridUiState
 import com.interndra.util.Constants
@@ -82,6 +84,7 @@ fun HybridChatScreen(
     val provider by vm.aiProvider.collectAsState()
     val jailbreakEnabled by vm.jailbreakEnabled.collectAsState()
     val jailbreakLevel by vm.jailbreakLevel.collectAsState()
+    val activeCommands by vm.activeCommands.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     val keyboard   = LocalSoftwareKeyboardController.current
@@ -94,6 +97,11 @@ fun HybridChatScreen(
 
     // ── Task system ───────────────────────────────────────────────────
     val activeTask by vm.taskManager.activeTask.collectAsState()
+
+    // ── Active command tracking ────────────────────────────────────
+    val hasRunningCommands = remember(activeCommands) {
+        activeCommands.any { it.status == com.interndra.ui.viewmodel.CommandStatus.RUNNING }
+    }
 
     // ── Group messages by consecutive role (derived for recomposition efficiency) ──
     val groupedMessages by remember {
@@ -174,11 +182,20 @@ fun HybridChatScreen(
         }
 
     // ── Messages (isolated recomposition scope for streaming) ─────────
+        // ── Active commands indicator (like Claude: "Running command...") ──
+        if (activeCommands.isNotEmpty()) {
+            CommandExecutionDisplay(
+                commands = activeCommands,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+        }
+
         MessageList(
             modifier = Modifier.weight(1f),
             messages = messages,
             groupedMessages = groupedMessages,
             activeTask = activeTask,
+            activeCommands = activeCommands,
             colors = colors,
             onSuggestionClick = { text -> inputText = text },
             onCopy = { text ->
@@ -233,6 +250,7 @@ private fun MessageList(
     messages: List<ChatMessage>,
     groupedMessages: List<Pair<MessageRole, List<ChatMessage>>>,
     activeTask: TaskPlan?,
+    activeCommands: List<com.interndra.ui.viewmodel.ActiveCommand>,
     colors: InterndraColors,
     onSuggestionClick: (String) -> Unit,
     onCopy: (String) -> Unit,
@@ -410,6 +428,8 @@ private fun MessageList(
 }
 
 // ── Message Group ───────────────────────────────────────────────────────────
+// User messages → right-aligned bubbles (like ChatGPT)
+// AI messages → full-width, no bubble, direct rendering (like Claude)
 @Composable
 private fun MessageGroup(
     role: MessageRole,
@@ -437,7 +457,7 @@ private fun MessageGroup(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = if (isUser) 8.dp else 4.dp),
+            .padding(horizontal = if (isUser) 8.dp else 0.dp),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
         // Timestamp header for group
@@ -448,94 +468,65 @@ private fun MessageGroup(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
         )
 
-        // ENHANCED: Connected message bubbles with entry animation
-        // Each message slides up with a staggered delay for a premium feel
         messages.forEachIndexed { idx, msg ->
             val isLast = idx == messages.size - 1
-            val borderRadius = if (isUser) {
-                if (isLast) RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp)
-                else RoundedCornerShape(20.dp, 20.dp, 20.dp, 20.dp)
-            } else {
-                if (isLast) RoundedCornerShape(4.dp, 20.dp, 20.dp, 20.dp)
-                else RoundedCornerShape(20.dp, 20.dp, 20.dp, 20.dp)
-            }
-
-            val showAvatar = !isUser && isLast
             val isStreaming = msg.id == streamingMsgId && streamedText.isNotEmpty()
 
-            // Animated message entry (skip animation for streaming messages to avoid flicker)
-            AnimatedMessage(
-                index = idx + groupIndex * 2,
-                visible = true
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = if (!isUser && !isLast) 48.dp else 0.dp),
-                    horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
-                ) {
-                    // AI avatar only on last message of group
-                    if (showAvatar) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.background,
-                            border = BorderStroke(1.dp, colors.aiBubbleBorder),
-                            modifier = Modifier
-                                .padding(top = 8.dp, end = 10.dp)
-                                .size(36.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.AutoAwesome, "AI",
-                                    tint = colors.accent, modifier = Modifier.size(20.dp))
-                            }
-                        }
-                    }
+            AnimatedMessage(index = idx + groupIndex * 2, visible = true) {
+                if (isUser) {
+                    // ── USER: Bubble style (right-aligned) ────────────────
+                    val borderRadius = if (isLast)
+                        RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp)
+                    else
+                        RoundedCornerShape(20.dp, 20.dp, 20.dp, 20.dp)
 
-                    // Message content
-                    Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
                         Box(
                             modifier = Modifier
-                                .widthIn(max = if (isUser) 300.dp else 400.dp)
+                                .widthIn(max = 300.dp)
                                 .clip(borderRadius)
-                                .background(
-                                    if (isUser) colors.userBubbleBg else colors.aiBubbleBg,
-                                    shape = borderRadius
-                                )
-                                .border(
-                                    if (!isUser) 0.5.dp else 0.dp,
-                                    if (!isUser) colors.aiBubbleBorder else Color.Transparent,
-                                    shape = borderRadius
-                                )
-                                .padding(
-                                    horizontal = if (isUser) 16.dp else 14.dp,
-                                    vertical = if (isUser) 12.dp else 6.dp
-                                )
+                                .background(colors.userBubbleBg, shape = borderRadius)
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
                         ) {
-                            if (msg.isLoading) {
-                                ThinkingIndicator()
-                            } else                        if (isUser) {
-                                Text(msg.content, color = colors.userBubbleText, fontSize = 15.sp, lineHeight = 22.sp)
-                            } else {
-                                // Streaming or full text
-                                val displayText = if (isStreaming) streamedText else msg.content
-                                RichMarkdownText(
-                                    markdown = displayText,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    onLinkClick = { url ->
-                                        val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        runCatching { context.startActivity(intent) }
-                                    }
-                                )
-                            }
+                            Text(
+                                msg.content,
+                                color = colors.userBubbleText,
+                                fontSize = 15.sp,
+                                lineHeight = 22.sp
+                            )
+                        }
+                    }
+                } else {
+                    // ── AI: Full-width, no bubble (like Claude) ───────────
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        if (msg.isLoading) {
+                            ThinkingIndicator()
+                        } else {
+                            val displayText = if (isStreaming) streamedText else msg.content
+                            RichMarkdownText(
+                                markdown = displayText,
+                                modifier = Modifier.fillMaxWidth(),
+                                onLinkClick = { url ->
+                                    val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    runCatching { context.startActivity(intent) }
+                                }
+                            )
                         }
 
-                        // Message actions bar (only for AI messages, last in group)
+                        // Message actions bar
                         if (isLast && !msg.isLoading) {
                             MessageActionsBar(
                                 onCopy = { onCopy(msg.content) },
-                                onRegenerate = if (msg.role == MessageRole.AI) onRegenerate else null,
-                                isUserMessage = isUser
+                                onRegenerate = onRegenerate,
+                                isUserMessage = false
                             )
                         }
                     }
@@ -899,6 +890,153 @@ private fun ChatHeaderBar(
         }
     }
     Divider(color = SurfaceLight.copy(alpha = 0.2f))
+}
+
+// ── Command Execution Display (like Claude's command indicator) ────────────
+@Composable
+private fun CommandExecutionDisplay(
+    commands: List<ActiveCommand>,
+    modifier: Modifier = Modifier
+) {
+    val runningCount = commands.count { it.status == CommandStatus.RUNNING }
+    val colors = LocalInterndraColors.current
+    var expanded by remember { mutableStateOf(false) }
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = colors.codeBlockBg.copy(alpha = 0.7f),
+        border = BorderStroke(1.dp, colors.codeBlockBorder.copy(alpha = 0.5f))
+    ) {
+        Column(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(12.dp)) {
+            // ── Header: Status indicator ─────────────────────────────────
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (runningCount > 0) {
+                    val infiniteTransition = rememberInfiniteTransition(label = "cmd_pulse")
+                    val pulseAlpha by infiniteTransition.animateFloat(
+                        0.3f, 1.0f,
+                        infiniteRepeatable(tween(800), RepeatMode.Reverse),
+                        label = "cmd_pulse"
+                    )
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .alpha(pulseAlpha)
+                            .clip(CircleShape)
+                            .background(TerminalGreen)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Running ${runningCount} command${if (runningCount > 1) "s" else ""}…",
+                        color = TerminalGreen,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                } else {
+                    val allSuccess = commands.all { it.status == CommandStatus.SUCCESS }
+                    val allFailed = commands.all { it.status == CommandStatus.FAILED }
+                    val icon = if (allSuccess) "✅" else if (allFailed) "❌" else "⚠️"
+                    val label = if (allSuccess) "All commands completed"
+                                else if (allFailed) "Commands failed"
+                                else "${commands.count { it.status == CommandStatus.SUCCESS }}/${commands.size} completed"
+                    Text("$icon $label", color = TerminalWhite.copy(0.7f), fontSize = 13.sp)
+                }
+
+                Spacer(Modifier.weight(1f))
+
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    null,
+                    tint = TerminalWhite.copy(0.4f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // ── Expanded command list ────────────────────────────────────
+            AnimatedVisibility(visible = expanded) {
+                Column(Modifier.padding(top = 8.dp)) {
+                    commands.forEachIndexed { idx, cmd ->
+                        CommandExecutionRow(cmd)
+                        if (idx < commands.size - 1) {
+                            HorizontalDivider(
+                                color = colors.codeBlockBorder.copy(alpha = 0.3f),
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CommandExecutionRow(command: ActiveCommand) {
+    val statusColor = when (command.status) {
+        CommandStatus.RUNNING -> TerminalGreen
+        CommandStatus.SUCCESS -> TerminalGreen.copy(alpha = 0.7f)
+        CommandStatus.FAILED -> TerminalRed
+    }
+    val statusIcon = when (command.status) {
+        CommandStatus.RUNNING -> "⚡"
+        CommandStatus.SUCCESS -> "✅"
+        CommandStatus.FAILED -> "❌"
+    }
+
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                statusIcon,
+                fontSize = 11.sp
+            )
+            Spacer(Modifier.width(6.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    command.description,
+                    color = TerminalWhite.copy(alpha = 0.85f),
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    command.command,
+                    color = TerminalWhite.copy(alpha = 0.4f),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.width(4.dp))
+
+            // Show output/error if available
+            if (command.output.isNotBlank() || command.error.isNotBlank()) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(statusColor)
+                )
+            }
+        }
+
+        // Show output snippet when failed
+        if (command.status == CommandStatus.FAILED && command.error.isNotBlank()) {
+            Text(
+                command.error.take(120),
+                color = TerminalRed.copy(alpha = 0.7f),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 20.dp, top = 2.dp)
+            )
+        }
+    }
 }
 
 // ── Helper: extract filename from content URI ──────────────────────────────

@@ -72,6 +72,19 @@ private val PRE_LOCK_MODE_PREF    = stringPreferencesKey("pre_lock_privacy_mode"
 private val EMERGENCY_LOCK_PREF   = booleanPreferencesKey("emergency_lock_active")
 private val TTS_ENABLED_PREF      = booleanPreferencesKey("tts_enabled")
 
+// ── Active command tracking for chat UI (like Claude's command indicator) ──
+enum class CommandStatus { RUNNING, SUCCESS, FAILED }
+
+data class ActiveCommand(
+    val id: Long,
+    val command: String,
+    val description: String,
+    val status: CommandStatus,
+    val output: String = "",
+    val error: String = "",
+    val startTime: Long = System.currentTimeMillis()
+)
+
 data class HybridUiState(
     val isLoading: Boolean                  = false,
     val a11yEnabled: Boolean                = false,
@@ -169,6 +182,13 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
 
     private val _topConcepts = MutableStateFlow<List<String>>(emptyList())
     val topConcepts: StateFlow<List<String>> = _topConcepts.asStateFlow()
+
+    // ── Active commands (for chat command indicators) ─────────────────
+    private val _activeCommands = MutableStateFlow<List<ActiveCommand>>(emptyList())
+    val activeCommands: StateFlow<List<ActiveCommand>> = _activeCommands.asStateFlow()
+
+    private var commandIdCounter = 0L
+    private fun nextCommandId() = ++commandIdCounter
 
     // ── Persistent preferences ────────────────────────────────────────────
     // UPGRADE: All stateIn() flows use `lazy {}` so that if DataStore or
@@ -988,6 +1008,20 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
 
         val chatOutputLines = mutableListOf<String>()
 
+        // ── Track commands in UI ────────────────────────────────────────
+        val cmdList = commands.mapIndexed { idx, cmd ->
+            val desc = cmd.description.ifBlank { cmd.command.take(40) }
+            ActiveCommand(
+                id = if (idx == 0) nextCommandId() else 0L,
+                command = cmd.command,
+                description = desc,
+                status = CommandStatus.RUNNING
+            )
+        }
+        // Ensure unique IDs
+        val trackedCmds = cmdList.map { it.copy(id = nextCommandId()) }
+        _activeCommands.value = trackedCmds
+
         engine.execute(session, userInput, intent.copy(commands = commands)) { result ->
             if (!result.success) allSuccess = false
             val cmd   = commands.getOrNull(result.stepIndex)
@@ -1000,6 +1034,19 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 val rawError = result.error.trim().take(200)
                 val friendly = friendlyError(rawError)
                 chatOutputLines.add("**$label** — $friendly")
+            }
+
+            // Update command tracking
+            _activeCommands.update { current ->
+                current.map { ac ->
+                    if (ac.id == trackedCmds.getOrNull(result.stepIndex)?.id) {
+                        ac.copy(
+                            status = if (result.success) CommandStatus.SUCCESS else CommandStatus.FAILED,
+                            output = result.output.take(500),
+                            error = result.error.take(500)
+                        )
+                    } else ac
+                }
             }
 
             viewModelScope.launch {
@@ -1018,12 +1065,19 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         // Phase 11 FIX: removed the artificial `delay(200)` — engine.execute
         // runs its callback synchronously inside its forEachIndexed loop, so
         // all results are already collected by the time we reach this point.
-        if (chatMessageId != null && chatOutputLines.isNotEmpty()) {
-            val allOutput = chatOutputLines.joinToString("\n\n")
-            val existing  = repo.getMessageText(chatMessageId) ?: ""
-            val updated   = if (existing.isBlank()) allOutput
-                            else "$existing\n\n$allOutput"
-            repo.updateAiMessage(chatMessageId, updated)
+        try {
+            if (chatMessageId != null && chatOutputLines.isNotEmpty()) {
+                val allOutput = chatOutputLines.joinToString("\n\n")
+                val existing  = repo.getMessageText(chatMessageId) ?: ""
+                val updated   = if (existing.isBlank()) allOutput
+                                else "$existing\n\n$allOutput"
+                repo.updateAiMessage(chatMessageId, updated)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update chat message with command output: ${e.message}")
+        } finally {
+            // Always clear active commands — even if the above throws
+            _activeCommands.value = emptyList()
         }
 
         if (allSuccess && commands.isNotEmpty()) {
