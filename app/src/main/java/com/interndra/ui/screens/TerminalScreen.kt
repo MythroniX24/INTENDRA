@@ -340,7 +340,8 @@ fun TerminalScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
             onControl = { ctrlChar ->
                 val session = vm.terminalAgent.getPtySession()
                 session?.sendControlChar(ctrlChar.code)
-            }
+            },
+            onToggleHistory = { showHistoryPanel = !showHistoryPanel }
         )
 
         // ── Terminal Input Bar ────────────────────────────────────────────
@@ -595,7 +596,8 @@ private fun EnhancedSessionRow(
 @Composable
 private fun TerminalExtraKeysBar(
     onInsert: (String) -> Unit,
-    onControl: (Char) -> Unit
+    onControl: (Char) -> Unit,
+    onToggleHistory: () -> Unit = {}
 ) {
     val extraKeys = listOf(
         "ESC" to { onInsert("\u001B") },
@@ -606,10 +608,7 @@ private fun TerminalExtraKeysBar(
         "Ctrl+D" to { onControl(4.toChar()) },
         "Ctrl+Z" to { onControl(26.toChar()) },
         "Ctrl+L" to { onControl(12.toChar()) },
-        "📋" to {
-            // Toggle history panel
-            showHistoryPanel = !showHistoryPanel
-        }
+        "📋" to { onToggleHistory() }
     )
 
     Row(
