@@ -1066,6 +1066,8 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         // runs its callback synchronously inside its forEachIndexed loop, so
         // all results are already collected by the time we reach this point.
         try {
+            // Brief delay so user sees the final status before clearing
+            delay(1500)
             if (chatMessageId != null && chatOutputLines.isNotEmpty()) {
                 val allOutput = chatOutputLines.joinToString("\n\n")
                 val existing  = repo.getMessageText(chatMessageId) ?: ""
