@@ -5,6 +5,9 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -152,6 +155,42 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        // ── IMMERSIVE MODE: auto-hide navigation buttons ────────────────
+        // Navigation bar (back, home, recent) will hide automatically.
+        // Swipe from bottom edge to reveal them temporarily.
+        enableImmersiveMode()
+    }
+
+    /**
+     * Enable immersive sticky mode so the system navigation bar (back, home,
+     * recent apps) auto-hides. Swipe from the bottom edge to reveal them.
+     * Uses the modern WindowInsetsController on API 30+, legacy flags on older.
+     */
+    private fun enableImmersiveMode() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // Android 11+ modern API
+                window.setDecorFitsSystemWindows(false)
+                window.insetsController?.let { controller ->
+                    controller.hide(
+                        WindowInsets.Type.navigationBars() or
+                        WindowInsets.Type.statusBars()
+                    )
+                    controller.systemBarsBehavior =
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+            } else {
+                // Legacy API for Android 10 and below
+                window.decorView.systemUiVisibility = (
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_FULLSCREEN
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to enable immersive mode: ${e.message}")
+        }
     }
 
     @Composable
@@ -234,5 +273,14 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel?.refreshStatus()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Re-hide navigation buttons when app regains focus
+        // (user may have swiped to reveal them, or switched apps and came back)
+        if (hasFocus) {
+            enableImmersiveMode()
+        }
     }
 }

@@ -9,9 +9,11 @@
 -->
 <resources>
     <style name="Theme.Interndra" parent="android:Theme.Material.NoActionBar">
-        <!-- Solid dark colors so status bar icons and nav buttons stay visible -->
-        <item name="android:statusBarColor">#0F0F0F</item>
-        <item name="android:navigationBarColor">#0F0F0F</item>
+        <!-- Immersive mode: transparent bars so content draws behind them.
+             Navigation buttons auto-hide via IMMERSIVE_STICKY flags set in
+             MainActivity — swipe from bottom to reveal them temporarily. -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
         <item name="android:windowBackground">@android:color/black</item>
