@@ -35,7 +35,8 @@ jobs:
           wget -q "https://repo1.maven.org/maven2/javax/xml/bind/jaxb-api/2.3.1/jaxb-api-2.3.1.jar" -O /tmp/jaxb-api.jar
           wget -q "https://repo1.maven.org/maven2/org/glassfish/jaxb/jaxb-runtime/2.3.1/jaxb-runtime-2.3.1.jar" -O /tmp/jaxb-runtime.jar
           wget -q "https://repo1.maven.org/maven2/javax/activation/activation/1.1.1/activation-1.1.1.jar" -O /tmp/activation.jar
-          export CLASSPATH="/tmp/jaxb-api.jar:/tmp/jaxb-runtime.jar:/tmp/activation.jar"
+          # -Xbootclasspath/a: IS honored by `java -jar` (CLASSPATH is NOT)
+          export JAVA_TOOL_OPTIONS="-Xbootclasspath/a:/tmp/jaxb-api.jar:/tmp/jaxb-runtime.jar:/tmp/activation.jar"
           export SKIP_JDK_VERSION_CHECK=true
           echo "=== Accepting licenses ==="
           yes | sdkmanager --licenses 2>&1 || true
