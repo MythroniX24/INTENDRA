@@ -267,8 +267,9 @@ class ProotDistroManager(
 
     /**
      * Login to a distro (interactive bash shell).
+     * Returns the command string — caller should execute it via runInDistro or directly.
      */
-    suspend fun loginDistro(distroName: String): String {
+    fun loginDistro(distroName: String): String {
         return "proot-distro login $distroName"
     }
 
