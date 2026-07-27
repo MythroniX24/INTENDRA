@@ -237,11 +237,40 @@ class TerminalEmulator(
         val oldRows = rows; val oldCols = columns
         rows = newRows; columns = newColumns
         scrollBottom = rows - 1
-        resizeBuffer(screenBuffer, oldRows, oldCols)
-        if (altBuffer != null) resizeBuffer(altBuffer!!, oldRows, oldCols)
+
+        // Resize primary screen buffer
+        screenBuffer = resizeBuffer(screenBuffer, oldRows, oldCols)
+
+        // Resize alternate buffer if it exists
+        if (altBuffer != null) {
+            altBuffer = resizeBuffer(altBuffer!!, oldRows, oldCols)
+        }
+
         cursorRow = cursorRow.coerceIn(0, rows - 1)
         cursorCol = cursorCol.coerceIn(0, columns - 1)
         markDirty()
+    }
+
+    /** Create a new buffer with the given dimensions, copying old content where it fits. */
+    private fun resizeBuffer(
+        oldBuf: Array<TerminalRow>,
+        oldRows: Int,
+        oldCols: Int
+    ): Array<TerminalRow> {
+        val newBuf = Array(rows) { r ->
+            val newRow = TerminalRow(columns)
+            if (r < oldRows) {
+                // Copy old row content (up to min of old/new columns)
+                val maxCol = minOf(oldCols, columns)
+                for (c in 0 until maxCol) {
+                    newRow.chars[c] = oldBuf[r].getChar(c)
+                    newRow.styles[c] = oldBuf[r].getStyle(c)
+                }
+                newRow.isWrapped = oldBuf[r].isWrapped
+            }
+            newRow
+        }
+        return newBuf
     }
 
     /** Clear the entire screen. */
@@ -284,28 +313,6 @@ class TerminalEmulator(
     // ══════════════════════════════════════════════════════════════════════
 
     private fun activeBuffer(): Array<TerminalRow> = altBuffer ?: screenBuffer
-
-    private fun resizeBuffer(buf: Array<TerminalRow>, oldRows: Int, oldCols: Int) {
-        val newBuf = Array(rows) { r ->
-            if (r < oldRows) buf[r].also { if (it.columns != columns) {
-                // Copy old content, resizing columns
-                val newRow = TerminalRow(columns)
-                newRow.copyFrom(it)
-                newRow
-            }} else TerminalRow(columns)
-        }
-        // Copy back
-        for (r in 0 until minOf(rows, oldRows)) {
-            if (buf[r].columns != columns) {
-                val newRow = TerminalRow(columns)
-                newRow.copyFrom(buf[r])
-                buf[r] = newRow
-            }
-        }
-        if (rows > oldRows) {
-            for (r in oldRows until rows) buf[r] = TerminalRow(columns)
-        }
-    }
 
     // ══════════════════════════════════════════════════════════════════════
     //  STATE MACHINE
@@ -482,7 +489,7 @@ class TerminalEmulator(
         var i = 0
         while (i < params.size) {
             val p = params[i]
-            // Check for colon-separated SGR (38:2:...)
+            // Skip colon-separator markers (-1) in param list
             if (p == -1) { i++; continue }
             when (p) {
                 0 -> resetAttributes()
@@ -503,52 +510,39 @@ class TerminalEmulator(
                 29 -> strikethrough = false
                 in 30..37 -> { foreground = p - 30; fgRgb = null }
                 38 -> {
+                    // Check next non-marker param
+                    var next = i + 1
+                    while (next < params.size && params[next] == -1) next++
                     when {
-                        i + 1 < params.size && params[i + 1] == 5 && i + 2 < params.size -> {
-                            foreground = params[i + 2].coerceIn(0, 255); fgRgb = null; i += 2
+                        next < params.size && params[next] == 5 && next + 1 < params.size -> {
+                            foreground = params[next + 1].coerceIn(0, 255); fgRgb = null; i = next + 1
                         }
-                        i + 1 < params.size && params[i + 1] == 2 && i + 4 < params.size -> {
-                            val r = params[i + 2].coerceIn(0, 255)
-                            val g = params[i + 3].coerceIn(0, 255)
-                            val b = params[i + 4].coerceIn(0, 255)
+                        next < params.size && params[next] == 2 && next + 3 < params.size -> {
+                            val r = params[next + 1].coerceIn(0, 255)
+                            val g = params[next + 2].coerceIn(0, 255)
+                            val b = params[next + 3].coerceIn(0, 255)
                             foreground = COLOR_DEFAULT_FG
                             fgRgb = (r shl 16) or (g shl 8) or b
-                            i += 4
-                        }
-                        // Colon-separated: 38:2:R:G:B or 38:5:N
-                        i + 1 < params.size && params[i + 1] == 2 && i + 4 < params.size -> {
-                            val r = params[i + 2].coerceIn(0, 255)
-                            val g = params[i + 3].coerceIn(0, 255)
-                            val b = params[i + 4].coerceIn(0, 255)
-                            fgRgb = (r shl 16) or (g shl 8) or b; i += 4
-                        }
-                        i + 1 < params.size && params[i + 1] == 5 && i + 2 < params.size -> {
-                            foreground = params[i + 2].coerceIn(0, 255); fgRgb = null; i += 2
+                            i = next + 3
                         }
                     }
                 }
                 39 -> { foreground = COLOR_DEFAULT_FG; fgRgb = null }
                 in 40..47 -> { background = p - 40; bgRgb = null }
                 48 -> {
+                    var next = i + 1
+                    while (next < params.size && params[next] == -1) next++
                     when {
-                        i + 1 < params.size && params[i + 1] == 5 && i + 2 < params.size -> {
-                            background = params[i + 2].coerceIn(0, 255); bgRgb = null; i += 2
+                        next < params.size && params[next] == 5 && next + 1 < params.size -> {
+                            background = params[next + 1].coerceIn(0, 255); bgRgb = null; i = next + 1
                         }
-                        i + 1 < params.size && params[i + 1] == 2 && i + 4 < params.size -> {
-                            val r = params[i + 2].coerceIn(0, 255)
-                            val g = params[i + 3].coerceIn(0, 255)
-                            val b = params[i + 4].coerceIn(0, 255)
+                        next < params.size && params[next] == 2 && next + 3 < params.size -> {
+                            val r = params[next + 1].coerceIn(0, 255)
+                            val g = params[next + 2].coerceIn(0, 255)
+                            val b = params[next + 3].coerceIn(0, 255)
                             background = COLOR_DEFAULT_BG
                             bgRgb = (r shl 16) or (g shl 8) or b
-                            i += 4
-                        }
-                        i + 1 < params.size && params[i + 1] == 2 && i + 4 < params.size -> {
-                            val r = params[i + 2].coerceIn(0, 255)
-                            val g = params[i + 3].coerceIn(0, 255)
-                            val b2 = params[i + 4].coerceIn(0, 255); bgRgb = (r shl 16) or (g shl 8) or b2; i += 4
-                        }
-                        i + 1 < params.size && params[i + 1] == 5 && i + 2 < params.size -> {
-                            background = params[i + 2].coerceIn(0, 255); bgRgb = null; i += 2
+                            i = next + 3
                         }
                     }
                 }
@@ -562,12 +556,6 @@ class TerminalEmulator(
     }
 
     private fun handleSetMode(params: List<Int>) {
-        // DEC private modes (prefixed with ?)
-        if (params.size >= 2 && params[0] == -1) {
-            // colon-separated — ignore
-        }
-        // Check if it's a private mode (params have a ? indicator)
-        // We detect this by checking the first param value
         var idx = 0
         while (idx < params.size) {
             val mode = params[idx]
@@ -594,7 +582,6 @@ class TerminalEmulator(
                 1 -> applicationCursorKeys = false
                 25 -> cursorVisible = false
                 1047, 1049 -> deactivateAlternateScreen()
-                1048 -> {} // Don't restore on reset
                 2004 -> bracketedPasteMode = false
                 1000 -> mouseNormalTracking = false
                 1002 -> mouseButtonTracking = false
@@ -690,7 +677,6 @@ class TerminalEmulator(
             scrollUpInRegion(1)
             cursorRow = scrollBottom
         }
-        // If no scroll margins (full screen), keep at bottom
         if (cursorRow >= rows) {
             cursorRow = rows - 1
             activeBuffer()[cursorRow].clear()
@@ -709,12 +695,9 @@ class TerminalEmulator(
         val buf = activeBuffer()
         val count = n.coerceAtLeast(1)
         for (i in 0 until count) {
-            if (i < rows) {
-                // Only primary screen lines go to scrollback
-                if (!inAlternateScreen) {
-                    scrollbackBuffer.add(buf[i].cloneRow())
-                    if (scrollbackBuffer.size > maxScrollback) scrollbackBuffer.removeAt(0)
-                }
+            if (i < rows && !inAlternateScreen) {
+                scrollbackBuffer.add(buf[i].cloneRow())
+                if (scrollbackBuffer.size > maxScrollback) scrollbackBuffer.removeAt(0)
             }
         }
         for (r in 0 until (rows - count)) buf[r] = buf[r + count]
@@ -728,12 +711,9 @@ class TerminalEmulator(
         for (r in 0 until count) buf[r] = TerminalRow(columns)
     }
 
-    /** Scroll within scroll region. */
     private fun scrollUpInRegion(n: Int) {
         val buf = activeBuffer()
         val count = n.coerceAtLeast(1)
-        val regionHeight = scrollBottom - scrollTop + 1
-        // Move lines to scrollback (only from primary screen)
         for (i in 0 until count) {
             val r = scrollTop + i
             if (r <= scrollBottom && !inAlternateScreen) {
