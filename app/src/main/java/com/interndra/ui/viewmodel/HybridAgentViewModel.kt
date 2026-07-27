@@ -512,6 +512,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                     })
                     if (result.success) {
                         termuxEnvironment.refreshStatus()
+                        // ⚡ FIX: Sync TerminalAgent mode from environment + invalidate cache
+                        terminalAgent.syncModeFromEnvironment()
+                        cachedRuntimeCaps = null
                         val newMode = termuxEnvironment.getMode()
                         terminalAgent.switchMode(newMode)
                         if (termuxEnvironment.hasTermux()) {
@@ -1001,6 +1004,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                         })
                         if (result.success) {
                             termuxEnvironment.refreshStatus()
+                            // ⚡ FIX: Sync TerminalAgent mode from environment + invalidate cache
+                            terminalAgent.syncModeFromEnvironment()
+                            cachedRuntimeCaps = null
                             // ⚡ FIX: Sync TerminalAgent mode → Termux and start PTY session
                             val envMode = termuxEnvironment.getMode()
                             terminalAgent.switchMode(envMode)
@@ -1462,6 +1468,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 })
                 if (result.success) {
                     termuxEnvironment.refreshStatus()
+                    // ⚡ FIX: Sync TerminalAgent mode from environment + invalidate cache
+                    terminalAgent.syncModeFromEnvironment()
+                    cachedRuntimeCaps = null
                     val envMode = termuxEnvironment.getMode()
                     terminalAgent.switchMode(envMode)
                     if (termuxEnvironment.hasTermux()) {
@@ -1512,6 +1521,8 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         _shizukuAvailable.value = shizukuManager.isBinderAlive
         _shizukuAuthorized.value = shizukuManager.isAuthorized()
         _shizukuUid.value = shizukuManager.shizukuUid
+        // ⚡ FIX: Sync TerminalAgent mode — Shizuku status changes may affect exec mode
+        terminalAgent.syncModeFromEnvironment()
         // Invalidate runtime capabilities cache so the next prompt sees fresh state.
         cachedRuntimeCaps = null
     }

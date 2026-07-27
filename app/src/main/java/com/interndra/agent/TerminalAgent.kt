@@ -149,6 +149,23 @@ class TerminalAgent(
         return ok
     }
 
+    /**
+     * Sync [currentMode] from the TermuxEnvironment without triggering
+     * a full switchMode() call. This is called after every refreshStatus()
+     * to keep the terminal indicator accurate.
+     */
+    fun syncModeFromEnvironment() {
+        val env = termuxEnvironment
+        if (env != null) {
+            val envMode = env.getMode()
+            if (envMode != currentMode) {
+                val prior = currentMode
+                currentMode = envMode
+                Log.i(TAG, "Mode synced from environment: $prior → $envMode")
+            }
+        }
+    }
+
     /** Get the current mode's env vars for command wrapping. */
     fun getEnvironmentVars(): Map<String, String> =
         termuxEnvironment?.getEnvironmentVars() ?: mapOf()
@@ -200,9 +217,12 @@ class TerminalAgent(
             val started = newShell.start()
             if (started) {
                 persistentShell = newShell
-                Log.i(TAG, "✅ Persistent shell started (${newShell.backendDescription})")
+                // ⚡ Sync mode after shell creation so indicator is accurate
+                syncModeFromEnvironment()
+                Log.i(TAG, "✅ Persistent shell started (${newShell.backendDescription}), mode=$currentMode")
+                val modeStr = getModeDescription()
                 _outputFlow.tryEmit(StreamEvent.Output("default",
-                    "\u001b[32m✓ Terminal ready — ${newShell.backendDescription}\u001b[0m\n"))
+                    "\u001b[32m✓ Terminal ready — $modeStr\u001b[0m\n"))
                 persistentShell
             } else {
                 Log.e(TAG, "Failed to start persistent shell")
@@ -554,13 +574,30 @@ class TerminalAgent(
                 _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
             }
         } else {
-            // Fallback to one-shot ShizukuShell / ShellExecutor
-            Log.w(TAG, "Persistent shell not available, using one-shot execution")
-            if (shizukuShell.isElevatedAvailable) {
+            // ── Termux mode: use TermuxEnvironment to wrap command with proper env ──
+            val env = termuxEnvironment
+            if (currentMode == TermuxEnvironment.ExecMode.TERMUX && env != null && env.hasTermux()) {
+                Log.d(TAG, "Executing via Termux backend: $trimmed")
+                val execReq = env.buildExecutionCommand(trimmed, TermuxEnvironment.ExecMode.TERMUX)
+                val termuxCommand = execReq.command
+                if (execReq.useShizuku) {
+                    shizukuShell.execute(termuxCommand, timeoutMs) { line ->
+                        session.outputLines.add(line)
+                        _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
+                    }
+                } else {
+                    ShellExecutor.runStreaming(termuxCommand, timeoutMs) { line ->
+                        session.outputLines.add(line)
+                        _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
+                    }
+                }
+            } else if (shizukuShell.isElevatedAvailable) {
+                Log.d(TAG, "Executing via Shizuku one-shot: $trimmed")
                 shizukuShell.execute(trimmed, timeoutMs) { line ->
                     session.outputLines.add(line); _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
                 }
             } else {
+                Log.d(TAG, "Executing via ShellExecutor fallback: $trimmed")
                 ShellExecutor.runStreaming(trimmed, timeoutMs) { line ->
                     session.outputLines.add(line); _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
                 }
@@ -571,6 +608,7 @@ class TerminalAgent(
         val indicator = when (result.backend) {
             ExecutionBackend.SHIZUKU_ROOT -> "\u001b[90m[🛡️ Shizuku Root]\u001b[0m\n"
             ExecutionBackend.SHIZUKU_ADB -> "\u001b[90m[🔑 Shizuku ADB]\u001b[0m\n"
+            ExecutionBackend.TERMUX -> "\u001b[90m[🐧 Termux]\u001b[0m\n"
             else -> "\u001b[90m[⚙️ Shell]\u001b[0m\n"
         }
         session.outputLines.add(indicator)
