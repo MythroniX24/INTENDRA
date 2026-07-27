@@ -188,16 +188,40 @@ class TerminalAgent(
             if (shell?.isAlive == true) return@withLock shell
 
             Log.i(TAG, "Creating persistent shell...")
-            val newShell = if (shizukuShell.isElevatedAvailable) {
-                // Shizuku-elevated shell with root privileges
-                Log.i(TAG, "Using Shizuku-elevated persistent shell (UID ${shizukuShell.manager.shizukuUid})")
-                PersistentShell(
+
+            // ⚡ PRIORITY 1: Termux bash (embedded environment) — AI PRIMARY
+            val env = termuxEnvironment
+            if (currentMode == TermuxEnvironment.ExecMode.TERMUX && env != null && env.hasTermux()) {
+                val envInfo = env.info.value
+                val termuxBash = "${envInfo.bootstrapPrefix}/usr/bin/bash"
+                Log.i(TAG, "🐧 Using Termux bash: $termuxBash")
+                val newShell = PersistentShell(
+                    shellPath = termuxBash,
+                    initialWorkdir = "${envInfo.bootstrapPrefix}/home",
+                    envVars = env.getTermuxEnvVars(envInfo.bootstrapPrefix)
+                )
+                val started = newShell.start()
+                if (started) {
+                    persistentShell = newShell
+                    syncModeFromEnvironment()
+                    Log.i(TAG, "✅ Termux bash persistent shell started")
+                    _outputFlow.tryEmit(StreamEvent.Output("default",
+                        "\u001b[32m✓ Termux bash ready — ${getModeDescription()}\u001b[0m\n"))
+                    return@withLock persistentShell
+                } else {
+                    Log.w(TAG, "⚠️ Termux bash failed to start, falling back to shell")
+                }
+            }
+
+            // ⚡ PRIORITY 2: Shizuku-elevated shell
+            if (shizukuShell.isElevatedAvailable) {
+                Log.i(TAG, "🔑 Using Shizuku-elevated persistent shell (UID ${shizukuShell.manager.shizukuUid})")
+                val newShell = PersistentShell(
                     shellPath = PersistentShell.DEFAULT_SHELL,
                     initialWorkdir = DEFAULT_WORKDIR,
                     shizukuProvider = {
                         try {
                             shizukuShell.manager.executeShell("echo shizuku_ready 2>&1")
-                            // Use ShizukuProcessCreator to spawn a persistent shell
                             createShizukuShellProcess()
                         } catch (e: Exception) {
                             Log.w(TAG, "Shizuku shell spawn failed: ${e.message}")
@@ -205,14 +229,24 @@ class TerminalAgent(
                         }
                     }
                 )
-            } else {
-                // Sandboxed persistent shell
-                Log.i(TAG, "Using sandboxed persistent shell")
-                PersistentShell(
-                    shellPath = PersistentShell.DEFAULT_SHELL,
-                    initialWorkdir = DEFAULT_WORKDIR
-                )
+                val started = newShell.start()
+                if (started) {
+                    persistentShell = newShell
+                    syncModeFromEnvironment()
+                    Log.i(TAG, "✅ Shizuku persistent shell started (${newShell.backendDescription})")
+                    _outputFlow.tryEmit(StreamEvent.Output("default",
+                        "\u001b[32m✓ Shizuku shell ready — ${getModeDescription()}\u001b[0m\n"))
+                    return@withLock persistentShell
+                } else {
+                    Log.w(TAG, "⚠️ Shizuku shell failed to start")
+                }
             }
+
+            // NO SHELL FALLBACK — let runExecution handle it via Termux or Shizuku one-shot
+            Log.w(TAG, "⚠️ No persistent shell available — commands will use one-shot execution")
+            _outputFlow.tryEmit(StreamEvent.Output("default",
+                "\u001b[33m⚠ No persistent shell — using one-shot execution\u001b[0m\n"))
+            null
 
             val started = newShell.start()
             if (started) {

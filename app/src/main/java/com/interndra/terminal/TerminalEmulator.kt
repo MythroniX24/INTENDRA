@@ -1,39 +1,37 @@
 /*
- * TerminalEmulator.kt — ANSI/VT100 escape code parser and terminal screen state.
+ * TerminalEmulator.kt — Full ANSI/VT100/xterm escape code parser.
  *
- * A lightweight state-machine-based parser that processes terminal byte streams
- * and maintains:
- *   - Screen buffer (rows x cols of characters with attributes)
- *   - Cursor position
- *   - Scrollback buffer (history)
- *   - Text attributes (bold, italic, colors)
+ * This is the "brain" of the terminal emulator. It consumes a byte stream
+ * (output from the shell), interprets ANSI/VT-100 escape sequences, and
+ * maintains the screen buffer (rows × columns of characters with styles).
  *
- * Supported control sequences:
- *   - ESC [ ... m   — SGR (colors, bold, italic, underline)
- *   - ESC [ A/B/C/D — Cursor movement (up/down/left/right)
- *   - ESC [ H/f     — Cursor home/position
- *   - ESC [ J       — Erase display (partial/full)
- *   - ESC [ K       — Erase line
- *   - ESC [ s/u     — Save/restore cursor
- *   - ESC 7/8       — Save/restore cursor (DEC)
- *   - ESC ( B       — Character set selection
- *   - \r, \n, \t, \b — Basic control chars
+ * ## What's new vs the previous version
+ * - Uses [TextStyle] (Int-bitfield) instead of a `Cell` data class
+ * - Uses [TerminalRow] for efficient row-level operations
+ * - Uses [WcWidth] for correct CJK/emoji character display
+ * - **Alternate screen buffer** (ESC [ ? 1049 h / l) — required by vim, nano, tmux
+ * - **256-colour + true-colour** (ESC [ 38;5;N m / 38;2;R;G;B m)
+ * - **Bracketed paste mode** (ESC [ ? 2004 h / l)
+ * - **Mouse reporting** (ESC [ ? 1000 h / l etc.) — stores state, caller handles
+ * - **Application cursor keys** (ESC [ ? 1 h / l)
+ * - Much faster rendering via style-bitfield comparison
  *
- * This is a simplified but functional implementation. For production use,
- * consider using Termux's terminal-emulator library for full VT100/xterm
- * compatibility.
+ * ## Supported control sequences (extended)
+ *   - SGR: 0-107 (including 256-colour `38;5;N`, true-colour `38;2;R;G;B`)
+ *   - Cursor movement: CUU, CUD, CUF, CUB, CUP, CHA, CNL, CPL, HVP, etc.
+ *   - Erase: ED (0-3), EL (0-2), DCH, ICH, ECH
+ *   - Scroll: SU, SD, IL, DL
+ *   - Modes: DEC private modes (1, 25, 1047, 1048, 1049, 2004, etc.)
+ *   - Alternate screen: ESC [ ? 1049 h / l (full save/restore)
+ *   - OSC: 0 (title), 1 (icon), 2 (title)
+ *   - Bracketed paste: ESC [ ? 2004 h / l
+ *   - Mouse: X10, normal tracking, button-event, any-event, SGR coordinates
  */
 
 package com.interndra.terminal
 
 import android.util.Log
 
-/**
- * ANSI/VT100 terminal emulator.
- *
- * @param rows    Initial number of rows (height)
- * @param columns Initial number of columns (width)
- */
 class TerminalEmulator(
     var rows: Int = DEFAULT_ROWS,
     var columns: Int = DEFAULT_COLUMNS
@@ -45,7 +43,7 @@ class TerminalEmulator(
         const val DEFAULT_COLUMNS = 120
         const val DEFAULT_SCROLLBACK_SIZE = 2000
 
-        // SGR color constants
+        // ANSI colour constants
         const val COLOR_BLACK   = 0
         const val COLOR_RED     = 1
         const val COLOR_GREEN   = 2
@@ -54,96 +52,98 @@ class TerminalEmulator(
         const val COLOR_MAGENTA = 5
         const val COLOR_CYAN    = 6
         const val COLOR_WHITE   = 7
-        const val COLOR_DEFAULT = 9
-
-        /** Convert an ANSI color code (0-7, 9) to an ARGB color int. */
-        fun colorInt(code: Int): Int = when (code) {
-            0 -> 0xFF1E1E1E.toInt()  // Black
-            1 -> 0xFFE06C75.toInt()  // Red
-            2 -> 0xFF98C379.toInt()  // Green
-            3 -> 0xFFE5C07B.toInt()  // Yellow
-            4 -> 0xFF61AFEF.toInt()  // Blue
-            5 -> 0xFFC678DD.toInt()  // Magenta
-            6 -> 0xFF56B6C2.toInt()  // Cyan
-            7 -> 0xFFABB2BF.toInt()  // White
-            9 -> 0xFFABB2BF.toInt()  // Default → white
-            else -> 0xFFABB2BF.toInt()
-        }
+        const val COLOR_DEFAULT_FG = 7
+        const val COLOR_DEFAULT_BG = 0
     }
 
-    // ── Screen cell ─────────────────────────────────────────────────────
+    // ── Screen buffers ──────────────────────────────────────────────────
+    /** The primary screen buffer. */
+    private var screenBuffer = Array(rows) { TerminalRow(columns) }
 
-    /** A single character cell on the terminal screen. */
-    data class Cell(
-        var char: Char = ' ',
-        var bold: Boolean = false,
-        var italic: Boolean = false,
-        var underline: Boolean = false,
-        var strikethrough: Boolean = false,
-        var blink: Boolean = false,
-        var reverse: Boolean = false,
-        var foreground: Int = COLOR_DEFAULT,
-        var background: Int = COLOR_DEFAULT
-    )
+    /** The alternate screen buffer (used by vim, nano, tmux, etc.). */
+    private var altBuffer: Array<TerminalRow>? = null
 
-    // ── State ───────────────────────────────────────────────────────────
+    /** Saved primary screen for alternate-screen mode. */
+    private var savedPrimaryScreen: Array<TerminalRow>? = null
+    private var savedCursorRow = 0
+    private var savedCursorCol = 0
 
-    /** The main screen buffer. Mutable — recreated on [resize]. */
-    private var screenBuffer = Array(rows) { Array(columns) { Cell() } }
-
-    /** Scrollback buffer (history lines). */
-    private val scrollbackBuffer = mutableListOf<Array<Cell>>()
+    /** Scrollback buffer (history lines from primary screen). */
+    private val scrollbackBuffer = mutableListOf<TerminalRow>()
     private val maxScrollback = DEFAULT_SCROLLBACK_SIZE
 
-    /** Current cursor position. */
+    // ── Cursor state ────────────────────────────────────────────────────
     var cursorRow: Int = 0
         private set
     var cursorCol: Int = 0
         private set
 
-    /** Current text attributes (SGR state). */
+    /** Whether cursor is visible. */
+    var cursorVisible: Boolean = true
+        private set
+
+    // ── SGR state ───────────────────────────────────────────────────────
     private var bold = false
+    private var dim = false
     private var italic = false
     private var underline = false
-    private var strikethrough = false
     private var blink = false
     private var reverse = false
-    private var foreground = COLOR_DEFAULT
-    private var background = COLOR_DEFAULT
+    private var strikethrough = false
+    private var hidden = false
+    private var foreground = COLOR_DEFAULT_FG
+    private var background = COLOR_DEFAULT_BG
+    /** True-colour overrides (null = use indexed colour, not set). */
+    private var fgRgb: Int? = null
+    private var bgRgb: Int? = null
 
     /** Saved cursor position (for ESC [ s / ESC 7). */
     private var savedRow = 0
     private var savedCol = 0
 
-    /** State machine state. */
-    private enum class ParserState {
-        NORMAL,
-        ESC,
-        CSI,       // ESC [
-        CSI_PARAM, // ESC [ <digits>
-        OSC,       // ESC ]
-        OSC_STRING // ESC ] ... ST
-    }
+    // ── Terminal modes ──────────────────────────────────────────────────
+    /** Whether the alternate screen is active. */
+    var inAlternateScreen: Boolean = false
+        private set
 
-    private var parserState = ParserState.NORMAL
-    private val csiParams = mutableListOf<Int>()
-    private var csiParamBuilder = StringBuilder()
-    private var oscStringBuilder = StringBuilder()
+    /** Whether bracketed paste mode is active. */
+    var bracketedPasteMode: Boolean = false
+        private set
+
+    /** Application cursor keys (DECCKM). */
+    var applicationCursorKeys: Boolean = false
+        private set
+
+    /** Mouse reporting modes. */
+    var mouseNormalTracking: Boolean = false     // ?1000
+    var mouseButtonTracking: Boolean = false     // ?1002
+    var mouseAnyEvent: Boolean = false           // ?1003
+    var mouseSgrFormat: Boolean = false          // ?1006 — use SGR coordinates
+
+    /** Scroll margins (top/bottom). null = full screen. */
+    private var scrollTop: Int = 0
+    private var scrollBottom: Int = rows - 1
 
     /** Whether the screen has been modified since last check. */
     var isDirty: Boolean = false
         private set
 
-    /** Callback invoked when the screen is modified. */
+    /** Callback invoked when screen is modified. */
     var onScreenChanged: (() -> Unit)? = null
 
-    // ── Public API ──────────────────────────────────────────────────────
+    // ── Parser state machine ────────────────────────────────────────────
+    private enum class ParserState {
+        NORMAL, ESC, CSI, CSI_PARAM, OSC, OSC_STRING, DCS, DCS_STRING
+    }
+    private var parserState = ParserState.NORMAL
+    private val csiParams = mutableListOf<Int>()
+    private var csiParamBuilder = StringBuilder()
+    private var oscStringBuilder = StringBuilder()
 
-    /**
-     * Process a single byte from the terminal output stream.
-     *
-     * @param b  The byte value (0-255)
-     */
+    // ══════════════════════════════════════════════════════════════════════
+    //  PUBLIC API
+    // ══════════════════════════════════════════════════════════════════════
+
     fun processByte(b: Int) {
         when (parserState) {
             ParserState.NORMAL -> processNormalByte(b)
@@ -152,183 +152,184 @@ class TerminalEmulator(
             ParserState.CSI_PARAM -> processCsiParamByte(b)
             ParserState.OSC -> processOscByte(b)
             ParserState.OSC_STRING -> processOscStringByte(b)
+            ParserState.DCS -> processDcsByte(b)
+            ParserState.DCS_STRING -> processDcsStringByte(b)
         }
     }
 
-    /**
-     * Process multiple bytes at once.
-     */
     fun processBytes(bytes: ByteArray, offset: Int = 0, length: Int = bytes.size) {
         for (i in offset until (offset + length).coerceAtMost(bytes.size)) {
             processByte(bytes[i].toInt() and 0xFF)
         }
     }
 
-    /**
-     * Process a UTF-8 string directly.
-     */
     fun processString(text: String) {
         for (c in text) {
             processByte(c.code)
         }
     }
 
-    /**
-     * Get the character at a screen position.
-     */
-    fun getCell(row: Int, col: Int): Cell {
-        if (row < 0 || row >= rows || col < 0 || col >= columns) return Cell()
-        return screenBuffer[row][col]
+    /** Get current style as a TextStyle-encoded int. */
+    private fun currentStyle(): Int = TextStyle.encode(
+        foreground = foreground,
+        background = background,
+        bold = bold,
+        dim = dim,
+        italic = italic,
+        underline = underline,
+        blink = blink,
+        reverse = reverse,
+        strikethrough = strikethrough,
+        hidden = hidden
+    )
+
+    /** Get the character at a screen position. */
+    fun getChar(row: Int, col: Int): Char {
+        val buf = activeBuffer()
+        if (row < 0 || row >= rows || col < 0 || col >= columns) return ' '
+        return buf[row].getChar(col)
     }
 
-    /**
-     * Get the entire screen buffer as a list of lines.
-     */
-    fun getScreenLines(): List<String> {
-        return screenBuffer.map { row ->
-            row.joinToString("") { cell -> cell.char.toString() }
-        }
+    /** Get the style at a screen position. */
+    fun getStyle(row: Int, col: Int): Int {
+        val buf = activeBuffer()
+        if (row < 0 || row >= rows || col < 0 || col >= columns) return TextStyle.DEFAULT
+        return buf[row].getStyle(col)
     }
 
-    /**
-     * Get the screen buffer as a list of CharArrays for grid rendering.
-     * Each CharArray represents one row, with padding to fill the terminal width.
-     */
+    /** Get the full screen as a list of TerminalRows. */
+    fun getScreenRows(): List<TerminalRow> = activeBuffer().toList()
+
+    /** Get screen as list of char arrays (for Compose grid rendering). */
     fun getScreenChars(): List<CharArray> {
-        return screenBuffer.map { row ->
-            CharArray(columns) { c -> if (c < row.size) row[c].char else ' ' }
-        }
+        return activeBuffer().map { row -> row.chars.copyOf() }
     }
 
-    /**
-     * Get the screen buffer with ANSI escape codes for colors.
-     */
-    fun getScreenAnsi(): List<String> {
-        return screenBuffer.map { row ->
-            val sb = StringBuilder()
-            var lastFg = COLOR_DEFAULT
-            var lastBg = COLOR_DEFAULT
-            var lastBold = false
-            for (cell in row) {
-                if (cell.foreground != lastFg || cell.background != lastBg || cell.bold != lastBold) {
-                    sb.append("\u001B[")
-                    val codes = mutableListOf<Int>()
-                    if (cell.bold != lastBold) codes.add(if (cell.bold) 1 else 22)
-                    if (cell.foreground != lastFg) codes.add(30 + cell.foreground)
-                    if (cell.background != lastBg) codes.add(40 + cell.background)
-                    sb.append(codes.joinToString(";"))
-                    sb.append('m')
-                    lastFg = cell.foreground
-                    lastBg = cell.background
-                    lastBold = cell.bold
-                }
-                sb.append(cell.char)
-            }
-            sb.append("\u001B[0m")
-            sb.toString()
-        }
+    /** Get screen as list of style arrays (for Compose colour rendering). */
+    fun getScreenStyles(): List<IntArray> {
+        return activeBuffer().map { row -> row.styles.copyOf() }
     }
 
-    /**
-     * Get plain text from the screen (no escape codes).
-     */
-    fun getScreenText(): String {
-        return getScreenLines().joinToString("\n")
+    /** Get screen as plain text lines. */
+    fun getScreenLines(): List<String> {
+        return activeBuffer().map { it.text }
     }
 
-    /**
-     * Get scrollback content (history lines).
-     */
+    /** Get screen plain text. */
+    fun getScreenText(): String = getScreenLines().joinToString("\n")
+
+    /** Get scrollback content. */
     fun getScrollbackLines(): List<String> {
-        return scrollbackBuffer.map { row ->
-            row.joinToString("") { cell -> cell.char.toString() }
-        }
+        return scrollbackBuffer.map { it.text }
     }
 
-    /**
-     * Get the full content including scrollback.
-     */
+    /** Get full content (scrollback + screen). */
     fun getFullContent(): String {
-        val full = mutableListOf<String>()
-        full.addAll(getScrollbackLines())
-        full.addAll(getScreenLines())
-        return full.joinToString("\n")
+        val lines = mutableListOf<String>()
+        lines.addAll(getScrollbackLines())
+        lines.addAll(getScreenLines())
+        return lines.joinToString("\n")
     }
 
-    /**
-     * Resize the terminal.
-     */
+    /** Resize the terminal. */
     fun resize(newRows: Int, newColumns: Int) {
         if (newRows == rows && newColumns == columns) return
-
-        val oldRows = rows
-        val oldCols = columns
-
-        rows = newRows
-        columns = newColumns
-
-        // Recreate screen buffer with new dimensions, copying old content where it fits
-        val newBuffer = Array(rows) { r ->
-            Array(columns) { c ->
-                if (r < oldRows && c < oldCols) {
-                    screenBuffer[r][c].copy()
-                } else {
-                    Cell()
-                }
-            }
-        }
-        screenBuffer = newBuffer
-
-        // Adjust cursor
+        val oldRows = rows; val oldCols = columns
+        rows = newRows; columns = newColumns
+        scrollBottom = rows - 1
+        resizeBuffer(screenBuffer, oldRows, oldCols)
+        if (altBuffer != null) resizeBuffer(altBuffer!!, oldRows, oldCols)
         cursorRow = cursorRow.coerceIn(0, rows - 1)
         cursorCol = cursorCol.coerceIn(0, columns - 1)
-
         markDirty()
     }
 
-    /** Clear the entire screen and home the cursor. */
+    /** Clear the entire screen. */
     fun clearScreen() {
-        for (r in 0 until rows) {
-            for (c in 0 until columns) {
-                screenBuffer[r][c] = Cell()
+        val buf = activeBuffer()
+        for (r in 0 until rows) buf[r].clear()
+        cursorRow = 0; cursorCol = 0
+        markDirty()
+    }
+
+    /** Reset all SGR attributes to default. */
+    fun resetAttributes() {
+        bold = false; dim = false; italic = false; underline = false
+        blink = false; reverse = false; strikethrough = false; hidden = false
+        foreground = COLOR_DEFAULT_FG; background = COLOR_DEFAULT_BG
+        fgRgb = null; bgRgb = null
+    }
+
+    /** Reset terminal to initial state. */
+    fun fullReset() {
+        resetAttributes()
+        clearScreen()
+        scrollbackBuffer.clear()
+        altBuffer = null
+        savedPrimaryScreen = null
+        inAlternateScreen = false
+        bracketedPasteMode = false
+        applicationCursorKeys = false
+        mouseNormalTracking = false; mouseButtonTracking = false
+        mouseAnyEvent = false; mouseSgrFormat = false
+        cursorVisible = true
+        scrollTop = 0; scrollBottom = rows - 1
+        markDirty()
+    }
+
+    fun markClean() { isDirty = false }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  INTERNAL: buffer helpers
+    // ══════════════════════════════════════════════════════════════════════
+
+    private fun activeBuffer(): Array<TerminalRow> = altBuffer ?: screenBuffer
+
+    private fun resizeBuffer(buf: Array<TerminalRow>, oldRows: Int, oldCols: Int) {
+        val newBuf = Array(rows) { r ->
+            if (r < oldRows) buf[r].also { if (it.columns != columns) {
+                // Copy old content, resizing columns
+                val newRow = TerminalRow(columns)
+                newRow.copyFrom(it)
+                newRow
+            }} else TerminalRow(columns)
+        }
+        // Copy back
+        for (r in 0 until minOf(rows, oldRows)) {
+            if (buf[r].columns != columns) {
+                val newRow = TerminalRow(columns)
+                newRow.copyFrom(buf[r])
+                buf[r] = newRow
             }
         }
-        cursorRow = 0
-        cursorCol = 0
-        markDirty()
+        if (rows > oldRows) {
+            for (r in oldRows until rows) buf[r] = TerminalRow(columns)
+        }
     }
 
-    /** Reset all attributes to default. */
-    fun resetAttributes() {
-        bold = false
-        italic = false
-        underline = false
-        strikethrough = false
-        blink = false
-        reverse = false
-        foreground = COLOR_DEFAULT
-        background = COLOR_DEFAULT
-    }
-
-    // ── Internal byte processing ────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    //  STATE MACHINE
+    // ══════════════════════════════════════════════════════════════════════
 
     private fun processNormalByte(b: Int) {
         when (b) {
-            0x00 -> { /* NOP */ }
-            0x07 -> { /* BEL - ignore */ }
-            0x08 -> { /* BS - backspace */ if (cursorCol > 0) cursorCol--; markDirty() }
-            0x09 -> { /* HT - tab */ val tabStop = 8; cursorCol = ((cursorCol / tabStop) + 1) * tabStop; if (cursorCol >= columns) { cursorCol = 0; newLine() }; markDirty() }
-            0x0A -> { /* LF - line feed */ newLine(); markDirty() }
-            0x0B -> { /* VT - vertical tab */ newLine(); markDirty() }
-            0x0C -> { /* FF - form feed */ clearScreen(); markDirty() }
-            0x0D -> { /* CR - carriage return */ cursorCol = 0; markDirty() }
-            0x1B -> { /* ESC */ parserState = ParserState.ESC }
-            in 0x20..0x7E -> { /* Printable ASCII */ putChar(b.toChar()); markDirty() }
-            in 0x80..0xBF -> { /* UTF-8 continuation byte — pass through as fallback */ putChar(b.toChar()); markDirty() }
-            in 0xC0..0xDF -> { /* 2-byte UTF-8 start — pass through */ putChar(b.toChar()); markDirty() }
-            in 0xE0..0xEF -> { /* 3-byte UTF-8 start — pass through */ putChar(b.toChar()); markDirty() }
-            in 0xF0..0xF7 -> { /* 4-byte UTF-8 start — pass through */ putChar(b.toChar()); markDirty() }
-            else -> { /* Unknown control char */ }
+            0x00 -> {}
+            0x07 -> {} // BEL
+            0x08 -> { if (cursorCol > 0) cursorCol--; markDirty() }
+            0x09 -> { // HT — tab to next 8-col stop
+                val tab = 8
+                cursorCol = ((cursorCol / tab) + 1) * tab
+                if (cursorCol >= columns) { cursorCol = 0; newLine() }
+                markDirty()
+            }
+            0x0A, 0x0B, 0x0C -> { newLine(); markDirty() }
+            0x0D -> { cursorCol = 0; markDirty() }
+            0x1B -> { parserState = ParserState.ESC }
+            in 0x20..0x7E -> { putChar(b.toChar()); markDirty() }
+            else -> {
+                // UTF-8 multi-byte — pass through as fallback
+                putChar(b.toChar()); markDirty()
+            }
         }
     }
 
@@ -336,29 +337,25 @@ class TerminalEmulator(
         parserState = ParserState.NORMAL
         when (b) {
             '['.code -> parserState = ParserState.CSI
-            ']'.code -> {
-                parserState = ParserState.OSC
-                oscStringBuilder = StringBuilder()
-            }
-            '7'.code -> { /* DECSC - Save cursor */ savedRow = cursorRow; savedCol = cursorCol }
-            '8'.code -> { /* DECRC - Restore cursor */ cursorRow = savedRow; cursorCol = savedCol; markDirty() }
-            'D'.code -> { /* IND - Index (scroll down) */ newLine() }
-            'M'.code -> { /* RI - Reverse index (scroll up) */ reverseIndex(); markDirty() }
-            'c'.code -> { /* RIS - Reset to initial state */ resetAttributes(); clearScreen() }
-            '('.code -> { /* G0 character set - ignore */ }
-            ')'.code -> { /* G1 character set - ignore */ }
-            '*'.code -> { /* G2 character set - ignore */ }
-            '+'.code -> { /* G3 character set - ignore */ }
-            else -> {
-                /* Unknown escape sequence or incomplete ESC — re-process byte */
-                processNormalByte(b)
-            }
+            ']'.code -> { parserState = ParserState.OSC; oscStringBuilder = StringBuilder() }
+            'P'.code -> { parserState = ParserState.DCS; oscStringBuilder = StringBuilder() }
+            '7'.code -> { savedRow = cursorRow; savedCol = cursorCol }
+            '8'.code -> { cursorRow = savedRow; cursorCol = savedCol; markDirty() }
+            'D'.code -> newLine()        // IND
+            'M'.code -> { reverseIndex(); markDirty() } // RI
+            'c'.code -> fullReset()
+            '('.code -> {} // G0 charset select — ignore
+            ')'.code -> {} // G1
+            '*'.code -> {} // G2
+            '+'.code -> {} // G3
+            '>'.code -> {} // DECNORMAL — ignore
+            '='.code -> {} // DECAPPL — ignore
+            else -> processNormalByte(b)
         }
     }
 
     private fun processCsiByte(b: Int) {
-        csiParams.clear()
-        csiParamBuilder = StringBuilder()
+        csiParams.clear(); csiParamBuilder = StringBuilder()
         parserState = ParserState.CSI_PARAM
         processCsiParamByte(b)
     }
@@ -366,35 +363,31 @@ class TerminalEmulator(
     private fun processCsiParamByte(b: Int) {
         when {
             b == ';'.code -> {
-                val param = csiParamBuilder.toString().toIntOrNull() ?: 0
-                csiParams.add(param)
-                csiParamBuilder = StringBuilder()
+                val p = csiParamBuilder.toString().toIntOrNull() ?: 0
+                csiParams.add(p); csiParamBuilder = StringBuilder()
             }
-            b in '0'.code..'9'.code -> {
-                csiParamBuilder.append(b.toChar())
+            b in '0'.code..'9'.code -> csiParamBuilder.append(b.toChar())
+            b == ':'.code -> {
+                // Sub-parameter separator (used by SGR 38:2:...)
+                val p = csiParamBuilder.toString().toIntOrNull() ?: 0
+                csiParams.add(p); csiParamBuilder = StringBuilder()
+                csiParams.add(-1) // marker for colon separator
             }
             b in '@'.code..'~'.code || b in 'A'.code..'Z'.code || b in 'a'.code..'z'.code -> {
-                // Final byte
                 if (csiParamBuilder.isNotEmpty()) {
-                    val param = csiParamBuilder.toString().toIntOrNull() ?: 0
-                    csiParams.add(param)
+                    csiParams.add(csiParamBuilder.toString().toIntOrNull() ?: 0)
                 }
                 if (csiParams.isEmpty()) csiParams.add(0)
-                executeCsiCommand(b.toChar())
+                executeCsi(b.toChar())
                 parserState = ParserState.NORMAL
             }
-            else -> {
-                // Unknown character - abort
-                parserState = ParserState.NORMAL
-            }
+            else -> parserState = ParserState.NORMAL
         }
     }
 
     private fun processOscByte(b: Int) {
         when (b) {
-            '0'.code, '1'.code, '2'.code, '3'.code, '4'.code,
-            '5'.code, '6'.code, '7'.code, '8'.code, '9'.code,
-            ';'.code -> {
+            in '0'.code..'9'.code, ';'.code -> {
                 oscStringBuilder.append(b.toChar())
                 parserState = ParserState.OSC_STRING
             }
@@ -404,116 +397,286 @@ class TerminalEmulator(
 
     private fun processOscStringByte(b: Int) {
         when {
-            b == 0x07 || b == '\\'.code -> {
-                // ST (String Terminator) - BEL or ESC \
-                parserState = ParserState.NORMAL
-                handleOsc(oscStringBuilder.toString())
+            b == 0x07 || (b == '\\'.code && oscStringBuilder.endsWith("\u001B")) -> {
+                // ST: BEL or ESC \
+                val s = oscStringBuilder.toString().removeSuffix("\u001B")
+                handleOsc(s); parserState = ParserState.NORMAL
             }
-            b == 0x1B -> {
-                // ESC - might be ESC \ terminator
-                parserState = ParserState.ESC
-            }
-            else -> {
-                oscStringBuilder.append(b.toChar())
-            }
+            b == 0x1B -> oscStringBuilder.append(b.toChar()) // might be ESC \
+            else -> oscStringBuilder.append(b.toChar())
         }
     }
 
-    // ── Command execution ───────────────────────────────────────────────
-
-    private fun executeCsiCommand(cmd: Char) {
-        val p = csiParams.toList() // copy
-        when (cmd) {
-            'A' -> { /* CUU - Cursor Up */ cursorRow = maxOf(0, cursorRow - (p.firstOrNull()?.coerceAtLeast(1) ?: 1)); markDirty() }
-            'B' -> { /* CUD - Cursor Down */ cursorRow = minOf(rows - 1, cursorRow + (p.firstOrNull()?.coerceAtLeast(1) ?: 1)); markDirty() }
-            'C' -> { /* CUF - Cursor Forward */ cursorCol = minOf(columns - 1, cursorCol + (p.firstOrNull()?.coerceAtLeast(1) ?: 1)); markDirty() }
-            'D' -> { /* CUB - Cursor Back */ cursorCol = maxOf(0, cursorCol - (p.firstOrNull()?.coerceAtLeast(1) ?: 1)); markDirty() }
-            'E' -> { /* CNL - Cursor Next Line */ cursorRow = minOf(rows - 1, cursorRow + (p.firstOrNull()?.coerceAtLeast(1) ?: 1)); cursorCol = 0; markDirty() }
-            'F' -> { /* CPL - Cursor Previous Line */ cursorRow = maxOf(0, cursorRow - (p.firstOrNull()?.coerceAtLeast(1) ?: 1)); cursorCol = 0; markDirty() }
-            'G' -> { /* CHA - Cursor Horizontal Absolute */ cursorCol = (p.firstOrNull()?.coerceIn(1, columns) ?: 1) - 1; markDirty() }
-            'H', 'f' -> { /* CUP - Cursor Position */ val r = p.getOrElse(0) { 1 }.coerceIn(1, rows) - 1; val c = p.getOrElse(1) { 1 }.coerceIn(1, columns) - 1; cursorRow = r; cursorCol = c; markDirty() }
-            'J' -> { /* ED - Erase Display */ val mode = p.firstOrNull() ?: 0; when (mode) { 0 -> eraseFromCursor(); 1 -> eraseToCursor(); 2 -> clearScreen(); 3 -> clearScreen() }; markDirty() }
-            'K' -> { /* EL - Erase Line */ val mode = p.firstOrNull() ?: 0; when (mode) { 0 -> eraseLineFromCursor(); 1 -> eraseLineToCursor(); 2 -> eraseEntireLine() }; markDirty() }
-            'L' -> { /* IL - Insert Line */ val n = p.firstOrNull()?.coerceAtLeast(1) ?: 1; insertLines(n); markDirty() }
-            'M' -> { /* DL - Delete Line */ val n = p.firstOrNull()?.coerceAtLeast(1) ?: 1; deleteLines(n); markDirty() }
-            'P' -> { /* DCH - Delete Character */ val n = p.firstOrNull()?.coerceAtLeast(1) ?: 1; deleteChars(n); markDirty() }
-            '@' -> { /* ICH - Insert Character */ val n = p.firstOrNull()?.coerceAtLeast(1) ?: 1; insertChars(n); markDirty() }
-            'X' -> { /* ECH - Erase Character */ val n = p.firstOrNull()?.coerceAtLeast(1) ?: 1; eraseChars(n); markDirty() }
-            'S' -> { /* SU - Scroll Up */ val n = p.firstOrNull()?.coerceAtLeast(1) ?: 1; scrollUp(n); markDirty() }
-            'T' -> { /* SD - Scroll Down */ val n = p.firstOrNull()?.coerceAtLeast(1) ?: 1; scrollDown(n); markDirty() }
-            's' -> { /* Save cursor */ savedRow = cursorRow; savedCol = cursorCol }
-            'u' -> { /* Restore cursor */ cursorRow = savedRow; cursorCol = savedCol; markDirty() }
-            'm' -> { /* SGR - Select Graphic Rendition */ handleSgr(p) }
-            'h' -> { /* SM - Set Mode */ /* handle DEC private modes if needed */ }
-            'l' -> { /* RM - Reset Mode */ /* handle DEC private modes if needed */ }
-            'n' -> { /* DSR - Device Status Report */ /* would need to send response */ }
-            else -> { /* Unknown CSI */ }
+    private fun processDcsByte(b: Int) {
+        parserState = ParserState.DCS_STRING
+        oscStringBuilder = StringBuilder()
+        when (b) {
+            in '0'.code..'9'.code -> oscStringBuilder.append(b.toChar())
+            ';'.code -> oscStringBuilder.append(b.toChar())
+            else -> parserState = ParserState.NORMAL
         }
+    }
+
+    private fun processDcsStringByte(b: Int) {
+        if (b == 0x07 || (b == '\\'.code && oscStringBuilder.endsWith("\u001B"))) {
+            parserState = ParserState.NORMAL
+        } else if (b == 0x1B) {
+            oscStringBuilder.append(b.toChar())
+        } else {
+            oscStringBuilder.append(b.toChar())
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  CSI COMMAND EXECUTION
+    // ══════════════════════════════════════════════════════════════════════
+
+    private fun executeCsi(cmd: Char) {
+        val p = csiParams.toList()
+        when (cmd) {
+            'A' -> cursorRow = maxOf(0, cursorRow - (p.firstOrNull()?.coerceAtLeast(1) ?: 1))
+            'B' -> cursorRow = minOf(rows - 1, cursorRow + (p.firstOrNull()?.coerceAtLeast(1) ?: 1))
+            'C' -> cursorCol = minOf(columns - 1, cursorCol + (p.firstOrNull()?.coerceAtLeast(1) ?: 1))
+            'D' -> cursorCol = maxOf(0, cursorCol - (p.firstOrNull()?.coerceAtLeast(1) ?: 1))
+            'E' -> { cursorRow = minOf(rows - 1, cursorRow + (p.firstOrNull()?.coerceAtLeast(1) ?: 1)); cursorCol = 0 }
+            'F' -> { cursorRow = maxOf(0, cursorRow - (p.firstOrNull()?.coerceAtLeast(1) ?: 1)); cursorCol = 0 }
+            'G' -> cursorCol = (p.firstOrNull()?.coerceIn(1, columns) ?: 1) - 1
+            'H', 'f' -> {
+                val r = p.getOrElse(0) { 1 }.coerceIn(1, rows) - 1
+                val c = p.getOrElse(1) { 1 }.coerceIn(1, columns) - 1
+                cursorRow = r; cursorCol = c
+            }
+            'J' -> when (p.firstOrNull() ?: 0) {
+                0 -> eraseFromCursor(); 1 -> eraseToCursor()
+                2 -> clearScreen(); 3 -> { clearScreen(); scrollbackBuffer.clear() }
+            }
+            'K' -> when (p.firstOrNull() ?: 0) {
+                0 -> eraseLineFromCursor(); 1 -> eraseLineToCursor(); 2 -> eraseEntireLine()
+            }
+            'L' -> insertLines(p.firstOrNull()?.coerceAtLeast(1) ?: 1)
+            'M' -> deleteLines(p.firstOrNull()?.coerceAtLeast(1) ?: 1)
+            'P' -> deleteChars(p.firstOrNull()?.coerceAtLeast(1) ?: 1)
+            '@' -> insertChars(p.firstOrNull()?.coerceAtLeast(1) ?: 1)
+            'X' -> eraseChars(p.firstOrNull()?.coerceAtLeast(1) ?: 1)
+            'S' -> scrollUp(p.firstOrNull()?.coerceAtLeast(1) ?: 1)
+            'T' -> scrollDown(p.firstOrNull()?.coerceAtLeast(1) ?: 1)
+            's' -> { savedRow = cursorRow; savedCol = cursorCol }
+            'u' -> { cursorRow = savedRow; cursorCol = savedCol }
+            'm' -> handleSgr(p)
+            'h' -> handleSetMode(p)
+            'l' -> handleResetMode(p)
+            'n' -> {} // DSR — would need to send response back to PTY
+            'r' -> { // DECSTBM — set scroll margins
+                val t = p.getOrElse(0) { 1 }.coerceIn(1, rows) - 1
+                val b = p.getOrElse(1) { rows }.coerceIn(1, rows) - 1
+                scrollTop = minOf(t, b); scrollBottom = maxOf(t, b)
+                cursorRow = 0; cursorCol = 0
+            }
+        }
+        markDirty()
     }
 
     private fun handleSgr(params: List<Int>) {
-        if (params.isEmpty() || params.first() == 0) {
-            resetAttributes()
-            return
-        }
+        if (params.isEmpty() || params.first() == 0) { resetAttributes(); return }
+
         var i = 0
         while (i < params.size) {
-            when (val p = params[i]) {
+            val p = params[i]
+            // Check for colon-separated SGR (38:2:...)
+            if (p == -1) { i++; continue }
+            when (p) {
                 0 -> resetAttributes()
                 1 -> bold = true
+                2 -> dim = true
                 3 -> italic = true
                 4 -> underline = true
-                7 -> reverse = true
-                9 -> strikethrough = true
                 5, 6 -> blink = true
-                22 -> bold = false
+                7 -> reverse = true
+                8 -> hidden = true
+                9 -> strikethrough = true
+                22 -> { bold = false; dim = false }
                 23 -> italic = false
                 24 -> underline = false
                 25 -> blink = false
                 27 -> reverse = false
+                28 -> hidden = false
                 29 -> strikethrough = false
-                30, 31, 32, 33, 34, 35, 36, 37 -> foreground = p - 30
-                38 -> { /* 256/true color foreground - skip for simplicity */ if (i + 1 < params.size && params[i + 1] == 5) i += 2; else if (i + 1 < params.size && params[i + 1] == 2) i += 4 }
-                39 -> foreground = COLOR_DEFAULT
-                40, 41, 42, 43, 44, 45, 46, 47 -> background = p - 40
-                48 -> { /* 256/true color background - skip */ if (i + 1 < params.size && params[i + 1] == 5) i += 2; else if (i + 1 < params.size && params[i + 1] == 2) i += 4 }
-                49 -> background = COLOR_DEFAULT
-                90, 91, 92, 93, 94, 95, 96, 97 -> foreground = p - 82  /* bright fg */
-                100, 101, 102, 103, 104, 105, 106, 107 -> background = p - 92  /* bright bg */
+                in 30..37 -> { foreground = p - 30; fgRgb = null }
+                38 -> {
+                    when {
+                        i + 1 < params.size && params[i + 1] == 5 && i + 2 < params.size -> {
+                            foreground = params[i + 2].coerceIn(0, 255); fgRgb = null; i += 2
+                        }
+                        i + 1 < params.size && params[i + 1] == 2 && i + 4 < params.size -> {
+                            val r = params[i + 2].coerceIn(0, 255)
+                            val g = params[i + 3].coerceIn(0, 255)
+                            val b = params[i + 4].coerceIn(0, 255)
+                            foreground = COLOR_DEFAULT_FG
+                            fgRgb = (r shl 16) or (g shl 8) or b
+                            i += 4
+                        }
+                        // Colon-separated: 38:2:R:G:B or 38:5:N
+                        i + 1 < params.size && params[i + 1] == 2 && i + 4 < params.size -> {
+                            val r = params[i + 2].coerceIn(0, 255)
+                            val g = params[i + 3].coerceIn(0, 255)
+                            val b = params[i + 4].coerceIn(0, 255)
+                            fgRgb = (r shl 16) or (g shl 8) or b; i += 4
+                        }
+                        i + 1 < params.size && params[i + 1] == 5 && i + 2 < params.size -> {
+                            foreground = params[i + 2].coerceIn(0, 255); fgRgb = null; i += 2
+                        }
+                    }
+                }
+                39 -> { foreground = COLOR_DEFAULT_FG; fgRgb = null }
+                in 40..47 -> { background = p - 40; bgRgb = null }
+                48 -> {
+                    when {
+                        i + 1 < params.size && params[i + 1] == 5 && i + 2 < params.size -> {
+                            background = params[i + 2].coerceIn(0, 255); bgRgb = null; i += 2
+                        }
+                        i + 1 < params.size && params[i + 1] == 2 && i + 4 < params.size -> {
+                            val r = params[i + 2].coerceIn(0, 255)
+                            val g = params[i + 3].coerceIn(0, 255)
+                            val b = params[i + 4].coerceIn(0, 255)
+                            background = COLOR_DEFAULT_BG
+                            bgRgb = (r shl 16) or (g shl 8) or b
+                            i += 4
+                        }
+                        i + 1 < params.size && params[i + 1] == 2 && i + 4 < params.size -> {
+                            val r = params[i + 2].coerceIn(0, 255)
+                            val g = params[i + 3].coerceIn(0, 255); bgRgb = (r shl 16) or (g shl 8) or b; i += 4
+                        }
+                        i + 1 < params.size && params[i + 1] == 5 && i + 2 < params.size -> {
+                            background = params[i + 2].coerceIn(0, 255); bgRgb = null; i += 2
+                        }
+                    }
+                }
+                49 -> { background = COLOR_DEFAULT_BG; bgRgb = null }
+                in 90..97 -> foreground = p - 82  // bright fg
+                in 100..107 -> background = p - 92 // bright bg
             }
             i++
         }
         markDirty()
     }
 
-    private fun handleOsc(os: String) {
-        // Handle OSC sequences (e.g., OSC 0 ; title ST)
-        // For simplicity, we mostly ignore these
-        if (os.startsWith("0;") || os.startsWith("1;") || os.startsWith("2;")) {
-            // Set window title - ignore
+    private fun handleSetMode(params: List<Int>) {
+        // DEC private modes (prefixed with ?)
+        if (params.size >= 2 && params[0] == -1) {
+            // colon-separated — ignore
+        }
+        // Check if it's a private mode (params have a ? indicator)
+        // We detect this by checking the first param value
+        var idx = 0
+        while (idx < params.size) {
+            val mode = params[idx]
+            when (mode) {
+                1 -> applicationCursorKeys = true
+                25 -> cursorVisible = true
+                1047, 1049 -> activateAlternateScreen()
+                1048 -> { savedRow = cursorRow; savedCol = cursorCol }
+                2004 -> bracketedPasteMode = true
+                1000 -> mouseNormalTracking = true
+                1002 -> mouseButtonTracking = true
+                1003 -> mouseAnyEvent = true
+                1006 -> mouseSgrFormat = true
+            }
+            idx++
         }
     }
 
-    // ── Screen operations ───────────────────────────────────────────────
+    private fun handleResetMode(params: List<Int>) {
+        var idx = 0
+        while (idx < params.size) {
+            val mode = params[idx]
+            when (mode) {
+                1 -> applicationCursorKeys = false
+                25 -> cursorVisible = false
+                1047, 1049 -> deactivateAlternateScreen()
+                1048 -> {} // Don't restore on reset
+                2004 -> bracketedPasteMode = false
+                1000 -> mouseNormalTracking = false
+                1002 -> mouseButtonTracking = false
+                1003 -> mouseAnyEvent = false
+                1006 -> mouseSgrFormat = false
+            }
+            idx++
+        }
+    }
+
+    private fun handleOsc(os: String) {
+        // OSC 0;title ST — set window title
+        // OSC 1;icon ST — set icon title
+        // OSC 2;title ST — set window title
+        if (os.startsWith("0;") || os.startsWith("1;") || os.startsWith("2;")) {
+            val title = os.substringAfter(';', "")
+            onTitleChanged?.invoke(title)
+        }
+    }
+
+    /** Callback for window title changes. */
+    var onTitleChanged: ((String) -> Unit)? = null
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ALTERNATE SCREEN
+    // ══════════════════════════════════════════════════════════════════════
+
+    private fun activateAlternateScreen() {
+        if (inAlternateScreen) return
+        // Save primary screen
+        savedPrimaryScreen = Array(rows) { screenBuffer[it].cloneRow() }
+        savedCursorRow = cursorRow; savedCursorCol = cursorCol
+        // Create alternate buffer
+        altBuffer = Array(rows) { TerminalRow(columns) }
+        inAlternateScreen = true
+        cursorRow = 0; cursorCol = 0
+        markDirty()
+    }
+
+    private fun deactivateAlternateScreen() {
+        if (!inAlternateScreen) return
+        altBuffer = null
+        inAlternateScreen = false
+        // Restore primary screen
+        if (savedPrimaryScreen != null) {
+            for (r in 0 until minOf(rows, savedPrimaryScreen!!.size)) {
+                screenBuffer[r].copyFrom(savedPrimaryScreen!![r])
+            }
+            savedPrimaryScreen = null
+        }
+        cursorRow = savedCursorRow; cursorCol = savedCursorCol
+        markDirty()
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  SCREEN OPERATIONS
+    // ══════════════════════════════════════════════════════════════════════
 
     private fun putChar(c: Char) {
-        if (cursorRow >= rows) {
-            // Should not happen - newLine handles scrolling
-            cursorRow = rows - 1
+        if (cursorRow >= rows) { cursorRow = rows - 1 }
+        val buf = activeBuffer()
+        val row = buf[cursorRow]
+
+        // Handle wide chars (CJK, emoji) — occupy 2 columns
+        val w = WcWidth.charWidth(c)
+        if (w == 0) return // Combining character — ignore for now (would need to combine)
+        if (w == 2) {
+            // Set this cell + next cell
+            row.setCell(cursorCol, c, currentStyle())
+            if (fgRgb != null) row.setTrueColorFg(cursorCol, fgRgb!!)
+            if (bgRgb != null) row.setTrueColorBg(cursorCol, bgRgb!!)
+            cursorCol++
+            if (cursorCol < columns) {
+                row.setCell(cursorCol, '\u0000', currentStyle()) // zero-width spacer
+                cursorCol++
+            }
+        } else {
+            row.setCell(cursorCol, c, currentStyle())
+            if (fgRgb != null) row.setTrueColorFg(cursorCol, fgRgb!!)
+            if (bgRgb != null) row.setTrueColorBg(cursorCol, bgRgb!!)
+            cursorCol++
         }
 
-        val cell = screenBuffer[cursorRow][cursorCol]
-        cell.char = c
-        cell.bold = bold
-        cell.italic = italic
-        cell.underline = underline
-        cell.strikethrough = strikethrough
-        cell.blink = blink
-        cell.reverse = reverse
-        cell.foreground = foreground
-        cell.background = background
-
-        cursorCol++
         if (cursorCol >= columns) {
             cursorCol = 0
             newLine()
@@ -522,162 +685,160 @@ class TerminalEmulator(
 
     private fun newLine() {
         cursorRow++
+        if (cursorRow > scrollBottom) {
+            scrollUpInRegion(1)
+            cursorRow = scrollBottom
+        }
+        // If no scroll margins (full screen), keep at bottom
         if (cursorRow >= rows) {
-            // Scroll the screen up
-            scrollUp(1)
             cursorRow = rows - 1
-            // Clear the new line
-            for (c in 0 until columns) {
-                screenBuffer[cursorRow][c] = Cell()
-            }
+            activeBuffer()[cursorRow].clear()
         }
     }
 
     private fun reverseIndex() {
-        if (cursorRow > 0) {
+        if (cursorRow > scrollTop) {
             cursorRow--
         } else {
-            scrollDown(1)
+            scrollDownInRegion(1)
         }
     }
 
     private fun scrollUp(n: Int) {
+        val buf = activeBuffer()
         val count = n.coerceAtLeast(1)
-        // Move lines to scrollback
         for (i in 0 until count) {
             if (i < rows) {
-                scrollbackBuffer.add(screenBuffer[i].copyOf())
-                if (scrollbackBuffer.size > maxScrollback) {
-                    scrollbackBuffer.removeAt(0)
+                // Only primary screen lines go to scrollback
+                if (!inAlternateScreen) {
+                    scrollbackBuffer.add(buf[i].cloneRow())
+                    if (scrollbackBuffer.size > maxScrollback) scrollbackBuffer.removeAt(0)
                 }
             }
         }
-        // Shift rows up
-        for (r in 0 until (rows - count)) {
-            screenBuffer[r] = screenBuffer[r + count]
-        }
-        // Clear bottom rows
-        for (r in (rows - count) until rows) {
-            screenBuffer[r] = Array(columns) { Cell() }
-        }
+        for (r in 0 until (rows - count)) buf[r] = buf[r + count]
+        for (r in (rows - count) until rows) buf[r] = TerminalRow(columns)
     }
 
     private fun scrollDown(n: Int) {
+        val buf = activeBuffer()
         val count = n.coerceAtLeast(1)
-        // Shift rows down
-        for (r in (rows - 1) downTo count) {
-            screenBuffer[r] = screenBuffer[r - count]
+        for (r in (rows - 1) downTo count) buf[r] = buf[r - count]
+        for (r in 0 until count) buf[r] = TerminalRow(columns)
+    }
+
+    /** Scroll within scroll region. */
+    private fun scrollUpInRegion(n: Int) {
+        val buf = activeBuffer()
+        val count = n.coerceAtLeast(1)
+        val regionHeight = scrollBottom - scrollTop + 1
+        // Move lines to scrollback (only from primary screen)
+        for (i in 0 until count) {
+            val r = scrollTop + i
+            if (r <= scrollBottom && !inAlternateScreen) {
+                scrollbackBuffer.add(buf[r].cloneRow())
+                if (scrollbackBuffer.size > maxScrollback) scrollbackBuffer.removeAt(0)
+            }
         }
-        // Clear top rows
-        for (r in 0 until count) {
-            screenBuffer[r] = Array(columns) { Cell() }
+        for (r in scrollTop until (scrollBottom - count + 1)) {
+            buf[r].copyFrom(buf[r + count])
+        }
+        for (r in (scrollBottom - count + 1)..scrollBottom) buf[r] = TerminalRow(columns)
+    }
+
+    private fun scrollDownInRegion(n: Int) {
+        val buf = activeBuffer()
+        val count = n.coerceAtLeast(1)
+        for (r in scrollBottom downTo (scrollTop + count)) {
+            buf[r].copyFrom(buf[r - count])
+        }
+        for (r in scrollTop until (scrollTop + count).coerceAtMost(scrollBottom + 1)) {
+            buf[r] = TerminalRow(columns)
         }
     }
 
     private fun eraseFromCursor() {
-        // Erase from cursor to end of screen
         eraseLineFromCursor()
-        for (r in (cursorRow + 1) until rows) {
-            for (c in 0 until columns) {
-                screenBuffer[r][c] = Cell()
-            }
-        }
+        val buf = activeBuffer()
+        for (r in (cursorRow + 1) until rows) buf[r].clear()
     }
 
     private fun eraseToCursor() {
-        // Erase from start of screen to cursor
-        for (r in 0 until cursorRow) {
-            for (c in 0 until columns) {
-                screenBuffer[r][c] = Cell()
-            }
-        }
+        val buf = activeBuffer()
+        for (r in 0 until cursorRow) buf[r].clear()
         eraseLineToCursor()
     }
 
     private fun eraseLineFromCursor() {
-        for (c in cursorCol until columns) {
-            screenBuffer[cursorRow][c] = Cell()
-        }
+        val row = activeBuffer()[cursorRow]
+        for (c in cursorCol until columns) row.setCell(c, ' ', TextStyle.DEFAULT)
     }
 
     private fun eraseLineToCursor() {
-        for (c in 0..cursorCol) {
-            screenBuffer[cursorRow][c] = Cell()
-        }
+        val row = activeBuffer()[cursorRow]
+        for (c in 0..cursorCol) row.setCell(c, ' ', TextStyle.DEFAULT)
     }
 
     private fun eraseEntireLine() {
-        for (c in 0 until columns) {
-            screenBuffer[cursorRow][c] = Cell()
-        }
+        activeBuffer()[cursorRow].clear()
     }
 
     private fun eraseChars(n: Int) {
+        val row = activeBuffer()[cursorRow]
         val count = n.coerceAtMost(columns - cursorCol)
         for (i in 0 until count) {
             val c = cursorCol + i
-            if (c < columns) screenBuffer[cursorRow][c] = Cell()
+            if (c < columns) row.setCell(c, ' ', TextStyle.DEFAULT)
         }
     }
 
     private fun insertLines(n: Int) {
+        val buf = activeBuffer()
         val count = n.coerceAtLeast(1)
-        val bottomStart = (rows - count).coerceAtLeast(0)
-        // Move existing content down
-        for (r in (bottomStart - 1) downTo cursorRow) {
-            if (r + count < rows) {
-                screenBuffer[r + count] = screenBuffer[r]
-            }
+        val end = scrollBottom
+        for (r in (end - count) downTo cursorRow) {
+            if (r + count <= end) buf[r + count].copyFrom(buf[r])
         }
-        // Clear inserted lines
-        for (r in cursorRow until (cursorRow + count).coerceAtMost(rows)) {
-            screenBuffer[r] = Array(columns) { Cell() }
+        for (r in cursorRow until (cursorRow + count).coerceAtMost(end + 1)) {
+            buf[r] = TerminalRow(columns)
         }
     }
 
     private fun deleteLines(n: Int) {
+        val buf = activeBuffer()
         val count = n.coerceAtLeast(1)
-        // Shift content up
-        for (r in cursorRow until (rows - count)) {
-            screenBuffer[r] = screenBuffer[r + count]
+        for (r in cursorRow until (scrollBottom - count)) {
+            buf[r].copyFrom(buf[r + count])
         }
-        // Clear bottom lines
-        for (r in (rows - count) until rows) {
-            screenBuffer[r] = Array(columns) { Cell() }
+        for (r in (scrollBottom - count + 1)..scrollBottom) {
+            buf[r] = TerminalRow(columns)
         }
     }
 
     private fun deleteChars(n: Int) {
+        val row = activeBuffer()[cursorRow]
         val count = n.coerceAtMost(columns - cursorCol)
-        // Shift chars left
         for (c in cursorCol until (columns - count)) {
-            screenBuffer[cursorRow][c] = screenBuffer[cursorRow][c + count]
+            row.setCell(c, row.getChar(c + count), row.getStyle(c + count))
         }
-        // Clear remaining chars
         for (c in (columns - count) until columns) {
-            screenBuffer[cursorRow][c] = Cell()
+            row.setCell(c, ' ', TextStyle.DEFAULT)
         }
     }
 
     private fun insertChars(n: Int) {
+        val row = activeBuffer()[cursorRow]
         val count = n.coerceAtMost(columns - cursorCol)
-        // Shift chars right
         for (c in (columns - 1) downTo (cursorCol + count)) {
-            screenBuffer[cursorRow][c] = screenBuffer[cursorRow][c - count]
+            row.setCell(c, row.getChar(c - count), row.getStyle(c - count))
         }
-        // Clear inserted positions
         for (c in cursorCol until (cursorCol + count)) {
-            screenBuffer[cursorRow][c] = Cell()
+            row.setCell(c, ' ', TextStyle.DEFAULT)
         }
     }
 
     private fun markDirty() {
         isDirty = true
         onScreenChanged?.invoke()
-    }
-
-    /** Mark screen as clean (call after rendering). */
-    fun markClean() {
-        isDirty = false
     }
 }

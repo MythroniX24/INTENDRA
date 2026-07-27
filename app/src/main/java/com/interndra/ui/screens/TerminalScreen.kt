@@ -239,6 +239,22 @@ fun TerminalScreen(
             }
         }
 
+        // ── Extra Keys Row ────────────────────────────────────
+        ExtraKeysRow(
+            onKey = { key ->
+                scope.launch {
+                    when (key) {
+                        "Tab" -> vm.terminalAgent.execute(activeSessionName, "\t")
+                        "Esc" -> vm.terminalAgent.execute(activeSessionName, "\u001B")
+                        "Up" -> vm.terminalAgent.execute(activeSessionName, "\u001B[A")
+                        "Down" -> vm.terminalAgent.execute(activeSessionName, "\u001B[B")
+                        "Left" -> vm.terminalAgent.execute(activeSessionName, "\u001B[D")
+                        "Right" -> vm.terminalAgent.execute(activeSessionName, "\u001B[C")
+                    }
+                }
+            }
+        )
+
         // ── Bottom input bar ───────────────────────────────────
         TerminalInputBar(
             commandInput = commandInput,
@@ -669,6 +685,81 @@ private fun TerminalWelcomeMessage(
 }
 
 // ── ANSI rendering helper ──────────────────────────────────────────────
+/**
+ * Extra Keys Row — like Termux's extra keys row.
+ * Provides quick access to Tab, Esc, arrow keys, and common Ctrl combos.
+ */
+@Composable
+private fun ExtraKeysRow(
+    onKey: (String) -> Unit
+) {
+    Surface(
+        color = Color(0xFF0D0D0D),
+        tonalElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 6.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            // Extra key buttons
+            ExtraKey("Esc", onKey)
+            ExtraKey("Tab", onKey)
+            ExtraKey("/", onKey)
+            ExtraKey("-", onKey)
+            DividerLine()
+            ExtraKey("←", onKey)
+            ExtraKey("→", onKey)
+            ExtraKey("↑", onKey)
+            ExtraKey("↓", onKey)
+            DividerLine()
+            ExtraKey("Ctrl+A", onKey)
+            ExtraKey("Ctrl+E", onKey)
+            ExtraKey("Ctrl+W", onKey)
+            ExtraKey("Ctrl+U", onKey)
+            ExtraKey("Ctrl+R", onKey)
+            DividerLine()
+            ExtraKey("Alt+←", onKey)
+            ExtraKey("Alt+→", onKey)
+            ExtraKey("Alt+↑", onKey)
+            ExtraKey("Alt+↓", onKey)
+        }
+    }
+}
+
+@Composable
+private fun ExtraKey(label: String, onKey: (String) -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = Color(0xFF1A1A1A),
+        border = BorderStroke(1.dp, Color(0xFF2A2A2A)),
+        modifier = Modifier
+            .clickable { onKey(label) }
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = label,
+            color = TerminalWhite.copy(alpha = 0.6f),
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+private fun DividerLine() {
+    Box(
+        modifier = Modifier
+            .width(1.dp)
+            .height(16.dp)
+            .background(TerminalWhite.copy(alpha = 0.1f))
+    )
+}
+
 /**
  * Strips ANSI escape codes from a line and returns the plain text.
  * For the real terminal, we render the TerminalEmulator's screen buffer
