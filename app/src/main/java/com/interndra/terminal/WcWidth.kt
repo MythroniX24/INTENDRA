@@ -357,7 +357,13 @@ object WcWidth {
     }
 
     /**
-     * Convenience: get the width of a Kotlin Char (handles surrogate pairs via codePointAt).
+     * Get the display width of a Unicode code point.
+     * Returns 0 for combining/control, 1 for regular, 2 for wide (CJK/emoji).
+     */
+    fun charWidth(codepoint: Int): Int = width(codepoint)
+
+    /**
+     * Convenience: get the width of a Kotlin Char.
      */
     fun charWidth(ch: Char): Int = width(ch.code)
 
