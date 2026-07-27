@@ -29,15 +29,17 @@ jobs:
 
       - name: Accept SDK licenses + install packages
         run: |
+          # sdkmanager needs Java 8 (javax.xml.bind was removed in Java 11+)
+          for java_home_var in JAVA_HOME_8_X64 JAVA_HOME_11_X64 JAVA_HOME_17_X64; do
+            jh="${!java_home_var}"
+            if [ -n "$jh" ] && [ -x "$jh/bin/java" ]; then
+              export JAVA_HOME="$jh"
+              export PATH="$jh/bin:$PATH"
+              break
+            fi
+          done
+          echo "Using Java: $JAVA_HOME ($(java -version 2>&1 | head -1))"
           echo "=== Accepting licenses ==="
-          # Use Java 11 for sdkmanager (javax.xml.bind removed in Java 17)
-          SDK_JAVA="${JAVA_HOME_11_X64:-${JAVA_HOME_17_X64}}"
-          if [ -f "$SDK_JAVA/bin/java" ]; then
-            SDK_JAVA_BIN="$SDK_JAVA/bin/java"
-          else
-            SDK_JAVA_BIN="java"
-          fi
-          yes | $SDK_JAVA_BIN -jar "$ANDROID_SDK_ROOT/cmdline-tools/latest/lib/sdklib-*.jar" --licenses 2>&1 || true
           yes | sdkmanager --licenses 2>&1 || true
           echo "=== Installing packages ==="
           yes | sdkmanager --install "platform-tools" "build-tools;35.0.0" "platforms;android-35" "ndk;27.0.12077973" "cmake;3.22.1" 2>&1
