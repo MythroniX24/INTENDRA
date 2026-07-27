@@ -39,6 +39,7 @@ import com.interndra.services.AutomationEngine
 import com.interndra.services.AutomationWorker
 import com.interndra.service.ShellExecutor
 import com.interndra.service.PersistentShell
+import com.interndra.service.ProotDistroManager
 import com.interndra.service.TermuxBootstrapInstaller
 import com.interndra.service.TermuxEnvironment
 import com.interndra.terminal.TerminalSession
@@ -267,6 +268,32 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     // ── Embedded Termux Environment ─────────────────────────────────────
     val termuxBootstrapInstaller = TermuxBootstrapInstaller(app, shizukuShell)
     val termuxEnvironment = TermuxEnvironment(app, shizukuShell, termuxBootstrapInstaller, scope = viewModelScope)
+
+    // ── PRoot-distro Manager (Full Linux Distros) ─────────────────────
+    val prootDistroManager = ProotDistroManager(app, termuxEnvironment, shizukuShell)
+    private val _prootDistroState = MutableStateFlow(ProotDistroManager.ProotDistroState())
+    val prootDistroState: StateFlow<ProotDistroManager.ProotDistroState> = _prootDistroState.asStateFlow()
+
+    /** Refresh proot-distro state and update UI. */
+    fun refreshProotDistroState() = viewModelScope.launch(Dispatchers.IO) {
+        val state = prootDistroManager.refreshState()
+        _prootDistroState.value = state
+    }
+
+    /** Install a full Linux distro via proot-distro (e.g., "ubuntu", "debian"). */
+    fun installLinuxDistro(distroName: String, onProgress: ((String) -> Unit)? = null) = viewModelScope.launch(Dispatchers.IO) {
+        onProgress?.invoke("📦 Installing proot-distro tool...")
+        if (!_prootDistroState.value.isAvailable) {
+            val installed = prootDistroManager.installProotDistro()
+            if (!installed) {
+                onProgress?.invoke("❌ Failed to install proot-distro. Ensure Termux environment is available.")
+                return@launch
+            }
+        }
+        onProgress?.invoke("🐧 Installing $distroName Linux distro...")
+        prootDistroManager.installDistro(distroName, onProgress)
+        refreshProotDistroState()
+    }
 
     // ── Terminal Agent — uses PersistentShell (no Termux needed) ─────
     val terminalAgent = TerminalAgent(app, shizukuShell, termuxEnvironment, scope = viewModelScope)
@@ -533,6 +560,16 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Init: TermuxEnvironment failed: ${e.message}")
+            }
+        }
+
+        // ── Initialize PRoot-distro state ───────────────────────────────
+        viewModelScope.launch {
+            try {
+                refreshProotDistroState()
+                Log.i(TAG, "PRoot-distro state refreshed: ${_prootDistroState.value.isAvailable}")
+            } catch (e: Exception) {
+                Log.w(TAG, "Init: PRoot-distro refresh failed: ${e.message}")
             }
         }
     }

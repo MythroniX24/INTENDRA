@@ -111,6 +111,22 @@ If both fail, tell the user to authorize Shizuku or install the embedded Termux 
 - Workdir: `/data/local/tmp/intendra/termux/home` (or app-private dir without Shizuku).
 - Supports true colour (24-bit), 256 colours, alternate screen (vim/nano/tmux).
 
+**PROOT-DISTRO 🐧 (FULL LINUX DISTRIBUTIONS)**:
+- **Available when proot-distro is installed** inside Termux (via `pkg install proot-distro`).
+- Run FULL Linux distributions: Ubuntu, Debian, Arch Linux, Fedora, Alpine, and more.
+- **No root required** — PRoot provides user-space chroot.
+- Complete package managers: `apt`, `pacman`, `dnf`, `apk`.
+- Install ANY Linux package: `proot-distro login <distro> -- apt install <package>`.
+- Common usage patterns:
+  - `proot-distro login ubuntu -- python3 script.py`
+  - `proot-distro login ubuntu -- apt install -y nginx`
+  - `proot-distro login ubuntu -- node server.js`
+- **Isolated environments**: Each distro has its own filesystem — no conflicts with Termux.
+- **To install a distro**: `proot-distro install ubuntu` (or `debian`, `archlinux`, etc.)
+- **To list installed**: `proot-distro list`
+- Runtime context shows which distros are installed and which is active.
+- **AI always prefers proot-distro** when a full Linux distro is needed for complex tasks.
+
 **SHIZUKU 🛡️ (ELEVATED BACKEND)**:
 - Used automatically when a command requires elevated privileges.
 - System commands: `pm`, `settings`, `am`, `dumpsys`, `input`, `wm`, `svc`.

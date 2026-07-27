@@ -91,11 +91,15 @@ jobs:
           echo "KOTLIN_EXIT=$?"
         shell: bash
 
-      - name: STEP 2 - Full APK with native (only if Kotlin passed)
+      # 🚫 APK build temporarily disabled — re-enable by uncommenting STEP 2 + Upload debug APK
+      #
+      # To re-enable: delete the '# DISABLED: ' prefix from both sections below
+      #
+      - name: DISABLED: STEP 2 - Full APK with native
         if: success()
         id: native
         run: |
-          echo "=== Full APK build with native code ==="
+          echo "=== Full APK build with native code (DISABLED) ==="
           ./gradlew assembleDebug --no-daemon --console=plain --stacktrace 2>&1
           echo "ASSEMBLE_EXIT=$?"
         shell: bash
@@ -116,7 +120,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Upload debug APK
+      # 🚫 APK upload disabled (matching the DISABLED native build above)
+      - name: DISABLED: Upload debug APK
         if: success()
         uses: actions/upload-artifact@v4
         with:

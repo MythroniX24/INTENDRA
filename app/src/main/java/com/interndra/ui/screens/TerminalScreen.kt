@@ -325,7 +325,7 @@ private fun TerminalStatusBar(
             Spacer(Modifier.width(6.dp))
 
             Text(
-                if (isPtyActive) "PTY ACTIVE" else "SHELL",
+                if (isPtyActive) "PTY" else "SH",
                 color = if (isPtyActive) TerminalGreen else TerminalYellow,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,

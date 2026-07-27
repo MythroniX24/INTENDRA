@@ -85,6 +85,10 @@ class TermuxEnvironment(
         val aptAvailable: Boolean = false,
         val bashAvailable: Boolean = false,
         val installedPackages: List<String> = emptyList(),
+        val prootDistroAvailable: Boolean = false,          // proot-distro script exists
+        val prootBinaryAvailable: Boolean = false,          // proot binary exists
+        val activeProotDistro: String = "",                 // current active proot distro (e.g., "ubuntu")
+        val installedProotDistros: List<String> = emptyList(), // installed proot distro names
         val error: String? = null
     )
 
@@ -183,6 +187,36 @@ class TermuxEnvironment(
                     .getOrDefault(emptyList())
             } else emptyList()
 
+            // ── Detect proot-distro availability ────────────────────────
+            val prootDistroScript = if (activePrefix.isNotBlank()) {
+                "$activePrefix/usr/bin/proot-distro"
+            } else null
+            val prootDistroAvail = prootDistroScript != null && (
+                File(prootDistroScript).exists() ||
+                runCatching {
+                    val r = shizukuShell.executeBlocking(
+                        "test -f '$prootDistroScript' && echo 'yes' || echo 'no'", 5_000
+                    )
+                    r.isSuccess && r.stdout.trim() == "yes"
+                }.getOrDefault(false)
+            )
+            val prootBinAvail = activePrefix.isNotBlank() && (
+                File("$activePrefix/usr/bin/proot").exists() ||
+                runCatching { File(context.filesDir, "proot/proot").exists() }.getOrDefault(false)
+            )
+
+            // Detect installed proot distros (quick check — look for rootfs dirs)
+            val installedProotDistros = if (prootDistroAvail) {
+                runCatching {
+                    // Check common proot-distro install paths
+                    val prootRootfsDir = "$activePrefix/var/lib/proot-distro/installed-rootfs"
+                    val dir = File(prootRootfsDir)
+                    if (dir.exists() && dir.isDirectory) {
+                        dir.listFiles()?.filter { it.isDirectory }?.map { it.name }?.sorted() ?: emptyList()
+                    } else emptyList()
+                }.getOrDefault(emptyList())
+            } else emptyList()
+
             prefixPath = activePrefix
             _mode.value = bestMode
             _info.value = EnvInfo(
@@ -194,7 +228,11 @@ class TermuxEnvironment(
                 shizukuUid = shizukuUid,
                 aptAvailable = aptAvail,
                 bashAvailable = bashAvail,
-                installedPackages = installedPkgs
+                installedPackages = installedPkgs,
+                prootDistroAvailable = prootDistroAvail,
+                prootBinaryAvailable = prootBinAvail,
+                activeProotDistro = installedProotDistros.firstOrNull() ?: "",
+                installedProotDistros = installedProotDistros
             )
 
             Log.i(TAG, "Status: mode=$bestMode, prefix=$activePrefix, " +
@@ -423,8 +461,19 @@ class TermuxEnvironment(
                         workdir = "$prefixPath/home"
                     )
                 } else {
-                    // Fallback to Shizuku or basic shell
-                    if (shizukuShell.isElevatedAvailable) {
+                    // Safety fallback: if proot-distro is available (requires Termux bootstrap
+                    // but bootstrap detection may have failed), try using it directly.
+                    val prootDistroAvail = _info.value.prootDistroAvailable
+                    val activeDistro = _info.value.activeProotDistro
+                    if (prootDistroAvail && activeDistro.isNotBlank()) {
+                        ExecutionRequest(
+                            command = "proot-distro login $activeDistro -- $command 2>&1",
+                            mode = ExecMode.TERMUX,
+                            useProotDistro = true,
+                            prootDistroName = activeDistro,
+                            envVars = getTermuxEnvVars(prefixPath)
+                        )
+                    } else if (shizukuShell.isElevatedAvailable) {
                         ExecutionRequest(
                             command = command,
                             mode = ExecMode.SHIZUKU,
@@ -464,6 +513,8 @@ class TermuxEnvironment(
         val mode: ExecMode,
         val useShizuku: Boolean = false,
         val useProot: Boolean = false,
+        val useProotDistro: Boolean = false,     // use proot-distro to run inside a full Linux distro
+        val prootDistroName: String = "",        // which distro (e.g., "ubuntu")
         val envVars: Map<String, String> = emptyMap(),
         val workdir: String? = null
     )
@@ -647,7 +698,7 @@ class TermuxEnvironment(
     }
 
     /** Get a human-readable summary of the current environment. */
-    fun getSummary(): String {
+    suspend fun getSummary(): String {
         val info = _info.value
         return buildString {
             appendLine("🐧 **Termux Environment**")
@@ -662,6 +713,18 @@ class TermuxEnvironment(
             }
             if (info.installedPackages.isNotEmpty()) {
                 appendLine("- Packages (${info.installedPackages.size}): `${info.installedPackages.take(10).joinToString("`, `")}`${if (info.installedPackages.size > 10) "…" else ""}")
+            }
+            // ── PRoot-distro info ────────────────────────────────────────
+            if (info.prootDistroAvailable) {
+                appendLine("- PRoot-distro: ✅ Available")
+                if (info.installedProotDistros.isNotEmpty()) {
+                    appendLine("- PRoot distros: ${info.installedProotDistros.joinToString(", ")}")
+                    appendLine("- Active distro: ${info.activeProotDistro}")
+                    appendLine("- Run commands: `proot-distro login <distro> -- <command>`")
+                } else {
+                    appendLine("- PRoot distros: ❌ None installed")
+                    appendLine("- Install: `proot-distro install ubuntu`")
+                }
             }
         }
     }
