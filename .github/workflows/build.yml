@@ -27,35 +27,21 @@ jobs:
         with:
           accept-android-sdk-licenses: true
 
-      - name: Set up Java 8 for SDK manager
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 8
-
       - name: Accept SDK licenses + install packages
         run: |
-          # sdkmanager needs Java 8 (javax.xml.bind was removed in Java 11+)
-          for java_home_var in JAVA_HOME_8_X64 JAVA_HOME_11_X64 JAVA_HOME_17_X64; do
-            jh="${!java_home_var}"
-            if [ -n "$jh" ] && [ -x "$jh/bin/java" ]; then
-              export JAVA_HOME="$jh"
-              export PATH="$jh/bin:$PATH"
-              break
-            fi
-          done
-          echo "Using Java: $JAVA_HOME ($(java -version 2>&1 | head -1))"
+          # Latest sdkmanager requires JDK 17+ but javax.xml.bind was removed in JDK 11+
+          # Solution: Download JAXB JARs and add to classpath
+          echo "=== Downloading JAXB JARs (needed by sdkmanager) ==="
+          wget -q "https://repo1.maven.org/maven2/javax/xml/bind/jaxb-api/2.3.1/jaxb-api-2.3.1.jar" -O /tmp/jaxb-api.jar
+          wget -q "https://repo1.maven.org/maven2/org/glassfish/jaxb/jaxb-runtime/2.3.1/jaxb-runtime-2.3.1.jar" -O /tmp/jaxb-runtime.jar
+          wget -q "https://repo1.maven.org/maven2/javax/activation/activation/1.1.1/activation-1.1.1.jar" -O /tmp/activation.jar
+          export CLASSPATH="/tmp/jaxb-api.jar:/tmp/jaxb-runtime.jar:/tmp/activation.jar"
+          export SKIP_JDK_VERSION_CHECK=true
           echo "=== Accepting licenses ==="
           yes | sdkmanager --licenses 2>&1 || true
           echo "=== Installing packages ==="
           yes | sdkmanager --install "platform-tools" "build-tools;35.0.0" "platforms;android-35" "ndk;27.0.12077973" "cmake;3.22.1" 2>&1
         shell: bash
-
-      - name: Switch back to Java 17 for Gradle
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
 
       - name: Set SDK paths
         run: |
