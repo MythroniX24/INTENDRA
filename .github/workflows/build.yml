@@ -30,8 +30,14 @@ jobs:
       - name: Accept SDK licenses + install packages
         run: |
           echo "=== Accepting licenses ==="
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses 2>&1 || true
-          yes | "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" --licenses 2>&1 || true
+          # Use Java 11 for sdkmanager (javax.xml.bind removed in Java 17)
+          SDK_JAVA="${JAVA_HOME_11_X64:-${JAVA_HOME_17_X64}}"
+          if [ -f "$SDK_JAVA/bin/java" ]; then
+            SDK_JAVA_BIN="$SDK_JAVA/bin/java"
+          else
+            SDK_JAVA_BIN="java"
+          fi
+          yes | $SDK_JAVA_BIN -jar "$ANDROID_SDK_ROOT/cmdline-tools/latest/lib/sdklib-*.jar" --licenses 2>&1 || true
           yes | sdkmanager --licenses 2>&1 || true
           echo "=== Installing packages ==="
           yes | sdkmanager --install "platform-tools" "build-tools;35.0.0" "platforms;android-35" "ndk;27.0.12077973" "cmake;3.22.1" 2>&1
