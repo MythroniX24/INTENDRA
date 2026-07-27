@@ -28,15 +28,13 @@ jobs:
           accept-android-sdk-licenses: true
 
       - name: Accept SDK licenses + install packages
-        env:
-          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT || '$ANDROID_SDK_ROOT' }}
         run: |
           echo "=== Accepting licenses ==="
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 || true
-          yes | $ANDROID_SDK_ROOT/tools/bin/sdkmanager --licenses 2>&1 || true
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses 2>&1 || true
+          yes | "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" --licenses 2>&1 || true
           yes | sdkmanager --licenses 2>&1 || true
           echo "=== Installing packages ==="
-          sdkmanager --install "platform-tools" "build-tools;35.0.0" "platforms;android-35" "ndk;27.0.12077973" "cmake;3.22.1" 2>&1 || echo "SDK install had some issues, continuing..."
+          yes | sdkmanager --install "platform-tools" "build-tools;35.0.0" "platforms;android-35" "ndk;27.0.12077973" "cmake;3.22.1" 2>&1
         shell: bash
 
       - name: Set SDK paths
