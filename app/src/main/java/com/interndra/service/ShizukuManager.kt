@@ -84,17 +84,32 @@ class ShizukuManager(private val context: Context) {
         initialized.set(false)
     }
 
+    /** Lock to prevent concurrent refreshStatus() calls from reading inconsistent state. */
+    private val statusLock = java.lang.Object()
+
     fun refreshStatus() {
-        try {
-            isBinderAlive = Shizuku.pingBinder()
-            if (isBinderAlive) {
-                isPermissionGranted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-                shizukuUid = Shizuku.getUid()
-                apiVersion = Shizuku.getVersion()
-            } else { isPermissionGranted = false; shizukuUid = -1; apiVersion = 0 }
-        } catch (e: Exception) {
-            Log.w(TAG, "Refresh failed: ${e.message}")
-            isBinderAlive = false; isPermissionGranted = false; shizukuUid = -1
+        synchronized(statusLock) {
+            try {
+                val binderAlive = Shizuku.pingBinder()
+                val permGranted: Boolean
+                val uid: Int
+                val version: Int
+                if (binderAlive) {
+                    permGranted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+                    uid = Shizuku.getUid()
+                    version = Shizuku.getVersion()
+                } else {
+                    permGranted = false; uid = -1; version = 0
+                }
+                // Atomically update all fields
+                isBinderAlive = binderAlive
+                isPermissionGranted = permGranted
+                shizukuUid = uid
+                apiVersion = version
+            } catch (e: Exception) {
+                Log.w(TAG, "Refresh failed: ${e.message}")
+                isBinderAlive = false; isPermissionGranted = false; shizukuUid = -1
+            }
         }
     }
 

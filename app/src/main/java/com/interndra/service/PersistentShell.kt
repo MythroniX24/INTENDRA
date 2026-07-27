@@ -163,12 +163,18 @@ class PersistentShell(
                     }
                 }, "pshell-stdout").apply { isDaemon = true }.start()
 
-                // Brief wait to see if shell started successfully
-                Thread.sleep(200)
-                val alive = try { theProcess.isAlive } catch (_: Exception) { false }
+                // Poll to see if shell started successfully (loop instead of fixed sleep)
+                val startWaitMs = System.currentTimeMillis()
+                val maxWaitMs = 3000L
+                var alive = false
+                while (System.currentTimeMillis() - startWaitMs < maxWaitMs) {
+                    alive = try { theProcess.isAlive } catch (_: Exception) { false }
+                    if (alive) break
+                    Thread.sleep(50)
+                }
 
                 if (!alive) {
-                    Log.e(TAG, "Shell process died immediately after start")
+                    Log.e(TAG, "Shell process failed to start within ${maxWaitMs}ms")
                     destroy()
                     return@withContext false
                 }

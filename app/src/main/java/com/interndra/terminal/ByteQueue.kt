@@ -100,11 +100,23 @@ class ByteQueue(
         return written
     }
 
-    /** Wait for space in the buffer, returns true if space is available. */
+    /** Wait for space in the buffer, returns true if space is available.
+     *  Includes a timeout to prevent indefinite blocking if the reader has stalled.
+     *  If the deadline expires, the oldest bytes are discarded to make room. */
     private fun waitForSpace(): Boolean {
+        val deadline = System.currentTimeMillis() + 2000L // 2 second timeout
         while (count == capacity) {
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0) {
+                // Reader stalled — discard oldest bytes to prevent deadlock
+                Log.w(TAG, "ByteQueue full for 2s — discarding oldest ${capacity / 4} bytes")
+                val discard = (capacity / 4).coerceAtLeast(1)
+                head = (head + discard) % capacity
+                count = (count - discard).coerceAtLeast(0)
+                return true
+            }
             try {
-                (this as java.lang.Object).wait(100)
+                (this as java.lang.Object).wait(remaining.coerceAtMost(100))
             } catch (_: InterruptedException) {
                 return false
             }
@@ -114,24 +126,28 @@ class ByteQueue(
     }
 
     /**
-     * Read bytes from the queue. Blocks until data is available.
+     * Read bytes from the queue. Blocks until data is available or timeout expires.
      *
      * @param dst  Destination byte array
      * @param offset  Offset in dst to start writing at
      * @param maxLen  Maximum number of bytes to read
-     * @return Number of bytes actually read, or -1 if interrupted
+     * @return Number of bytes actually read, or -1 if interrupted or timed out
      */
     fun read(dst: ByteArray, offset: Int = 0, maxLen: Int = dst.size): Int {
+        val deadline = System.currentTimeMillis() + 3000L // 3 second read timeout
         synchronized(this) {
-            // Wait for data
+            // Wait for data with timeout
             while (count == 0) {
+                val remaining = deadline - System.currentTimeMillis()
+                if (remaining <= 0) return 0 // timeout, no data
                 try {
-                    (this as java.lang.Object).wait(100)
+                    (this as java.lang.Object).wait(remaining.coerceAtMost(100))
                 } catch (_: InterruptedException) {
                     return -1
                 }
                 if (count > 0) break
             }
+            if (count == 0) return 0
 
             val batchSize = minOf(maxLen, count)
             for (i in 0 until batchSize) {

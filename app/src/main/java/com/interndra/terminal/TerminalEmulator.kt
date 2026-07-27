@@ -139,6 +139,8 @@ class TerminalEmulator(
     private val csiParams = mutableListOf<Int>()
     private var csiParamBuilder = StringBuilder()
     private var oscStringBuilder = StringBuilder()
+    /** Separate buffer for DCS string — prevents OSC/DCS buffer confusion. */
+    private var dcsStringBuilder = StringBuilder()
 
     // ══════════════════════════════════════════════════════════════════════
     //  PUBLIC API
@@ -390,6 +392,7 @@ class TerminalEmulator(
     private fun processOscByte(b: Int) {
         when (b) {
             in '0'.code..'9'.code, ';'.code -> {
+                oscStringBuilder = StringBuilder()  // fresh buffer
                 oscStringBuilder.append(b.toChar())
                 parserState = ParserState.OSC_STRING
             }
@@ -411,21 +414,21 @@ class TerminalEmulator(
 
     private fun processDcsByte(b: Int) {
         parserState = ParserState.DCS_STRING
-        oscStringBuilder = StringBuilder()
+        dcsStringBuilder = StringBuilder()  // uses ITS OWN buffer — not oscStringBuilder
         when (b) {
-            in '0'.code..'9'.code -> oscStringBuilder.append(b.toChar())
-            ';'.code -> oscStringBuilder.append(b.toChar())
+            in '0'.code..'9'.code -> dcsStringBuilder.append(b.toChar())
+            ';'.code -> dcsStringBuilder.append(b.toChar())
             else -> parserState = ParserState.NORMAL
         }
     }
 
     private fun processDcsStringByte(b: Int) {
-        if (b == 0x07 || (b == '\\'.code && oscStringBuilder.endsWith("\u001B"))) {
+        if (b == 0x07 || (b == '\\'.code && dcsStringBuilder.endsWith("\u001B"))) {
             parserState = ParserState.NORMAL
         } else if (b == 0x1B) {
-            oscStringBuilder.append(b.toChar())
+            dcsStringBuilder.append(b.toChar())
         } else {
-            oscStringBuilder.append(b.toChar())
+            dcsStringBuilder.append(b.toChar())
         }
     }
 

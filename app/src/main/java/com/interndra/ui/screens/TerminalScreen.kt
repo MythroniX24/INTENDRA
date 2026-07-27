@@ -500,6 +500,15 @@ private fun ExecutionModeBar(vm: HybridAgentViewModel) {
     val mode = agent.currentMode
     val backend = agent.executionBackendDescription
 
+    // Poll PTY session periodically instead of stale `remember`
+    var pid by remember { mutableIntStateOf(-1) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            pid = agent.getPtySession()?.childPid ?: -1
+            kotlinx.coroutines.delay(2000)
+        }
+    }
+
     Surface(
         color = Color(0xFF080808),
         tonalElevation = 0.dp
@@ -531,8 +540,6 @@ private fun ExecutionModeBar(vm: HybridAgentViewModel) {
 
             Spacer(Modifier.weight(1f))
 
-            val ptySession = remember { vm.terminalAgent.getPtySession() }
-            val pid = ptySession?.childPid ?: -1
             if (pid > 0) {
                 Text(
                     text = "PID $pid",
@@ -646,6 +653,19 @@ private fun TerminalWelcomeMessage(
                     text = "🐧 Termux mode active — bash ready",
                     color = TerminalGreen,
                     fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "  • PRoot-distro: install Ubuntu/Debian/Arch via \"proot-distro install ubuntu\"",
+                    color = TerminalWhite.copy(alpha = 0.5f),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = "  • Full Linux distro with apt, pacman, dnf package managers",
+                    color = TerminalWhite.copy(alpha = 0.4f),
+                    fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace
                 )
             }
