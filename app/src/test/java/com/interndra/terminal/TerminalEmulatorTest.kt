@@ -22,18 +22,18 @@ class TerminalEmulatorTest {
     @Test
     fun `processByte writes printable char at cursor`() {
         emu.processByte('A'.code)
-        assertEquals('A', emu.getCell(0, 0).char)
+        assertEquals('A', emu.getChar(0, 0))
         assertEquals(1, emu.cursorCol)
     }
 
     @Test
     fun `processString writes multiple chars`() {
         emu.processString("Hello")
-        assertEquals('H', emu.getCell(0, 0).char)
-        assertEquals('e', emu.getCell(0, 1).char)
-        assertEquals('l', emu.getCell(0, 2).char)
-        assertEquals('l', emu.getCell(0, 3).char)
-        assertEquals('o', emu.getCell(0, 4).char)
+        assertEquals('H', emu.getChar(0, 0))
+        assertEquals('e', emu.getChar(0, 1))
+        assertEquals('l', emu.getChar(0, 2))
+        assertEquals('l', emu.getChar(0, 3))
+        assertEquals('o', emu.getChar(0, 4))
         assertEquals(5, emu.cursorCol)
     }
 
@@ -41,7 +41,7 @@ class TerminalEmulatorTest {
     fun `processBytes handles byte array`() {
         val bytes = "Test".toByteArray()
         emu.processBytes(bytes, 0, bytes.size)
-        assertEquals('T', emu.getCell(0, 0).char)
+        assertEquals('T', emu.getChar(0, 0))
         assertEquals(4, emu.cursorCol)
     }
 
@@ -76,65 +76,62 @@ class TerminalEmulatorTest {
     @Test
     fun `SGR bold sets bold on cells`() {
         emu.processString("\u001B[1mBold")
-        val cell = emu.getCell(0, 0)
-        assertTrue(cell.bold)
-        assertEquals('B', cell.char)
+        assertTrue(TextStyle.bold(emu.getStyle(0, 0)))
+        assertEquals('B', emu.getChar(0, 0))
     }
 
     @Test
     fun `SGR reset clears attributes`() {
         emu.processString("\u001B[1mBold\u001B[0mNormal")
-        assertEquals('B', emu.getCell(0, 0).char)
-        assertTrue(emu.getCell(0, 0).bold)
+        assertEquals('B', emu.getChar(0, 0))
+        assertTrue(TextStyle.bold(emu.getStyle(0, 0)))
         // After reset, 'N' should not be bold
-        assertEquals('N', emu.getCell(0, 4).char)
-        assertFalse(emu.getCell(0, 4).bold)
+        assertEquals('N', emu.getChar(0, 4))
+        assertFalse(TextStyle.bold(emu.getStyle(0, 4)))
     }
 
     @Test
     fun `SGR red foreground sets color`() {
         emu.processString("\u001B[31mRed")
-        val cell = emu.getCell(0, 0)
-        assertEquals(TerminalEmulator.COLOR_RED, cell.foreground)
+        assertEquals(TerminalEmulator.COLOR_RED, TextStyle.foreground(emu.getStyle(0, 0)))
     }
 
     @Test
     fun `SGR green foreground`() {
         emu.processString("\u001B[32mGreen")
-        assertEquals(TerminalEmulator.COLOR_GREEN, emu.getCell(0, 0).foreground)
+        assertEquals(TerminalEmulator.COLOR_GREEN, TextStyle.foreground(emu.getStyle(0, 0)))
     }
 
     @Test
     fun `SGR blue background`() {
         emu.processString("\u001B[44mBgBlue")
-        assertEquals(TerminalEmulator.COLOR_BLUE, emu.getCell(0, 0).background)
+        assertEquals(TerminalEmulator.COLOR_BLUE, TextStyle.background(emu.getStyle(0, 0)))
     }
 
     @Test
     fun `SGR multiple params in one sequence`() {
         emu.processString("\u001B[1;31mBoldRed")
-        val cell = emu.getCell(0, 0)
-        assertTrue(cell.bold)
-        assertEquals(TerminalEmulator.COLOR_RED, cell.foreground)
+        assertTrue(TextStyle.bold(emu.getStyle(0, 0)))
+        assertEquals(TerminalEmulator.COLOR_RED, TextStyle.foreground(emu.getStyle(0, 0)))
     }
 
     @Test
     fun `SGR reset code 0 clears all`() {
         emu.processString("\u001B[1;32;44mStyled\u001B[0mClear")
-        assertEquals('C', emu.getCell(0, 6).char)
-        assertFalse(emu.getCell(0, 6).bold)
+        assertEquals('C', emu.getChar(0, 6))
+        assertFalse(TextStyle.bold(emu.getStyle(0, 6)))
     }
 
     @Test
     fun `SGR bright foreground colors`() {
         emu.processString("\u001B[91mBrightRed")
-        assertEquals('B', emu.getCell(0, 0).char)
+        assertEquals('B', emu.getChar(0, 0))
     }
 
     @Test
     fun `SGR bright background colors`() {
         emu.processString("\u001B[104mBrightBlueBg")
-        assertEquals('B', emu.getCell(0, 0).char)
+        assertEquals('B', emu.getChar(0, 0))
     }
 
     // ── Cursor Movement (CSI) ─────────────────────────────────────────
@@ -201,15 +198,15 @@ class TerminalEmulatorTest {
         emu.clearScreen()
         assertEquals(0, emu.cursorRow)
         assertEquals(0, emu.cursorCol)
-        assertEquals(' ', emu.getCell(0, 0).char)
+        assertEquals(' ', emu.getChar(0, 0))
     }
 
     @Test
     fun `erase display J mode 2 clears all`() {
         emu.processString("Hello\nWorld!")
         emu.processString("\u001B[2J")
-        assertEquals(' ', emu.getCell(0, 0).char)
-        assertEquals(' ', emu.getCell(1, 0).char)
+        assertEquals(' ', emu.getChar(0, 0))
+        assertEquals(' ', emu.getChar(1, 0))
     }
 
     @Test
@@ -217,8 +214,8 @@ class TerminalEmulatorTest {
         emu.processString("Hello World")
         emu.processByte(0x0D) // CR
         emu.processString("\u001B[2K")
-        assertEquals(' ', emu.getCell(0, 0).char)
-        assertEquals(' ', emu.getCell(0, 5).char)
+        assertEquals(' ', emu.getChar(0, 0))
+        assertEquals(' ', emu.getChar(0, 5))
     }
 
     // ── Screen Buffer ─────────────────────────────────────────────────
@@ -241,15 +238,13 @@ class TerminalEmulatorTest {
     }
 
     @Test
-    fun `getCell returns space for out of bounds`() {
-        val cell = emu.getCell(99, 99)
-        assertEquals(' ', cell.char)
+    fun `getChar returns space for out of bounds`() {
+        assertEquals(' ', emu.getChar(99, 99))
     }
 
     @Test
-    fun `getCell returns space for negative indices`() {
-        val cell = emu.getCell(-1, -1)
-        assertEquals(' ', cell.char)
+    fun `getChar returns space for negative indices`() {
+        assertEquals(' ', emu.getChar(-1, -1))
     }
 
     // ── Resize ────────────────────────────────────────────────────────
@@ -258,8 +253,8 @@ class TerminalEmulatorTest {
     fun `resize preserves existing content`() {
         emu.processString("Hello")
         emu.resize(40, 120)
-        assertEquals('H', emu.getCell(0, 0).char)
-        assertEquals('e', emu.getCell(0, 1).char)
+        assertEquals('H', emu.getChar(0, 0))
+        assertEquals('e', emu.getChar(0, 1))
     }
 
     @Test
@@ -270,8 +265,8 @@ class TerminalEmulatorTest {
         emu.resize(oldRows + 10, oldCols + 20)
         assertEquals(oldRows + 10, emu.rows)
         assertEquals(oldCols + 20, emu.columns)
-        assertEquals('A', emu.getCell(0, 0).char)
-        assertEquals(' ', emu.getCell(emu.rows - 1, emu.columns - 1).char)
+        assertEquals('A', emu.getChar(0, 0))
+        assertEquals(' ', emu.getChar(emu.rows - 1, emu.columns - 1))
     }
 
     @Test
@@ -290,7 +285,7 @@ class TerminalEmulatorTest {
         emu.resize(r, c)
         assertEquals(r, emu.rows)
         assertEquals(c, emu.columns)
-        assertEquals('T', emu.getCell(0, 0).char)
+        assertEquals('T', emu.getChar(0, 0))
     }
 
     // ── Tab ───────────────────────────────────────────────────────────
