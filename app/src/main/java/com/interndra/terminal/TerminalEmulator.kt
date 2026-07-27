@@ -257,20 +257,15 @@ class TerminalEmulator(
         oldRows: Int,
         oldCols: Int
     ): Array<TerminalRow> {
-        val newBuf = Array(rows) { r ->
-            val newRow = TerminalRow(columns)
+        return Array(rows) { r ->
             if (r < oldRows) {
-                // Copy old row content (up to min of old/new columns)
-                val maxCol = minOf(oldCols, columns)
-                for (c in 0 until maxCol) {
-                    newRow.chars[c] = oldBuf[r].getChar(c)
-                    newRow.styles[c] = oldBuf[r].getStyle(c)
-                }
-                newRow.isWrapped = oldBuf[r].isWrapped
+                val newRow = TerminalRow(columns)
+                newRow.copyFrom(oldBuf[r])
+                newRow
+            } else {
+                TerminalRow(columns)
             }
-            newRow
         }
-        return newBuf
     }
 
     /** Clear the entire screen. */
