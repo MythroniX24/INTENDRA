@@ -22,7 +22,7 @@ object WcWidth {
         if (codePoint <= 0 || codePoint > 0x10FFFF) return 0
 
         // Fast path for ASCII
-        if (codePoint < 0x007F) {
+        if (codePoint <= 0x007F) {
             // C0 controls (0x00-0x1F) and DEL (0x7F) are 0-width
             return if (codePoint <= 0x1F || codePoint == 0x7F) 0 else 1
         }
