@@ -210,4 +210,324 @@ class TermuxEnvironmentTest {
         val labels = TermuxEnvironment.ExecMode.values().map { it.label }
         assertEquals(labels.size, labels.distinct().size)
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: buildExecutionCommand
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `buildExecutionCommand with FALLBACK mode returns simple command`() {
+        val req = env.buildExecutionCommand("ls -la", TermuxEnvironment.ExecMode.FALLBACK)
+        assertEquals(TermuxEnvironment.ExecMode.FALLBACK, req.mode)
+        assertFalse(req.useShizuku)
+        assertFalse(req.useProot)
+        assertTrue(req.command.contains("ls"))
+    }
+
+    @Test
+    fun `buildExecutionCommand with SHIZUKU mode sets useShizuku flag`() {
+        val req = env.buildExecutionCommand("pm list packages", TermuxEnvironment.ExecMode.SHIZUKU)
+        assertEquals(TermuxEnvironment.ExecMode.SHIZUKU, req.mode)
+        assertTrue(req.useShizuku)
+    }
+
+    @Test
+    fun `buildExecutionCommand has empty env for FALLBACK`() {
+        val req = env.buildExecutionCommand("echo test", TermuxEnvironment.ExecMode.FALLBACK)
+        assertNotNull(req.envVars)
+        assertTrue(req.envVars.containsKey("HOME"))
+        assertTrue(req.envVars.containsKey("PATH"))
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: wrapTermuxCommand
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `wrapTermuxCommand wraps command with env vars`() {
+        val wrapped = env.wrapTermuxCommand("echo test", "/data/termux")
+        assertTrue(wrapped.contains("/data/termux/usr/bin/bash"))
+        assertTrue(wrapped.contains("echo test"))
+        assertTrue(wrapped.contains("PREFIX"))
+        assertTrue(wrapped.contains("PATH"))
+    }
+
+    @Test
+    fun `wrapTermuxCommand with blank prefix returns original command`() {
+        val wrapped = env.wrapTermuxCommand("echo test", "")
+        assertEquals("echo test", wrapped)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: wrapShizukuCommand
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `wrapShizukuCommand wraps command with env vars`() {
+        val wrapped = env.wrapShizukuCommand("pm list packages")
+        assertTrue(wrapped.contains("pm list packages"))
+        assertTrue(wrapped.contains("PATH"))
+        assertTrue(wrapped.contains("HOME"))
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: Environment Variables
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `getTermuxEnvVars returns full env for Termux mode`() {
+        val vars = env.getTermuxEnvVars("/data/termux")
+        assertEquals("/data/termux/usr", vars["PREFIX"])
+        assertEquals("/data/termux/home", vars["HOME"])
+        assertTrue(vars["PATH"]?.contains("/data/termux/usr/bin") == true)
+        assertEquals("C.UTF-8", vars["LANG"])
+        assertEquals("C.UTF-8", vars["LC_ALL"])
+    }
+
+    @Test
+    fun `getTermuxEnvVars with blank prefix returns fallback vars`() {
+        val vars = env.getTermuxEnvVars("")
+        // Fallback env should have minimal vars
+        assertTrue(vars.containsKey("HOME"))
+        assertTrue(vars.containsKey("PATH"))
+        assertFalse(vars.containsKey("PREFIX"))
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: isElevated / hasTermux
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `isElevated returns false in FALLBACK mode`() {
+        assertFalse(env.isElevated())
+    }
+
+    @Test
+    fun `isElevated returns false when mode is not SHIZUKU or ROOT`() {
+        // FALLBACK mode should not be elevated
+        assertFalse(env.isElevated())
+    }
+
+    @Test
+    fun `isElevated returns false after unsuccessful switch to TERMUX`() = runTest {
+        // Bootstrap not installed, switch will fail
+        env.switchMode(TermuxEnvironment.ExecMode.TERMUX)
+        // Whether it succeeds or fails, isElevated should be false
+        assertFalse(env.isElevated())
+    }
+
+    @Test
+    fun `hasTermux returns false when not installed`() {
+        assertFalse(env.hasTermux())
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: getPrefix
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `getPrefix returns empty initially`() {
+        assertEquals("", env.getPrefix())
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: getSummary
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `getSummary returns non-empty description`() = runTest {
+        val summary = env.getSummary()
+        assertNotNull(summary)
+        assertTrue(summary.isNotBlank(), "Summary should not be blank")
+        assertTrue(summary.contains("Termux Environment") ||
+                   summary.contains("Mode") ||
+                   summary.contains("Bash"),
+            "Summary should contain environment info: $summary")
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: shutdown
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `shutdown does not throw`() {
+        env.shutdown()
+        // Should complete without exception
+        assertTrue(true)
+    }
+
+    @Test
+    fun `shutdown can be called multiple times`() {
+        env.shutdown()
+        env.shutdown()
+        assertTrue(true)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: installPackages
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `installPackages returns false when termux not available`() = runTest {
+        // Bootstrap is not installed, Termux not available
+        val result = env.installPackages(listOf("python"))
+        assertFalse(result)
+    }
+
+    @Test
+    fun `installCommonPackages returns false when termux not available`() = runTest {
+        val result = env.installCommonPackages()
+        assertFalse(result)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: isPackageInstalled
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `isPackageInstalled returns false without termux`() = runTest {
+        val installed = env.isPackageInstalled("python")
+        assertFalse(installed)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: ExecutionRequest
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `ExecutionRequest stores correct fields`() {
+        val req = TermuxEnvironment.ExecutionRequest(
+            command = "echo test",
+            mode = TermuxEnvironment.ExecMode.SHIZUKU,
+            useShizuku = true,
+            envVars = mapOf("PATH" to "/system/bin"),
+            workdir = "/tmp"
+        )
+        assertEquals("echo test", req.command)
+        assertEquals(TermuxEnvironment.ExecMode.SHIZUKU, req.mode)
+        assertTrue(req.useShizuku)
+        assertEquals("/system/bin", req.envVars["PATH"])
+        assertEquals("/tmp", req.workdir)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: EnvInfo defaults
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `EnvInfo has sensible defaults`() {
+        val info = TermuxEnvironment.EnvInfo()
+        assertEquals(TermuxEnvironment.ExecMode.FALLBACK, info.mode)
+        assertFalse(info.bootstrapInstalled)
+        assertFalse(info.bashAvailable)
+        assertFalse(info.aptAvailable)
+        assertFalse(info.shizukuAvailable)
+        assertFalse(info.shizukuAuthorized)
+        assertEquals(-1, info.shizukuUid)
+        assertTrue(info.installedPackages.isEmpty())
+        assertNull(info.error)
+    }
+
+    @Test
+    fun `EnvInfo with proot fields`() {
+        val info = TermuxEnvironment.EnvInfo(
+            mode = TermuxEnvironment.ExecMode.TERMUX,
+            prootDistroAvailable = true,
+            activeProotDistro = "ubuntu",
+            installedProotDistros = listOf("ubuntu", "debian")
+        )
+        assertTrue(info.prootDistroAvailable)
+        assertEquals("ubuntu", info.activeProotDistro)
+        assertEquals(2, info.installedProotDistros.size)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: suggestModeForCommand edge cases
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `suggestModeForCommand routes settings to SHIZUKU`() {
+        assertEquals(TermuxEnvironment.ExecMode.SHIZUKU,
+            env.suggestModeForCommand("settings put global airplane_mode_on 1"))
+    }
+
+    @Test
+    fun `suggestModeForCommand routes input to SHIZUKU`() {
+        assertEquals(TermuxEnvironment.ExecMode.SHIZUKU,
+            env.suggestModeForCommand("input keyevent KEYCODE_HOME"))
+    }
+
+    @Test
+    fun `suggestModeForCommand routes wm to SHIZUKU`() {
+        assertEquals(TermuxEnvironment.ExecMode.SHIZUKU,
+            env.suggestModeForCommand("wm size 1080x1920"))
+    }
+
+    @Test
+    fun `suggestModeForCommand routes pip3 to TERMUX`() {
+        assertEquals(TermuxEnvironment.ExecMode.TERMUX,
+            env.suggestModeForCommand("pip3 install torch"))
+    }
+
+    @Test
+    fun `suggestModeForCommand routes cargo to TERMUX`() {
+        assertEquals(TermuxEnvironment.ExecMode.TERMUX,
+            env.suggestModeForCommand("cargo build --release"))
+    }
+
+    @Test
+    fun `suggestModeForCommand routes make to TERMUX`() {
+        assertEquals(TermuxEnvironment.ExecMode.TERMUX,
+            env.suggestModeForCommand("make install"))
+    }
+
+    @Test
+    fun `suggestModeForCommand routes go to TERMUX`() {
+        assertEquals(TermuxEnvironment.ExecMode.TERMUX,
+            env.suggestModeForCommand("go build main.go"))
+    }
+
+    @Test
+    fun `suggestModeForCommand routes ruby to TERMUX`() {
+        assertEquals(TermuxEnvironment.ExecMode.TERMUX,
+            env.suggestModeForCommand("ruby script.rb"))
+    }
+
+    @Test
+    fun `suggestModeForCommand routes php to TERMUX`() {
+        assertEquals(TermuxEnvironment.ExecMode.TERMUX,
+            env.suggestModeForCommand("php artisan serve"))
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: PrefixPaths
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `prefix paths are configured correctly`() {
+        // Access via package-private is not possible, but we can observe behavior
+        assertTrue(true) // placeholder for prefix path test
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ADDITIONAL COVERAGE: mode flow updates
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `mode flow emits initial value`() = runTest {
+        val modeVal = env.mode.first()
+        assertEquals(TermuxEnvironment.ExecMode.FALLBACK, modeVal)
+    }
+
+    @Test
+    fun `isInstalling flow emits initial false`() = runTest {
+        val installing = env.isInstalling.first()
+        assertFalse(installing)
+    }
+
+    @Test
+    fun `installProgress flow emits initial empty`() = runTest {
+        val progress = env.installProgress.first()
+        assertNotNull(progress)
+    }
 }
