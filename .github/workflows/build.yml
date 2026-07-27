@@ -27,6 +27,12 @@ jobs:
         with:
           accept-android-sdk-licenses: true
 
+      - name: Set up Java 8 for SDK manager
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 8
+
       - name: Accept SDK licenses + install packages
         run: |
           # sdkmanager needs Java 8 (javax.xml.bind was removed in Java 11+)
@@ -44,6 +50,12 @@ jobs:
           echo "=== Installing packages ==="
           yes | sdkmanager --install "platform-tools" "build-tools;35.0.0" "platforms;android-35" "ndk;27.0.12077973" "cmake;3.22.1" 2>&1
         shell: bash
+
+      - name: Switch back to Java 17 for Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
 
       - name: Set SDK paths
         run: |
