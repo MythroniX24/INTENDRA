@@ -83,7 +83,7 @@ object WcWidth {
         if (codePoint in 0x0ABE..0x0AC5) return 0
         if (codePoint in 0x0AC7..0x0AC9) return 0
         if (codePoint in 0x0ACB..0x0ACD) return 0
-        if (codePoint == 0x0AE2..0x0AE3) return 0
+        if (codePoint in 0x0AE2..0x0AE3) return 0
         if (codePoint in 0x0AFA..0x0AFF) return 0
         if (codePoint in 0x0B01..0x0B03) return 0
         if (codePoint == 0x0B3C) return 0
@@ -93,7 +93,7 @@ object WcWidth {
         if (codePoint in 0x0B55..0x0B57) return 0
         if (codePoint in 0x0B62..0x0B63) return 0
         if (codePoint == 0x0B82) return 0
-        if (codePoint == 0x0BBE..0x0BC2) return 0
+        if (codePoint in 0x0BBE..0x0BC2) return 0
         if (codePoint in 0x0BC6..0x0BC8) return 0
         if (codePoint in 0x0BCA..0x0BCD) return 0
         if (codePoint == 0x0BD7) return 0
@@ -112,7 +112,7 @@ object WcWidth {
         if (codePoint in 0x0CD5..0x0CD6) return 0
         if (codePoint in 0x0CE2..0x0CE3) return 0
         if (codePoint in 0x0D00..0x0D03) return 0
-        if (codePoint == 0x0D3B..0x0D3C) return 0
+        if (codePoint in 0x0D3B..0x0D3C) return 0
         if (codePoint in 0x0D3E..0x0D44) return 0
         if (codePoint in 0x0D46..0x0D48) return 0
         if (codePoint in 0x0D4A..0x0D4D) return 0

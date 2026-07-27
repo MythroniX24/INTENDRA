@@ -247,24 +247,6 @@ class TerminalAgent(
             _outputFlow.tryEmit(StreamEvent.Output("default",
                 "\u001b[33m⚠ No persistent shell — using one-shot execution\u001b[0m\n"))
             null
-
-            val started = newShell.start()
-            if (started) {
-                persistentShell = newShell
-                // ⚡ Sync mode after shell creation so indicator is accurate
-                syncModeFromEnvironment()
-                Log.i(TAG, "✅ Persistent shell started (${newShell.backendDescription}), mode=$currentMode")
-                val modeStr = getModeDescription()
-                _outputFlow.tryEmit(StreamEvent.Output("default",
-                    "\u001b[32m✓ Terminal ready — $modeStr\u001b[0m\n"))
-                persistentShell
-            } else {
-                Log.e(TAG, "Failed to start persistent shell")
-                _outputFlow.tryEmit(StreamEvent.Output("default",
-                    "\u001b[31m✗ Failed to start persistent shell — using fallback execution\u001b[0m\n"))
-                // Don't cache dead shell — let runExecution try the fallback path
-                null
-            }
         }
     }
 

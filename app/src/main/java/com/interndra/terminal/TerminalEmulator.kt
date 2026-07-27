@@ -544,7 +544,8 @@ class TerminalEmulator(
                         }
                         i + 1 < params.size && params[i + 1] == 2 && i + 4 < params.size -> {
                             val r = params[i + 2].coerceIn(0, 255)
-                            val g = params[i + 3].coerceIn(0, 255); bgRgb = (r shl 16) or (g shl 8) or b; i += 4
+                            val g = params[i + 3].coerceIn(0, 255)
+                            val b2 = params[i + 4].coerceIn(0, 255); bgRgb = (r shl 16) or (g shl 8) or b2; i += 4
                         }
                         i + 1 < params.size && params[i + 1] == 5 && i + 2 < params.size -> {
                             background = params[i + 2].coerceIn(0, 255); bgRgb = null; i += 2
