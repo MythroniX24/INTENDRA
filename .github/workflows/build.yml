@@ -57,9 +57,11 @@ jobs:
           export JAVA_TOOL_OPTIONS="-Xbootclasspath/a:${JAXB_CP%:}"
           export SKIP_JDK_VERSION_CHECK=true
           echo "=== Accepting licenses ==="
-          yes | sdkmanager --licenses 2>&1 || true
+          # Use printf with enough y's instead of `yes` to avoid broken pipe
+          # (yes | cmd causes SIGPIPE when cmd closes stdin → exit code 1)
+          printf 'y\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\n' | sdkmanager --licenses 2>&1 || true
           echo "=== Installing packages ==="
-          yes | sdkmanager --install "platform-tools" "build-tools;35.0.0" "platforms;android-35" "ndk;27.0.12077973" "cmake;3.22.1" 2>&1
+          printf 'y\ny\ny\ny\ny\ny\ny\ny\ny\ny\n' | sdkmanager --install "platform-tools" "build-tools;35.0.0" "platforms;android-35" "ndk;27.0.12077973" "cmake;3.22.1" 2>&1 || true
         shell: bash
 
       - name: Set SDK paths
