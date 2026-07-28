@@ -119,15 +119,15 @@ class BugFixRegressionTest {
         val q = ByteQueue(capacity = 1024)
         val iterations = 200  // Reduced from 500 for CI stability
         val latch = CountDownLatch(2)
-        @Volatile var writerDone = false
-        @Volatile var readerDone = false
+        val writerDone = AtomicInteger(0)
+        val readerDone = AtomicInteger(0)
 
         val writer = Thread {
             val data = ByteArray(512) { 'Z'.code.toByte() }
             repeat(iterations) {
                 q.write(data, 0, data.size)
             }
-            writerDone = true
+            writerDone.set(1)
             latch.countDown()
         }
         writer.isDaemon = true
@@ -144,15 +144,15 @@ class BugFixRegressionTest {
                 // Safety: don't loop forever in CI
                 if (!writer.isAlive && q.size == 0 && totalRead < target) break
             }
-            readerDone = true
+            readerDone.set(1)
             latch.countDown()
         }
         reader.isDaemon = true
         reader.start()
 
         assertTrue("Should complete without deadlock", latch.await(30, TimeUnit.SECONDS))
-        assertTrue("Writer should complete", writerDone)
-        assertTrue("Reader should complete", readerDone)
+        assertEquals("Writer should complete", 1, writerDone.get())
+        assertEquals("Reader should complete", 1, readerDone.get())
     }
 
     // ══════════════════════════════════════════════════════════════════════
