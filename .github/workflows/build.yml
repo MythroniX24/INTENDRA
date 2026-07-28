@@ -44,6 +44,13 @@ jobs:
           wget -q "https://repo1.maven.org/maven2/org/glassfish/jaxb/txw2/2.3.1/txw2-2.3.1.jar" -O $JAXB_DIR/txw2.jar
           echo "=== Verifying downloads ==="
           ls -la $JAXB_DIR/
+          # Verify all JARs downloaded successfully (non-zero size)
+          for f in $JAXB_DIR/*.jar; do
+            if [ ! -s "$f" ]; then
+              echo "ERROR: $f is missing or empty — download failed"
+              exit 1
+            fi
+          done
           # Build a single classpath string for -Xbootclasspath/a:
           JAXB_CP=$(ls $JAXB_DIR/*.jar | tr '\n' ':')
           # -Xbootclasspath/a: IS honored by `java -jar` (CLASSPATH is NOT)
