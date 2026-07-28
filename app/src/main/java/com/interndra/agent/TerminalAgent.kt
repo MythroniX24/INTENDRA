@@ -36,13 +36,14 @@ import java.util.concurrent.ConcurrentHashMap
  *  - Interactive programs (vim, python REPL) can work via PTY in future
  *
  * ## Execution Priority
- * 1. **PersistentShell with Shizuku** — elevated shell (root/ADB UID), lives at /
- * 2. **PersistentShell sandboxed** — app's own UID, limited permissions
- * 3. **ShellExecutor fallback** — one-shot commands (legacy)
+ * 1. **Termux persistent bash** — Embedded Termux (PRIMARY), full Linux env
+ * 2. **PersistentShell with Shizuku** — elevated shell (root/ADB UID)
+ * 3. **ShellExecutor fallback** — sandboxed one-shot commands (legacy)
  *
- * ## No Termux Required
- * TermuxBridge has been removed. The terminal works independently with its
- * own built-in shell. No external Termux app needed.
+ * ## Termux is PRIMARY
+ * The embedded Termux bootstrap environment is the default and preferred
+ * execution backend. All AI commands use Termux by default, falling back
+ * to Shizuku for system-level commands that need elevated privileges.
  */
 class TerminalAgent(
     private val context: Context,

@@ -173,10 +173,15 @@ class TermuxEnvironment(
 
             // Determine best mode — Termux is default (user's requirement)
             // AI can switch to Shizuku for system-level commands
+            // 🐛 FIXED: Shizuku/ROOT branches were unreachable because bashAvail=true
+            // caught everything first. Now checks root → shizuku → termux → fallback
+            // in proper priority order. Termux is PRIMARY but Shizuku ROOT is highest
+            // privilege when available.
             val bestMode = when {
-                bashAvail -> ExecMode.TERMUX           // 🐧 Default: embedded Termux
-                shizukuAvail && shizukuAuth -> ExecMode.SHIZUKU // 🔑 Fallback: Shizuku ADB
-                shizukuAvail && shizukuAuth && shizukuUid == 0 -> ExecMode.ROOT // 🛡️ Root
+                shizukuAvail && shizukuAuth && shizukuUid == 0 -> ExecMode.ROOT    // 🛡️ Root (highest)
+                shizukuAvail && shizukuAuth && !bashAvail -> ExecMode.SHIZUKU       // 🔑 ADB (no Termux)
+                bashAvail -> ExecMode.TERMUX          // 🐧 Default: embedded Termux
+                shizukuAvail && shizukuAuth -> ExecMode.SHIZUKU // 🔑 Shizuku (fallback when no Termux)
                 else -> ExecMode.FALLBACK              // ⚙️ Sandboxed
             }
 

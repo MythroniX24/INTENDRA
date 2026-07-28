@@ -462,8 +462,11 @@ class TermuxBootstrapInstaller(
                 val end = (start + chunkSize).coerceAtMost(b64.length)
                 val chunk = b64.substring(start, end)
 
+                // 🐛 FIXED: Old code used "printf '%s' '$chunk'" which breaks if the
+                // base64 chunk contains single quotes. Now uses heredoc redirection
+                // which is safe for arbitrary content.
                 val result = shizukuShell.executeBlocking(
-                    "printf '%s' '$chunk' >> /data/local/tmp/intendra_bootstrap_b64.tmp 2>&1",
+                    "cat >> /data/local/tmp/intendra_bootstrap_b64.tmp << 'INTENDRA_EOF'\n$chunk\nINTENDRA_EOF",
                     VERIFY_TIMEOUT_MS
                 )
                 if (!result.isSuccess) return false
