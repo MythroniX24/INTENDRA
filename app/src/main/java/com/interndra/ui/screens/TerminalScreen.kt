@@ -257,29 +257,29 @@ fun TerminalScreen(
             onKey = { key ->
                 scope.launch {
                     val pty = vm.terminalAgent.getPtySession()
-                    val usePty = pty != null && pty.isRunning
+                    val usePty = pty?.isRunning == true
                     when (key) {
                         // ── Navigation keys ──
-                        "Tab" -> if (usePty) pty.writeInput("\t") else vm.terminalAgent.execute(activeSessionName, "\t")
-                        "Esc" -> if (usePty) pty.writeInput("\u001B") else vm.terminalAgent.execute(activeSessionName, "\u001B")
-                        "Up", "↑" -> if (usePty) pty.writeInput("\u001B[A") else vm.terminalAgent.execute(activeSessionName, "\u001B[A")
-                        "Down", "↓" -> if (usePty) pty.writeInput("\u001B[B") else vm.terminalAgent.execute(activeSessionName, "\u001B[B")
-                        "Left", "←" -> if (usePty) pty.writeInput("\u001B[D") else vm.terminalAgent.execute(activeSessionName, "\u001B[D")
-                        "Right", "→" -> if (usePty) pty.writeInput("\u001B[C") else vm.terminalAgent.execute(activeSessionName, "\u001B[C")
+                        "Tab" -> if (usePty) pty?.writeInput("\t") else vm.terminalAgent.execute(activeSessionName, "\t")
+                        "Esc" -> if (usePty) pty?.writeInput("\u001B") else vm.terminalAgent.execute(activeSessionName, "\u001B")
+                        "Up", "↑" -> if (usePty) pty?.writeInput("\u001B[A") else vm.terminalAgent.execute(activeSessionName, "\u001B[A")
+                        "Down", "↓" -> if (usePty) pty?.writeInput("\u001B[B") else vm.terminalAgent.execute(activeSessionName, "\u001B[B")
+                        "Left", "←" -> if (usePty) pty?.writeInput("\u001B[D") else vm.terminalAgent.execute(activeSessionName, "\u001B[D")
+                        "Right", "→" -> if (usePty) pty?.writeInput("\u001B[C") else vm.terminalAgent.execute(activeSessionName, "\u001B[C")
                         // ── Ctrl combos ──
-                        "Ctrl+A" -> if (usePty) pty.writeInput("\u0001") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0001')
-                        "Ctrl+E" -> if (usePty) pty.writeInput("\u0005") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0005')
-                        "Ctrl+W" -> if (usePty) pty.writeInput("\u0017") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0017')
-                        "Ctrl+U" -> if (usePty) pty.writeInput("\u0015") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0015')
-                        "Ctrl+R" -> if (usePty) pty.writeInput("\u0012") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0012')
+                        "Ctrl+A" -> if (usePty) pty?.writeInput("\u0001") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0001')
+                        "Ctrl+E" -> if (usePty) pty?.writeInput("\u0005") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0005')
+                        "Ctrl+W" -> if (usePty) pty?.writeInput("\u0017") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0017')
+                        "Ctrl+U" -> if (usePty) pty?.writeInput("\u0015") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0015')
+                        "Ctrl+R" -> if (usePty) pty?.writeInput("\u0012") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0012')
                         // ── Alt+arrows ──
-                        "Alt+←" -> if (usePty) pty.writeInput("\u001B\u0062") else vm.terminalAgent.execute(activeSessionName, "\u001Bb")
-                        "Alt+→" -> if (usePty) pty.writeInput("\u001B\u0066") else vm.terminalAgent.execute(activeSessionName, "\u001Bf")
-                        "Alt+↑" -> if (usePty) pty.writeInput("\u001B\u001B[A") else vm.terminalAgent.execute(activeSessionName, "\u001B\u001B[A")
-                        "Alt+↓" -> if (usePty) pty.writeInput("\u001B\u001B[B") else vm.terminalAgent.execute(activeSessionName, "\u001B\u001B[B")
+                        "Alt+←" -> if (usePty) pty?.writeInput("\u001B\u0062") else vm.terminalAgent.execute(activeSessionName, "\u001Bb")
+                        "Alt+→" -> if (usePty) pty?.writeInput("\u001B\u0066") else vm.terminalAgent.execute(activeSessionName, "\u001Bf")
+                        "Alt+↑" -> if (usePty) pty?.writeInput("\u001B\u001B[A") else vm.terminalAgent.execute(activeSessionName, "\u001B\u001B[A")
+                        "Alt+↓" -> if (usePty) pty?.writeInput("\u001B\u001B[B") else vm.terminalAgent.execute(activeSessionName, "\u001B\u001B[B")
                         // ── Literal characters ──
-                        "/" -> if (usePty) pty.writeInput("/") else vm.terminalAgent.execute(activeSessionName, "/")
-                        "-" -> if (usePty) pty.writeInput("-") else vm.terminalAgent.execute(activeSessionName, "-")
+                        "/" -> if (usePty) pty?.writeInput("/") else vm.terminalAgent.execute(activeSessionName, "/")
+                        "-" -> if (usePty) pty?.writeInput("-") else vm.terminalAgent.execute(activeSessionName, "-")
                     }
                 }
             }
