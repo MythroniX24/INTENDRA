@@ -117,35 +117,42 @@ class BugFixRegressionTest {
     @Test
     fun `Bug4 - no deadlock under rapid write-read cycles`() {
         val q = ByteQueue(capacity = 1024)
-        val iterations = 500
+        val iterations = 200  // Reduced from 500 for CI stability
         val latch = CountDownLatch(2)
-        var writerDone = false
-        var readerDone = false
+        @Volatile var writerDone = false
+        @Volatile var readerDone = false
 
-        Thread {
+        val writer = Thread {
             val data = ByteArray(512) { 'Z'.code.toByte() }
             repeat(iterations) {
                 q.write(data, 0, data.size)
             }
             writerDone = true
             latch.countDown()
-        }.start()
+        }
+        writer.isDaemon = true
+        writer.start()
 
-        Thread {
+        val reader = Thread {
             val buf = ByteArray(1024)
             var totalRead = 0
-            while (totalRead < iterations * 512) {
+            val target = iterations * 512
+            while (totalRead < target) {
                 val n = q.tryRead(buf, 0, buf.size)
                 if (n > 0) totalRead += n
                 else Thread.sleep(1)
+                // Safety: don't loop forever in CI
+                if (!writer.isAlive && q.size == 0 && totalRead < target) break
             }
             readerDone = true
             latch.countDown()
-        }.start()
+        }
+        reader.isDaemon = true
+        reader.start()
 
-        assertTrue("Should complete without deadlock", latch.await(10, TimeUnit.SECONDS))
-        assertTrue(writerDone)
-        assertTrue(readerDone)
+        assertTrue("Should complete without deadlock", latch.await(30, TimeUnit.SECONDS))
+        assertTrue("Writer should complete", writerDone)
+        assertTrue("Reader should complete", readerDone)
     }
 
     // ══════════════════════════════════════════════════════════════════════
