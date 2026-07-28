@@ -134,8 +134,7 @@ class ProotDistroManagerTest {
     @Test
     fun `installProotDistro returns false without termux`() = runTest {
         val result = manager.installProotDistro()
-        assertFalse(result,
-            "Should fail gracefully without Termux environment")
+        assertFalse("Should fail gracefully without Termux environment", result)
     }
 
     @Test
@@ -194,8 +193,7 @@ class ProotDistroManagerTest {
     fun `getSummary returns non-empty string`() = runTest {
         val summary = manager.getSummary()
         assertNotNull(summary)
-        assertTrue(summary.isNotBlank(),
-            "Summary should not be blank")
+        assertTrue("Summary should not be blank", summary.isNotBlank())
     }
 
     @Test

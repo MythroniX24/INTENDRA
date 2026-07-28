@@ -113,7 +113,7 @@ class ShellExecutorTest {
     @Test
     fun `run executes a simple echo command`() {
         val result = ShellExecutor.run("echo 'hello world'")
-        assertTrue(result.isSuccess, "Expected success but got: ${result.stderr}")
+        assertTrue("Expected success but got: ${result.stderr}", result.isSuccess)
         assertEquals(0, result.exitCode)
         assertTrue("hello world" in result.stdout)
     }
@@ -219,8 +219,8 @@ class ShellExecutorTest {
             lines.add(line)
         }
         assertTrue(result.isSuccess)
-        assertTrue(lines.any { it.contains("line1") }, "Expected line1 in: $lines")
-        assertTrue(lines.any { it.contains("line2") }, "Expected line2 in: $lines")
+        assertTrue("Expected line1 in: $lines", lines.any { it.contains("line1") })
+        assertTrue("Expected line2 in: $lines", lines.any { it.contains("line2") })
     }
 
     @Test
@@ -230,8 +230,8 @@ class ShellExecutorTest {
             lines.add(line)
         }
         assertTrue(result.isSuccess)
-        assertTrue(lines.any { it.contains("stderr") || it.contains("\\u001b[31m") },
-            "Expected stderr in: $lines")
+        assertTrue("Expected stderr in: $lines",
+            lines.any { it.contains("stderr") || it.contains("\\u001b[31m") })
     }
 
     @Test
@@ -263,8 +263,8 @@ class ShellExecutorTest {
         latch.await(5, TimeUnit.SECONDS)
         bg.cancel()
 
-        assertTrue(outputLines.any { it.contains("background test") },
-            "Expected output but got: $outputLines")
+        assertTrue("Expected output but got: $outputLines",
+            outputLines.any { it.contains("background test") })
     }
 
     @Test
@@ -310,8 +310,8 @@ class ShellExecutorTest {
         val result = ShellExecutor.run("echo '$largeOutput'")
         // Should not crash and output should be capped
         assertNotNull(result.stdout)
-        assertTrue(result.stdout.length < TerminalConfig.MAX_OUTPUT_BYTES + 1000,
-            "Output was ${result.stdout.length}, expected < ${TerminalConfig.MAX_OUTPUT_BYTES + 1000}")
+        assertTrue("Output was ${result.stdout.length}, expected < ${TerminalConfig.MAX_OUTPUT_BYTES + 1000}",
+            result.stdout.length < TerminalConfig.MAX_OUTPUT_BYTES + 1000)
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -326,9 +326,9 @@ class ShellExecutorTest {
 
     @Test
     fun `run handles multiline output`() {
-        val result = ShellExecutor.run("for i in 1 2 3; do echo \"line \\$i\"; done")
+        val result = ShellExecutor.run("printf 'line 1\nline 2\nline 3\n'")
         assertTrue(result.isSuccess)
-        assertTrue(result.stdout.lines().size >= 3)
+        assertTrue("Expected at least 3 lines, got ${result.stdout.lines().size}", result.stdout.lines().size >= 3)
     }
 
     @Test

@@ -338,11 +338,11 @@ class TermuxEnvironmentTest {
     fun `getSummary returns non-empty description`() = runTest {
         val summary = env.getSummary()
         assertNotNull(summary)
-        assertTrue(summary.isNotBlank(), "Summary should not be blank")
-        assertTrue(summary.contains("Termux Environment") ||
-                   summary.contains("Mode") ||
-                   summary.contains("Bash"),
-            "Summary should contain environment info: $summary")
+        assertTrue("Summary should not be blank", summary.isNotBlank())
+        assertTrue("Summary should contain environment info: $summary",
+            summary.contains("Termux Environment") ||
+            summary.contains("Mode") ||
+            summary.contains("Bash"))
     }
 
     // ══════════════════════════════════════════════════════════════════════
