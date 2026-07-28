@@ -29,14 +29,25 @@ jobs:
 
       - name: Accept SDK licenses + install packages
         run: |
-          # Latest sdkmanager requires JDK 17+ but javax.xml.bind was removed in JDK 11+
-          # Solution: Download JAXB JARs and add to classpath
-          echo "=== Downloading JAXB JARs (needed by sdkmanager) ==="
-          wget -q "https://repo1.maven.org/maven2/javax/xml/bind/jaxb-api/2.3.1/jaxb-api-2.3.1.jar" -O /tmp/jaxb-api.jar
-          wget -q "https://repo1.maven.org/maven2/org/glassfish/jaxb/jaxb-runtime/2.3.1/jaxb-runtime-2.3.1.jar" -O /tmp/jaxb-runtime.jar
-          wget -q "https://repo1.maven.org/maven2/javax/activation/activation/1.1.1/activation-1.1.1.jar" -O /tmp/activation.jar
+          # Latest sdkmanager requires JDK 17+ but javax.xml.bind was removed in JDK 11+.
+          # JAXB 2.3.1 runtime has transitive deps: istack-commons-runtime, stax-ex, txw2.
+          # Download ALL required JARs and add to bootstrap classpath.
+          echo "=== Downloading JAXB JARs (needed by sdkmanager on JDK 17) ==="
+          JAXB_DIR=/tmp/jaxb
+          mkdir -p $JAXB_DIR
+          wget -q "https://repo1.maven.org/maven2/javax/xml/bind/jaxb-api/2.3.1/jaxb-api-2.3.1.jar" -O $JAXB_DIR/jaxb-api.jar
+          wget -q "https://repo1.maven.org/maven2/org/glassfish/jaxb/jaxb-runtime/2.3.1/jaxb-runtime-2.3.1.jar" -O $JAXB_DIR/jaxb-runtime.jar
+          wget -q "https://repo1.maven.org/maven2/javax/activation/activation/1.1.1/activation-1.1.1.jar" -O $JAXB_DIR/activation.jar
+          wget -q "https://repo1.maven.org/maven2/com/sun/istack/istack-commons-runtime/3.0.12/istack-commons-runtime-3.0.12.jar" -O $JAXB_DIR/istack-commons-runtime.jar
+          wget -q "https://repo1.maven.org/maven2/org/jvnet/staxex/stax-ex/1.8/stax-ex-1.8.jar" -O $JAXB_DIR/stax-ex.jar
+          wget -q "https://repo1.maven.org/maven2/com/sun/xml/fastinfoset/FastInfoset/1.2.16/FastInfoset-1.2.16.jar" -O $JAXB_DIR/fastinfoset.jar
+          wget -q "https://repo1.maven.org/maven2/org/glassfish/jaxb/txw2/2.3.1/txw2-2.3.1.jar" -O $JAXB_DIR/txw2.jar
+          echo "=== Verifying downloads ==="
+          ls -la $JAXB_DIR/
+          # Build a single classpath string for -Xbootclasspath/a:
+          JAXB_CP=$(ls $JAXB_DIR/*.jar | tr '\n' ':')
           # -Xbootclasspath/a: IS honored by `java -jar` (CLASSPATH is NOT)
-          export JAVA_TOOL_OPTIONS="-Xbootclasspath/a:/tmp/jaxb-api.jar:/tmp/jaxb-runtime.jar:/tmp/activation.jar"
+          export JAVA_TOOL_OPTIONS="-Xbootclasspath/a:${JAXB_CP%:}"
           export SKIP_JDK_VERSION_CHECK=true
           echo "=== Accepting licenses ==="
           yes | sdkmanager --licenses 2>&1 || true
