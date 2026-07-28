@@ -623,6 +623,13 @@ class TerminalAgent(
                 shizukuShell.execute(trimmed, timeoutMs) { line ->
                     session.outputLines.add(line); _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
                 }
+            } else if (termuxEnvironment != null && termuxEnvironment.hasTermux()) {
+                // Even without persistent shell, wrap with Termux env (PATH, LD_PRELOAD)
+                Log.d(TAG, "Executing via Termux wrapper (no persistent shell): $trimmed")
+                val execReq = termuxEnvironment!!.buildExecutionCommand(trimmed, TermuxEnvironment.ExecMode.TERMUX)
+                ShellExecutor.runStreaming(execReq.command, timeoutMs) { line ->
+                    session.outputLines.add(line); _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
+                }
             } else {
                 Log.d(TAG, "Executing via ShellExecutor fallback: $trimmed")
                 ShellExecutor.runStreaming(trimmed, timeoutMs) { line ->

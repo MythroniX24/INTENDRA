@@ -319,7 +319,11 @@ class TermuxEnvironment(
         val envStr = env.entries.joinToString(" ") { (k, v) ->
             "${k}='${v.replace("'", "'\\''")}'"
         }
-        return "env $envStr $prefix/usr/bin/bash -l -c '${command.replace("'", "'\\''")}' 2>&1"
+        // Use heredoc to avoid shell quoting issues with $(), backticks, nested quotes
+        val safeCommand = command
+            .replace("\\", "\\\\")     // escape backslashes
+            .replace("\u0000", "")       // strip null bytes  
+        return "env $envStr $prefix/usr/bin/bash -l << 'INTENDRA_CMD_EOF'\n$safeCommand\nINTENDRA_CMD_EOF\n"
     }
 
     /**
@@ -330,7 +334,11 @@ class TermuxEnvironment(
         val envStr = env.entries.joinToString(" ") { (k, v) ->
             "${k}='${v.replace("'", "'\\''")}'"
         }
-        return "env $envStr $command"
+        // Use heredoc for Shizuku commands too — safe against arbitrary content
+        val safeCommand = command
+            .replace("\\", "\\\\")
+            .replace("\u0000", "")
+        return "env $envStr sh << 'INTENDRA_CMD_EOF'\n$safeCommand\nINTENDRA_CMD_EOF\n"
     }
 
     // ══════════════════════════════════════════════════════════════════════

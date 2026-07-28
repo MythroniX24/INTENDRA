@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -170,19 +171,44 @@ fun TerminalScreen(
                     .fillMaxSize()
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                // ── PTY Screen buffer rendering (batched for performance) ──
-                // Bug #2 fix: Instead of rendering each character as a separate
-                // Text() composable (4800 instances per frame → severe jank),
-                // batch each row into a single AnnotatedString rendered by one
-                // Text() call. This reduces composables from ~4800 to ~40.
+                // ── MUTUALLY EXCLUSIVE rendering: PTY buffer XOR streaming output ──
+                // Fix: When PTY is active, ONLY show the PTY screen buffer.
+                // When PTY is NOT active, show streaming output lines.
+                // Previously both were shown simultaneously causing duplicate content.
                 if (isPtyActive.value && screenChars.value.isNotEmpty()) {
-                    // Also fetch styles for color rendering
-                    val screenStyles = remember(screenChars.value) {
-                        vm.terminalAgent.getPtySession()?.emulator?.getScreenStyles() ?: emptyList()
+                    // ── PTY Screen buffer rendering ────────────────
+                    // Use derivedStateOf so styles re-compute when emulator state changes
+                    // (not just when screenChars identity changes — fixes stale color bug).
+                    val screenStyles by remember {
+                        derivedStateOf {
+                            vm.terminalAgent.getPtySession()?.emulator?.getScreenStyles() ?: emptyList()
+                        }
                     }
+                    val cursorRow = vm.terminalAgent.getPtySession()?.emulator?.cursorRow ?: 0
+                    val cursorCol = vm.terminalAgent.getPtySession()?.emulator?.cursorCol ?: 0
+
                     screenChars.value.forEachIndexed { rowIdx, row ->
                         val styleRow = screenStyles.getOrNull(rowIdx)
-                        val annotatedLine = buildAnnotatedStringForRow(row, styleRow)
+                        // Overlay cursor ON the character row (not as a separate line)
+                        val displayRow = if (rowIdx == cursorRow && row.isNotEmpty()) {
+                            // Replace character at cursor column with cursor block
+                            val modified = row.copyOf()
+                            val col = cursorCol.coerceIn(0, modified.size - 1)
+                            modified[col] = '\u2588' // Full block = cursor
+                            modified
+                        } else {
+                            row
+                        }
+                        // Apply cursor highlight style at cursor position
+                        val displayStyles = if (rowIdx == cursorRow && styleRow != null) {
+                            val mod = styleRow.copyOf()
+                            val col = cursorCol.coerceIn(0, mod.size - 1)
+                            mod[col] = mod[col] or 0x200000 // reverse video for cursor
+                            mod
+                        } else {
+                            styleRow
+                        }
+                        val annotatedLine = buildAnnotatedStringForRow(displayRow, displayStyles)
                         Text(
                             text = annotatedLine,
                             fontSize = 13.sp,
@@ -193,10 +219,8 @@ fun TerminalScreen(
                             overflow = TextOverflow.Visible
                         )
                     }
-                }
-
-                // ── Streaming output lines ─────────────────────
-                if (!isPtyActive.value || outputLines.isNotEmpty()) {
+                } else {
+                    // ── Streaming output lines (only when PTY not active) ──
                     outputLines.forEach { line ->
                         Text(
                             text = renderAnsiLine(line),
@@ -209,37 +233,21 @@ fun TerminalScreen(
                             softWrap = false
                         )
                     }
-                }
 
-                // ── Empty state ────────────────────────────────
-                if (!isPtyActive.value && outputLines.isEmpty()) {
-                    TerminalWelcomeMessage(
-                        mode = vm.terminalAgent.currentMode,
-                        onInstallTermux = { vm.installEmbeddedTermux(
-                            onProgress = { progress ->
-                                outputLines.add("📦 $progress")
-                            },
-                            onComplete = { success, msg ->
-                                outputLines.add(if (success) "\u001b[32m$msg\u001b[0m" else "\u001b[31m$msg\u001b[0m")
-                            }
-                        )}
-                    )
-                }
-
-                Spacer(Modifier.height(4.dp))
-
-                // ── Blinking cursor at current position ────────
-                if (isPtyActive.value) {
-                    // Determine cursor state from emulator
-                    val session = vm.terminalAgent.getPtySession()
-                    val row = session?.emulator?.cursorRow ?: 0
-                    val col = session?.emulator?.cursorCol ?: 0
-                    Text(
-                        text = " ".repeat(col.coerceAtLeast(0)) + "█",
-                        color = TerminalGreen.copy(alpha = 0.7f),
-                        fontSize = 13.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
+                    // ── Empty state ────────────────────────────
+                    if (outputLines.isEmpty()) {
+                        TerminalWelcomeMessage(
+                            mode = vm.terminalAgent.currentMode,
+                            onInstallTermux = { vm.installEmbeddedTermux(
+                                onProgress = { progress ->
+                                    outputLines.add("📦 $progress")
+                                },
+                                onComplete = { success, msg ->
+                                    outputLines.add(if (success) "\u001b[32m$msg\u001b[0m" else "\u001b[31m$msg\u001b[0m")
+                                }
+                            )}
+                        )
+                    }
                 }
             }
         }
@@ -248,13 +256,30 @@ fun TerminalScreen(
         ExtraKeysRow(
             onKey = { key ->
                 scope.launch {
+                    val pty = vm.terminalAgent.getPtySession()
+                    val usePty = pty != null && pty.isRunning
                     when (key) {
-                        "Tab" -> vm.terminalAgent.execute(activeSessionName, "\t")
-                        "Esc" -> vm.terminalAgent.execute(activeSessionName, "\u001B")
-                        "Up" -> vm.terminalAgent.execute(activeSessionName, "\u001B[A")
-                        "Down" -> vm.terminalAgent.execute(activeSessionName, "\u001B[B")
-                        "Left" -> vm.terminalAgent.execute(activeSessionName, "\u001B[D")
-                        "Right" -> vm.terminalAgent.execute(activeSessionName, "\u001B[C")
+                        // ── Navigation keys ──
+                        "Tab" -> if (usePty) pty.writeInput("\t") else vm.terminalAgent.execute(activeSessionName, "\t")
+                        "Esc" -> if (usePty) pty.writeInput("\u001B") else vm.terminalAgent.execute(activeSessionName, "\u001B")
+                        "Up", "↑" -> if (usePty) pty.writeInput("\u001B[A") else vm.terminalAgent.execute(activeSessionName, "\u001B[A")
+                        "Down", "↓" -> if (usePty) pty.writeInput("\u001B[B") else vm.terminalAgent.execute(activeSessionName, "\u001B[B")
+                        "Left", "←" -> if (usePty) pty.writeInput("\u001B[D") else vm.terminalAgent.execute(activeSessionName, "\u001B[D")
+                        "Right", "→" -> if (usePty) pty.writeInput("\u001B[C") else vm.terminalAgent.execute(activeSessionName, "\u001B[C")
+                        // ── Ctrl combos ──
+                        "Ctrl+A" -> if (usePty) pty.writeInput("\u0001") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0001')
+                        "Ctrl+E" -> if (usePty) pty.writeInput("\u0005") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0005')
+                        "Ctrl+W" -> if (usePty) pty.writeInput("\u0017") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0017')
+                        "Ctrl+U" -> if (usePty) pty.writeInput("\u0015") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0015')
+                        "Ctrl+R" -> if (usePty) pty.writeInput("\u0012") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0012')
+                        // ── Alt+arrows ──
+                        "Alt+←" -> if (usePty) pty.writeInput("\u001B\u0062") else vm.terminalAgent.execute(activeSessionName, "\u001Bb")
+                        "Alt+→" -> if (usePty) pty.writeInput("\u001B\u0066") else vm.terminalAgent.execute(activeSessionName, "\u001Bf")
+                        "Alt+↑" -> if (usePty) pty.writeInput("\u001B\u001B[A") else vm.terminalAgent.execute(activeSessionName, "\u001B\u001B[A")
+                        "Alt+↓" -> if (usePty) pty.writeInput("\u001B\u001B[B") else vm.terminalAgent.execute(activeSessionName, "\u001B\u001B[B")
+                        // ── Literal characters ──
+                        "/" -> if (usePty) pty.writeInput("/") else vm.terminalAgent.execute(activeSessionName, "/")
+                        "-" -> if (usePty) pty.writeInput("-") else vm.terminalAgent.execute(activeSessionName, "-")
                     }
                 }
             }

@@ -122,7 +122,9 @@ class HybridExecutionEngine(
             // Falls back to sandboxed ShellExecutor only if no TerminalAgent.
             val agent = terminalAgent
             if (agent != null) {
-                val sessionName = "exec_shell_$index"
+                // Use a single persistent session for ALL AI commands (not exec_shell_N each time)
+                // This means cd, env vars, and shell state persist across commands
+                val sessionName = "ai_persistent"
                 val result = agent.execute(sessionName, cmd.command)
                 if (result.isSuccess) {
                     val output = if (result.stdout.isNotBlank()) result.stdout else "(completed)"
@@ -148,8 +150,9 @@ class HybridExecutionEngine(
         return try {
             val agent = terminalAgent
             if (agent != null) {
-                // Use TerminalAgent for session-aware execution with persistent shell
-                val sessionName = "exec_$index"
+                // Use a single persistent session for ALL AI commands
+                // This preserves shell state (cd, env vars, aliases) across commands
+                val sessionName = "ai_persistent"
                 val result = agent.execute(sessionName, cmd.command)
                 if (result.isSuccess) {
                     val output = if (result.stdout.isNotBlank()) result.stdout else "(completed)"
