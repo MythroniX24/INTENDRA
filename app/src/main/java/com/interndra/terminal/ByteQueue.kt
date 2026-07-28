@@ -93,9 +93,12 @@ class ByteQueue(
                 written += batchSize
                 totalWritten += batchSize
                 if (count > peakCount) peakCount = count
+
+                // Notify reader INSIDE the same lock — avoids race where
+                // notify is lost between releasing the write lock and
+                // acquiring the notify lock (Bug #4 deadlock fix)
+                (this as java.lang.Object).notifyAll()
             }
-            // Notify reader outside lock
-            synchronized(this) { (this as java.lang.Object).notifyAll() }
         }
         return written
     }

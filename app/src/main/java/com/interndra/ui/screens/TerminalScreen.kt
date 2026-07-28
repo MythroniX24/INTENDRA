@@ -22,7 +22,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -167,26 +170,28 @@ fun TerminalScreen(
                     .fillMaxSize()
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                // ── PTY Screen buffer rendering ─────────────────
+                // ── PTY Screen buffer rendering (batched for performance) ──
+                // Bug #2 fix: Instead of rendering each character as a separate
+                // Text() composable (4800 instances per frame → severe jank),
+                // batch each row into a single AnnotatedString rendered by one
+                // Text() call. This reduces composables from ~4800 to ~40.
                 if (isPtyActive.value && screenChars.value.isNotEmpty()) {
-                    // Render the real PTY screen buffer character by character
-                    screenChars.value.forEach { row ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(18.dp)
-                        ) {
-                            row.forEachIndexed { col, char ->
-                                Text(
-                                    text = char.toString(),
-                                    color = TerminalGreen,
-                                    fontSize = 13.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
-                        }
+                    // Also fetch styles for color rendering
+                    val screenStyles = remember(screenChars.value) {
+                        vm.terminalAgent.getPtySession()?.emulator?.getScreenStyles() ?: emptyList()
+                    }
+                    screenChars.value.forEachIndexed { rowIdx, row ->
+                        val styleRow = screenStyles.getOrNull(rowIdx)
+                        val annotatedLine = buildAnnotatedStringForRow(row, styleRow)
+                        Text(
+                            text = annotatedLine,
+                            fontSize = 13.sp,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 18.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Visible
+                        )
                     }
                 }
 
@@ -792,4 +797,119 @@ private fun renderAnsiLine(line: String): String {
         .replace(Regex("\u001b\\][0-9;]*[a-zA-Z]"), "")
         .replace("\u001b", "")
         .replace("\u0007", "")
+}
+
+/**
+ * Build an AnnotatedString from a row of characters and optional styles.
+ *
+ * This batches an entire terminal row (up to 120 chars) into a SINGLE
+ * AnnotatedString, so only ONE Text() composable is needed per row
+ * instead of one per character. Fixes Bug #2 (rendering jank).
+ *
+ * @param row     CharArray of characters in the row
+ * @param styles  Optional IntArray of TextStyle-encoded styles per column
+ */
+private fun buildAnnotatedStringForRow(row: CharArray, styles: IntArray?): AnnotatedString {
+    if (row.isEmpty()) return AnnotatedString("")
+
+    return buildAnnotatedString {
+        var currentSpanStart = 0
+        var currentStyleCode = styles?.getOrNull(0) ?: -1
+
+        for (col in row.indices) {
+            val styleCode = styles?.getOrNull(col) ?: -1
+            if (styleCode != currentStyleCode) {
+                // Style changed — emit the previous segment
+                if (col > currentSpanStart) {
+                    val segment = String(row, currentSpanStart, col - currentSpanStart)
+                    if (currentStyleCode >= 0) {
+                        val spanStyle = styleCodeToSpanStyle(currentStyleCode)
+                        if (spanStyle != null) {
+                            pushStyle(spanStyle)
+                            append(segment)
+                            pop()
+                        } else {
+                            append(segment)
+                        }
+                    } else {
+                        append(segment)
+                    }
+                }
+                currentSpanStart = col
+                currentStyleCode = styleCode
+            }
+        }
+        // Emit the final segment
+        if (currentSpanStart < row.size) {
+            val segment = String(row, currentSpanStart, row.size - currentSpanStart)
+            if (currentStyleCode >= 0) {
+                val spanStyle = styleCodeToSpanStyle(currentStyleCode)
+                if (spanStyle != null) {
+                    pushStyle(spanStyle)
+                    append(segment)
+                    pop()
+                } else {
+                    append(segment)
+                }
+            } else {
+                append(segment)
+            }
+        }
+    }
+}
+
+/**
+ * Convert a TextStyle-encoded int to a Compose SpanStyle.
+ * Returns null for default style (no special formatting needed).
+ *
+ * TextStyle encoding (from TextStyle.kt):
+ *   - Bits 0-7   → foreground color index (SHIFT_FG = 0)
+ *   - Bits 8-15  → background color index (SHIFT_BG = 8)
+ *   - Bits 16-23 → style flags (SHIFT_FLAGS = 16)
+ *     - bit 16 (0x10000) → bold
+ *     - bit 17 (0x20000) → dim
+ *     - bit 18 (0x40000) → italic
+ *     - bit 19 (0x80000) → underline
+ *     - bit 20 (0x100000) → blink
+ *     - bit 21 (0x200000) → reverse
+ *     - bit 22 (0x400000) → strikethrough
+ *     - bit 23 (0x800000) → hidden
+ */
+private fun styleCodeToSpanStyle(styleCode: Int): SpanStyle? {
+    val foreground = styleCode and 0xFF
+    val hasBold = (styleCode and 0x10000) != 0
+    val hasUnderline = (styleCode and 0x80000) != 0
+    val isItalic = (styleCode and 0x40000) != 0
+
+    // Map ANSI color index → Compose Color
+    val color = when (foreground) {
+        0 -> null                          // black / default bg
+        1 -> TerminalRed                   // red
+        2 -> TerminalGreen                 // green
+        3 -> TerminalYellow                // yellow
+        4 -> TerminalBlue                  // blue
+        5 -> TerminalMagenta               // magenta
+        6 -> TerminalCyan                  // cyan
+        7 -> null                          // white/default fg → use default
+        in 8..15 -> when (foreground - 8) { // bright colors
+            0 -> TerminalWhite.copy(alpha = 0.6f)  // bright black (grey)
+            1 -> TerminalRed                         // bright red
+            2 -> TerminalGreen                       // bright green
+            3 -> TerminalYellow                      // bright yellow
+            4 -> TerminalBlue                         // bright blue
+            5 -> TerminalMagenta                      // bright magenta
+            6 -> TerminalCyan                         // bright cyan
+            7 -> TerminalWhite                        // bright white
+            else -> null
+        }
+        else -> null                       // 256-color / true-color → default for now
+    }
+
+    if (color == null && !hasBold && !hasUnderline && !isItalic) return null
+    return SpanStyle(
+        color = color ?: TerminalGreen,
+        fontWeight = if (hasBold) FontWeight.Bold else null,
+        fontStyle = if (isItalic) androidx.compose.ui.text.font.FontStyle.Italic else null,
+        textDecoration = if (hasUnderline) androidx.compose.ui.text.style.TextDecoration.Underline else null
+    )
 }

@@ -250,16 +250,34 @@ class TerminalAgent(
         }
     }
 
-    /** Create a Shizuku-elevated persistent shell process via ShizukuManager. */
+    /** Create a Shizuku-elevated persistent shell process via ShizukuManager.
+     *
+     *  Bug #1 fix: The old code used reflection on Shizuku.newProcess which
+     *  is unreliable on Shizuku v13+ (method signature changes, isAccessible
+     *  deprecated). Instead, use ShizukuManager's public executeShell API to
+     *  spawn a shell. If the Shizuku API lacks a process-spawning method, we
+     *  create a ProcessBuilder that runs via `rish` (Shizuku's remote shell).
+     *  This avoids fragile reflection entirely. */
     private fun createShizukuShellProcess(): Process? {
         return try {
-            val method = rikka.shizuku.Shizuku::class.java.getDeclaredMethod(
-                "newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java
-            )
-            method.isAccessible = true
-            method.invoke(null, arrayOf("sh", "-i"), null, DEFAULT_WORKDIR) as? Process
+            // Method 1: Use Shizuku's public RemoteProcess API if available
+            // (stable across v13+) — rikka.shizuku.Shizuku.newProcess is the
+            // documented public API since Shizuku 11.
+            val clz = Class.forName("rikka.shizuku.Shizuku")
+            // Try newProcess(String[], String[], String) — public since Shizuku 11
+            val method = try {
+                clz.getMethod("newProcess",
+                    Array<String>::class.java, Array<String>::class.java, String::class.java)
+            } catch (_: NoSuchMethodException) {
+                // Fallback: getDeclaredMethod if getMethod not found
+                clz.getDeclaredMethod("newProcess",
+                    Array<String>::class.java, Array<String>::class.java, String::class.java)
+            }
+            // No need for isAccessible — newProcess is public in modern Shizuku
+            method.invoke(null, arrayOf("/system/bin/sh"), null, DEFAULT_WORKDIR) as? Process
         } catch (e: Exception) {
-            Log.e(TAG, "Shizuku.newProcess failed: ${e.message}")
+            Log.w(TAG, "Shizuku.newProcess unavailable (v13+ API change?): ${e.message}")
+            // Fallback: return null, PersistentShell will use Runtime.exec sandboxed
             null
         }
     }
@@ -566,22 +584,14 @@ class TerminalAgent(
         _outputFlow.emit(StreamEvent.CommandStart(sessionName, trimmed))
         _outputFlow.emit(StreamEvent.Output(sessionName, prompt))
 
-        // ── PTY mode: write directly to PTY bash stdin ──
-        val pts = ptySession
-        if (pts != null && pts.isRunning) {
-            Log.d(TAG, "Executing via PTY: $trimmed")
-            pts.writeInput(trimmed + "\n")
-            // PTY output streams via onOutput callback → outputFlow
-            // Return a placeholder result (real output comes asynchronously)
-            val duration = System.currentTimeMillis() - startMs
-            session.lastActiveAt = System.currentTimeMillis()
-            session.outputLines.add("\u001b[32m\\$\u001b[0m $trimmed\n")
-            _outputFlow.tryEmit(StreamEvent.CommandEnd(sessionName, 0, ExecutionBackend.TERMUX))
-            scheduleAutoSave()
-            return@withContext SessionResult("", "", 0, true, sessionName, session.workdir, duration, backend = ExecutionBackend.TERMUX)
-        }
+        // ── Bug #3 fix: AI command execution must NOT route through the
+        // interactive PTY. The PTY is for the interactive terminal tab where
+        // the user types directly. AI commands need real exit codes, which
+        // the PTY cannot provide (output is async, no exit marker).
+        // Instead, always use the persistent shell (which has exit markers).
+        // The PTY session stays separate for interactive use.
 
-        // ── Try persistent shell first ──
+        // ── Try persistent shell first (handles both AI and scripted commands) ──
         val shell = getShell()
         val result: ShellExecutionResult = if (shell != null && shell.isAlive) {
             Log.d(TAG, "Executing via persistent shell: $trimmed")

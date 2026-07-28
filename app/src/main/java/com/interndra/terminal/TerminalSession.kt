@@ -132,6 +132,7 @@ class TerminalSession(
 
     private val running = AtomicBoolean(false)
     private var readerThread: Thread? = null
+    private var emulatorThread: Thread? = null
     private var waiterThread: Thread? = null
 
     // I/O streams to PTY master fd
@@ -198,12 +199,20 @@ class TerminalSession(
                 readFromPty()
             }, "tsession-reader-$childPid").apply { isDaemon = true; start() }
 
-            // ── 4. Start waiter thread (wait for process exit) ──────
+            // ── 4. Start emulator feeder thread (ByteQueue → Emulator) ─
+            //   This thread reads bytes from the queue and feeds them to the
+            //   TerminalEmulator's ANSI parser, updating the screen buffer.
+            //   Without this, screenChars is ALWAYS empty (Bug #6).
+            emulatorThread = Thread({
+                feedEmulator()
+            }, "tsession-emulator-$childPid").apply { isDaemon = true; start() }
+
+            // ── 5. Start waiter thread (wait for process exit) ──────
             waiterThread = Thread({
                 waitForExit()
             }, "tsession-waiter-$childPid").apply { isDaemon = true; start() }
 
-            // ── 5. Enable UTF-8 mode on PTY ─────────────────────────
+            // ── 6. Enable UTF-8 mode on PTY ─────────────────────────
             JniTermux.setPtyUTF8Mode(ptmFd)
 
             Log.i(TAG, "✅ Terminal session started (PID $childPid)")
@@ -324,7 +333,7 @@ class TerminalSession(
                     break
                 }
                 if (bytesRead > 0) {
-                    // Write to byte queue (main thread reads from queue → feeds emulator)
+                    // Write to byte queue (emulator feeder thread reads → feeds emulator)
                     ptyToEmulatorQueue.write(buffer, 0, bytesRead)
 
                     // Notify output listener with raw text for streaming display
@@ -338,6 +347,37 @@ class TerminalSession(
             }
         } finally {
             Log.d(TAG, "PTY reader thread ended")
+        }
+    }
+
+    /**
+     * Emulator feeder loop: reads bytes from the ByteQueue and feeds them
+     * to the TerminalEmulator's ANSI parser. This updates the screen buffer
+     * (screenChars) so the UI can render real terminal output.
+     *
+     * Without this thread, the emulator screen buffer stays empty and the
+     * PTY terminal appears blank (Bug #6).
+     */
+    private fun feedEmulator() {
+        val buffer = ByteArray(READ_BUFFER_SIZE)
+        try {
+            while (running.get()) {
+                // Blocking read with 3s timeout (from ByteQueue.read)
+                val bytesRead = ptyToEmulatorQueue.read(buffer, 0, buffer.size)
+                if (bytesRead <= 0) {
+                    // Timeout or interrupted — check if still running
+                    if (!running.get()) break
+                    continue
+                }
+                // Feed bytes to the ANSI parser → updates screen buffer
+                emulator.processBytes(buffer, 0, bytesRead)
+            }
+        } catch (e: Exception) {
+            if (running.get()) {
+                Log.w(TAG, "Emulator feeder error: ${e.message}")
+            }
+        } finally {
+            Log.d(TAG, "Emulator feeder thread ended")
         }
     }
 
@@ -381,6 +421,7 @@ class TerminalSession(
         ptyInputStream = null
         ptyOutputStream = null
         readerThread = null
+        emulatorThread = null
         waiterThread = null
 
         Log.d(TAG, "Session cleaned up")

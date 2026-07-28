@@ -456,7 +456,9 @@ class TermuxBootstrapInstaller(
         }
     }
 
-    /** Handle SYMLINKS.txt in Shizuku mode. */
+    /** Handle SYMLINKS.txt in Shizuku mode.
+     *  Format: "target ← linkname" or "target → linkname"
+     *  Uses proper regex split matching the proot-mode implementation. */
     private suspend fun setupSymlinksShizuku(prefix: String) {
         val result = shizukuShell.executeBlocking(
             "cat '$prefix/SYMLINKS.txt' 2>/dev/null",
@@ -466,7 +468,10 @@ class TermuxBootstrapInstaller(
 
         val lines = result.stdout.lines()
         for (line in lines) {
-            val parts = line.trim().split("←|→|←|←").map { it.trim() }
+            val trimmed = line.trim()
+            if (trimmed.isBlank() || trimmed.startsWith("#")) continue
+            // Split on ← or → (Unicode arrows used in Termux SYMLINKS.txt)
+            val parts = trimmed.split("←|→".toRegex()).map { it.trim() }
             if (parts.size >= 2) {
                 val target = parts[0]
                 val linkName = parts[1]
