@@ -51,7 +51,7 @@ class TermuxBootstrapInstaller(
         private const val TAG = "TermuxInstaller"
 
         // Latest bootstrap version — auto-updating URL
-        private const val BOOTSTRAP_VERSION = "2026.07.19-r1%2Bapt.android-7"
+        private const val BOOTSTRAP_VERSION = "2026.07.26-r1%2Bapt.android-7"
         private const val BOOTSTRAP_BASE = "https://github.com/termux/termux-packages/releases/download"
 
         // Architecture mapping: Android ABI -> Termux arch name
@@ -281,21 +281,47 @@ class TermuxBootstrapInstaller(
 
             // ── Step B: Write bootstrap zip to /data/local/tmp/ ─────
             progress?.invoke("💾 Writing bootstrap archive...")
-            // Write via base64 to avoid shell escaping issues
-            val base64Str = android.util.Base64.encodeToString(zipBytes, android.util.Base64.NO_WRAP)
+            // CRITICAL FIX: The old approach piped 25MB base64 through `echo`,
+            // which exceeds the shell argument limit (~128KB on Android).
+            // New approach: Write the zip to the app's EXTERNAL cache dir
+            // (accessible by ADB shell UID 2000), then use Shizuku `cat` to
+            // copy it to /data/local/tmp/. The app's INTERNAL cache dir
+            // (/data/data/<pkg>/cache/) is NOT readable by ADB shell — only
+            // by root. External cache dir (/sdcard/Android/data/<pkg>/cache/)
+            // IS accessible by ADB shell.
+            val externalCacheDir = context.externalCacheDir
+                ?: context.cacheDir // fallback (only works with root Shizuku)
+            val cacheZip = File(externalCacheDir, "intendra_bootstrap.zip")
+            cacheZip.writeBytes(zipBytes)
+            Log.i(TAG, "Wrote bootstrap zip to external cache: ${cacheZip.absolutePath} (${zipBytes.size} bytes)")
+
+            // Copy from external cache → /data/local/tmp/ via Shizuku
+            // ADB shell (UID 2000) can read /sdcard/Android/data/<pkg>/cache/
             result = shizukuShell.executeBlocking(
-                "echo '$base64Str' | base64 -d > /data/local/tmp/intendra_bootstrap.zip 2>&1",
+                "cat '${cacheZip.absolutePath}' > /data/local/tmp/intendra_bootstrap.zip 2>&1",
                 EXTRACT_TIMEOUT_MS
             )
             if (!result.isSuccess) {
-                Log.w(TAG, "Base64 write failed: ${result.stderr}")
-                // Try alternative: write in chunks via multiple echo commands
-                val chunkResult = writeZipInChunksShizuku(zipBytes)
-                if (!chunkResult) {
-                    return InstallResult(false, Mode.SHIZUKU, "",
-                        "Failed to write bootstrap zip via Shizuku")
+                Log.w(TAG, "cat from external cache failed: ${result.stderr}, trying dd")
+                // Fallback: dd with block size for large files
+                result = shizukuShell.executeBlocking(
+                    "dd if='${cacheZip.absolutePath}' of=/data/local/tmp/intendra_bootstrap.zip bs=1M 2>&1",
+                    EXTRACT_TIMEOUT_MS
+                )
+                if (!result.isSuccess) {
+                    Log.w(TAG, "dd copy also failed: ${result.stderr}")
+                    // Last resort: chunk-based base64 write (small chunks only)
+                    val chunkResult = writeZipInChunksShizuku(zipBytes)
+                    if (!chunkResult) {
+                        // Clean up cache file
+                        cacheZip.delete()
+                        return InstallResult(false, Mode.SHIZUKU, "",
+                            "Failed to write bootstrap zip via Shizuku: ${result.stderr}")
+                    }
                 }
             }
+            // Clean up cache file after successful copy
+            cacheZip.delete()
 
             // ── Step C: Extract the zip ─────────────────────────────
             progress?.invoke("📦 Extracting bootstrap (this may take a minute)...")
@@ -596,7 +622,11 @@ class TermuxBootstrapInstaller(
         }
     }
 
-    /** Handle SYMLINKS.txt for proot mode. */
+    /** Handle SYMLINKS.txt for proot mode.
+     *  FIX: Runtime.exec("ln -sf") fails on Android sandboxed processes because
+     *  the app UID can't create symlinks in its own data dir on some devices.
+     *  Instead, use ShellExecutor (which runs `sh -c "ln -sf ..."`) with
+     *  fallback to file copy if symlink creation fails. */
     private fun setupSymlinksProot(prefixDir: File) {
         val symlinksFile = File(prefixDir, "SYMLINKS.txt")
         if (!symlinksFile.exists()) return
@@ -616,12 +646,20 @@ class TermuxBootstrapInstaller(
                         try {
                             linkFile.parentFile?.mkdirs()
                             linkFile.delete()
-                            // Create relative symlink
+                            // FIX: Use `sh -c "ln -sf ..."` via ShellExecutor instead of
+                            // Runtime.exec directly — ShellExecutor normalizes paths and
+                            // handles the shell properly.
                             val relTarget = target.relativeTo(linkFile.parentFile!!)
-                            // On Android, we can create symlinks using ln
-                            Runtime.getRuntime().exec(arrayOf(
-                                "ln", "-sf", relTarget.path, linkFile.absolutePath
-                            )).waitFor()
+                            val lnResult = ShellExecutor.run(
+                                "ln -sf '${relTarget.absolutePath}' '${linkFile.absolutePath}' 2>/dev/null"
+                            )
+                            if (!lnResult.isSuccess || !linkFile.exists()) {
+                                // If symlink fails, copy the file as fallback
+                                try {
+                                    target.copyTo(linkFile, overwrite = true)
+                                    Log.d(TAG, "Symlink failed, copied: ${parts[1]}")
+                                } catch (_: Exception) {}
+                            }
                         } catch (e: Exception) {
                             // If symlink fails, copy the file instead
                             try {

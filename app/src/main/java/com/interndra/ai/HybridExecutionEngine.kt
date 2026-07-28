@@ -117,8 +117,24 @@ class HybridExecutionEngine(
 
     private suspend fun executeShell(index: Int, cmd: ShellCommand): ExecutionResult =
         try {
-            val shellResult = shell.runAsync(cmd.command)
-            ExecutionResult(stepIndex = index, success = shellResult.isSuccess, output = shellResult.stdout)
+            // ⚡ FIX: Route through TerminalAgent if available (uses Termux/Shizuku
+            // persistent shell with real exit codes and proper environment).
+            // Falls back to sandboxed ShellExecutor only if no TerminalAgent.
+            val agent = terminalAgent
+            if (agent != null) {
+                val sessionName = "exec_shell_$index"
+                val result = agent.execute(sessionName, cmd.command)
+                if (result.isSuccess) {
+                    val output = if (result.stdout.isNotBlank()) result.stdout else "(completed)"
+                    ExecutionResult(stepIndex = index, success = true, output = output)
+                } else {
+                    val errMsg = if (result.stderr.isNotBlank()) result.stderr else "Exit code: ${result.exitCode}"
+                    ExecutionResult(stepIndex = index, success = false, output = result.stdout, error = errMsg)
+                }
+            } else {
+                val shellResult = shell.runAsync(cmd.command)
+                ExecutionResult(stepIndex = index, success = shellResult.isSuccess, output = shellResult.stdout)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Shell error on step $index: ${e.message}")
             ExecutionResult(stepIndex = index, success = false, output = "", error = e.message ?: "Shell error")

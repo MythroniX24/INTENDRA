@@ -1147,7 +1147,10 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             return
         }
 
-        val engine = HybridExecutionEngine(app, repo, ShellExecutor, safety)
+        // ⚡ CRITICAL FIX: Pass terminalAgent so AI commands route through
+        // Termux/Shizuku (persistent shell) instead of sandboxed ShellExecutor.
+        // Without this, ALL AI commands bypass Termux and run in the app sandbox.
+        val engine = HybridExecutionEngine(app, repo, ShellExecutor, safety, terminalAgent)
         var allSuccess = true
 
         val chatOutputLines = mutableListOf<String>()
