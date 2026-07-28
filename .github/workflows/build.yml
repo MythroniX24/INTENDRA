@@ -122,9 +122,9 @@ jobs:
           echo "KOTLIN_EXIT=$?"
         shell: bash
 
-      # 🏗️ APK build DISABLED — comment out 'if: false' below to re-enable
+      # 🏗️ APK build ENABLED
       - name: STEP 2 - Full APK with native
-        if: false  # DISABLED: set to 'success()' to re-enable APK build
+        if: success()
         id: native
         run: |
           echo "=== Full APK build with native code ==="
@@ -149,10 +149,10 @@ jobs:
           retention-days: 7
 
       - name: Upload debug APK
-        if: false  # DISABLED: set to 'success()' to re-enable APK upload
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: INTERNDRA-debug-apk
+          name: INTENDRA-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
