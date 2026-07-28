@@ -1,5 +1,8 @@
 package com.interndra.ai
 
+import com.interndra.data.model.CommandType
+import com.interndra.data.model.ExecutionResult
+import com.interndra.data.model.ShellCommand
 import org.junit.Assert.*
 import org.junit.Test
 
