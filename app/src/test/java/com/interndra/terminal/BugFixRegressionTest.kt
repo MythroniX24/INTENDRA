@@ -333,7 +333,9 @@ class BugFixRegressionTest {
 
     @Test
     fun `Bug2 - getScreenChars returns row arrays for batched rendering`() {
-        emulator.processString("ABC\nDEF")
+        // Use \r\n (CR+LF) so each line starts at column 0.
+        // LF alone only moves cursor down without resetting column.
+        emulator.processString("ABC\r\nDEF")
 
         val chars = emulator.getScreenChars()
         assertTrue("Should have multiple rows", chars.size >= 2)
@@ -345,7 +347,7 @@ class BugFixRegressionTest {
                 emulator.columns, row.size)
         }
 
-        // Verify content
+        // Verify content — row 0 has ABC at cols 0-2, row 1 has DEF at cols 0-2
         assertEquals('A', chars[0][0])
         assertEquals('B', chars[0][1])
         assertEquals('C', chars[0][2])
