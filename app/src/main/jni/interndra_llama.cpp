@@ -9,7 +9,9 @@
 #include <cstdint>
 #include <exception>
 #include <mutex>
+#include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -25,10 +27,77 @@ struct LlamaState {
     llama_context * context = nullptr;
     llama_sampler * sampler = nullptr;
     std::atomic_bool cancelRequested{false};
-    // Serializes inference and teardown. nativeCancelImpl intentionally does
-    // not wait for this lock, so it can interrupt an active generation.
+    // Serializes inference, begin, and teardown. Cancellation only needs the
+    // atomic flag and intentionally does not wait for this lock.
     std::mutex operationMutex;
 };
+
+using LlamaStatePtr = std::shared_ptr<LlamaState>;
+
+// JNI exposes a monotonic opaque ID, never a raw native pointer. The registry
+// is intentionally allocated for the lifetime of the process so native
+// teardown cannot hit static-destruction ordering problems during app exit.
+struct HandleRegistry {
+    std::mutex mutex;
+    std::unordered_map<jlong, LlamaStatePtr> states;
+    std::atomic<jlong> nextHandle{1};
+};
+
+HandleRegistry & handleRegistry() {
+    static HandleRegistry * registry = new HandleRegistry();
+    return *registry;
+}
+
+jlong registerState(const LlamaStatePtr & state) {
+    auto & registry = handleRegistry();
+    jlong handle = registry.nextHandle.fetch_add(1, std::memory_order_relaxed);
+    if (handle <= 0) {
+        // A signed overflow is practically unreachable, but never expose a
+        // zero/negative value as a valid JNI handle.
+        handle = registry.nextHandle.fetch_add(1, std::memory_order_relaxed);
+    }
+    std::lock_guard<std::mutex> lock(registry.mutex);
+    registry.states.emplace(handle, state);
+    return handle;
+}
+
+LlamaStatePtr findState(jlong handle) {
+    if (handle <= 0) return {};
+    auto & registry = handleRegistry();
+    std::lock_guard<std::mutex> lock(registry.mutex);
+    const auto it = registry.states.find(handle);
+    return it == registry.states.end() ? LlamaStatePtr{} : it->second;
+}
+
+LlamaStatePtr removeState(jlong handle) {
+    if (handle <= 0) return {};
+    auto & registry = handleRegistry();
+    std::lock_guard<std::mutex> lock(registry.mutex);
+    const auto it = registry.states.find(handle);
+    if (it == registry.states.end()) return {};
+    LlamaStatePtr state = it->second;
+    registry.states.erase(it);
+    return state;
+}
+
+void destroyState(const LlamaStatePtr & state) {
+    if (!state) return;
+    state->cancelRequested.store(true, std::memory_order_release);
+    // Wait for any active inference (or begin) before touching llama objects.
+    std::lock_guard<std::mutex> operation(state->operationMutex);
+    if (state->sampler != nullptr) {
+        llama_sampler_free(state->sampler);
+        state->sampler = nullptr;
+    }
+    if (state->context != nullptr) {
+        llama_free(state->context);
+        state->context = nullptr;
+    }
+    if (state->model != nullptr) {
+        llama_model_free(state->model);
+        state->model = nullptr;
+    }
+}
 
 struct SamplerGuard {
     llama_sampler ** slot;
@@ -138,7 +207,7 @@ extern "C" {
 JNIEXPORT jlong JNICALL
 Java_com_interndra_ai_LocalAiEngine_nativeInitImpl(
     JNIEnv * env, jclass, jstring modelPath, jint nThreads, jint nCtx) {
-    LlamaState * state = nullptr;
+    LlamaStatePtr state;
     try {
         const std::string path = fromJava(env, modelPath);
         if (path.empty()) {
@@ -147,20 +216,22 @@ Java_com_interndra_ai_LocalAiEngine_nativeInitImpl(
         }
 
         ensureBackend();
-        state = new LlamaState();
+        state = std::make_shared<LlamaState>();
         llama_model_params modelParams = llama_model_default_params();
         modelParams.n_gpu_layers = 0;
         state->model = llama_model_load_from_file(path.c_str(), modelParams);
         if (state->model == nullptr) {
             LOGE("Could not load GGUF model: %s", path.c_str());
-            delete state;
             return 0;
         }
 
         llama_context_params contextParams = llama_context_default_params();
         // Keep malformed JNI inputs from requesting an unbounded context and
         // allocating more native memory than the device can reasonably hold.
-        const int boundedContext = std::clamp(static_cast<int>(nCtx), 512, 131072);
+        // 32K is a conservative mobile ceiling; callers can still request
+        // smaller contexts, while accidental huge JNI values cannot trigger a
+        // multi-gigabyte context allocation on a phone.
+        const int boundedContext = std::clamp(static_cast<int>(nCtx), 512, 32768);
         contextParams.n_ctx = static_cast<uint32_t>(boundedContext);
         contextParams.n_batch = std::min<uint32_t>(contextParams.n_ctx, 2048U);
         contextParams.n_threads = std::clamp(static_cast<int>(nThreads), 1, 16);
@@ -170,28 +241,22 @@ Java_com_interndra_ai_LocalAiEngine_nativeInitImpl(
         if (state->context == nullptr) {
             LOGE("Could not create llama context for: %s", path.c_str());
             llama_model_free(state->model);
-            delete state;
+            state->model = nullptr;
             return 0;
         }
 
-        LOGI("Loaded GGUF model with %d threads and %u context tokens",
-             contextParams.n_threads, contextParams.n_ctx);
-        return reinterpret_cast<jlong>(state);
+        const jlong handle = registerState(state);
+        LOGI("Loaded GGUF model with %d threads and %u context tokens (handle=%lld)",
+             contextParams.n_threads, contextParams.n_ctx,
+             static_cast<long long>(handle));
+        return handle;
     } catch (const std::exception & error) {
         LOGE("Native model initialization exception: %s", error.what());
-        if (state != nullptr) {
-            if (state->context != nullptr) llama_free(state->context);
-            if (state->model != nullptr) llama_model_free(state->model);
-            delete state;
-        }
+        destroyState(state);
         return 0;
     } catch (...) {
         LOGE("Native model initialization exception: unknown");
-        if (state != nullptr) {
-            if (state->context != nullptr) llama_free(state->context);
-            if (state->model != nullptr) llama_model_free(state->model);
-            delete state;
-        }
+        destroyState(state);
         return 0;
     }
 }
@@ -199,12 +264,13 @@ Java_com_interndra_ai_LocalAiEngine_nativeInitImpl(
 JNIEXPORT jstring JNICALL
 Java_com_interndra_ai_LocalAiEngine_nativeInferImpl(
     JNIEnv * env, jclass, jlong handle, jstring prompt, jint maxTokens, jfloat temperature) {
-    auto * state = reinterpret_cast<LlamaState *>(handle);
-    if (state == nullptr || state->model == nullptr || state->context == nullptr) {
-        return env->NewStringUTF("");
-    }
+    const LlamaStatePtr state = findState(handle);
+    if (!state) return env->NewStringUTF("");
 
     std::lock_guard<std::mutex> operation(state->operationMutex);
+    if (state->model == nullptr || state->context == nullptr) {
+        return env->NewStringUTF("");
+    }
 
     try {
     const std::string promptText = fromJava(env, prompt);
@@ -280,46 +346,36 @@ Java_com_interndra_ai_LocalAiEngine_nativeInferImpl(
 
 JNIEXPORT void JNICALL
 Java_com_interndra_ai_LocalAiEngine_nativeBeginInferenceImpl(JNIEnv *, jclass, jlong handle) {
-    auto * state = reinterpret_cast<LlamaState *>(handle);
-    if (state != nullptr) {
+    const LlamaStatePtr state = findState(handle);
+    if (!state) return;
+    std::lock_guard<std::mutex> operation(state->operationMutex);
+    if (state->model != nullptr && state->context != nullptr) {
         state->cancelRequested.store(false, std::memory_order_release);
     }
 }
 
 JNIEXPORT void JNICALL
 Java_com_interndra_ai_LocalAiEngine_nativeCancelImpl(JNIEnv *, jclass, jlong handle) {
-    auto * state = reinterpret_cast<LlamaState *>(handle);
-    if (state != nullptr) {
-        state->cancelRequested.store(true, std::memory_order_release);
-    }
+    // A shared_ptr keeps the state alive while this call is in progress, even
+    // if another thread has already removed the handle from the registry.
+    const LlamaStatePtr state = findState(handle);
+    if (state) state->cancelRequested.store(true, std::memory_order_release);
 }
 
 JNIEXPORT void JNICALL
 Java_com_interndra_ai_LocalAiEngine_nativeFreeImpl(JNIEnv *, jclass, jlong handle) {
-    auto * state = reinterpret_cast<LlamaState *>(handle);
-    if (state == nullptr) return;
-
-    state->cancelRequested.store(true, std::memory_order_release);
-    std::lock_guard<std::mutex> operation(state->operationMutex);
-    if (state->sampler != nullptr) {
-        llama_sampler_free(state->sampler);
-        state->sampler = nullptr;
-    }
-    if (state->context != nullptr) {
-        llama_free(state->context);
-        state->context = nullptr;
-    }
-    if (state->model != nullptr) {
-        llama_model_free(state->model);
-        state->model = nullptr;
-    }
-    delete state;
+    // Remove first: new calls and duplicate frees now fail without touching
+    // the state. Existing calls retain their shared_ptr and finish safely.
+    const LlamaStatePtr state = removeState(handle);
+    destroyState(state);
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_interndra_ai_LocalAiEngine_nativeIsLoadedImpl(JNIEnv *, jclass, jlong handle) {
-    const auto * state = reinterpret_cast<const LlamaState *>(handle);
-    return state != nullptr && state->model != nullptr && state->context != nullptr;
+    const LlamaStatePtr state = findState(handle);
+    if (!state) return false;
+    std::lock_guard<std::mutex> operation(state->operationMutex);
+    return state->model != nullptr && state->context != nullptr;
 }
 
 } // extern "C"

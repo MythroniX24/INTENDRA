@@ -256,4 +256,19 @@ class LocalAiEngineTest {
         assertThat(result.isSuccess).isTrue()
         assertThat(result.modelUsed).contains("rule-based")
     }
+
+    @Test
+    fun `native wrappers safely ignore invalid handles`() {
+        val invalidHandle = 0L
+
+        assertThat(LocalAiEngine.nativeIsLoaded(invalidHandle)).isFalse()
+        assertThat(LocalAiEngine.nativeInfer(invalidHandle, "test", Int.MAX_VALUE, 0f))
+            .contains("Local model not loaded")
+
+        // These calls must remain no-ops for an invalid/closed handle. This
+        // protects model replacement and ViewModel teardown paths.
+        LocalAiEngine.nativeBeginInference(invalidHandle)
+        LocalAiEngine.nativeCancel(invalidHandle)
+        LocalAiEngine.nativeFree(invalidHandle)
+    }
 }
