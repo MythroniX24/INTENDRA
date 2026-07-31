@@ -59,7 +59,14 @@ object ContentExtractor {
         val sb = StringBuilder()
         for (el in paragraphs) {
             val text = el.text().trim()
-            if (text.length < 20) continue
+            // Headings are often short (e.g. "## Overview") — use a lower
+            // threshold for them; body text needs to be substantial.
+            val isHeading = el.tagName() in setOf("h1", "h2", "h3", "h4")
+            if (isHeading) {
+                if (text.length < 2) continue
+            } else if (text.length < 20) {
+                continue
+            }
             when (el.tagName()) {
                 "h1" -> sb.append("## ").appendLine(text)
                 "h2" -> sb.append("### ").appendLine(text)

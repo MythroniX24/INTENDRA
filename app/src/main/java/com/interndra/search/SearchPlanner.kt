@@ -41,7 +41,7 @@ class SearchPlanner {
         "when was", "when did", "when is", "tell me about", "facts about",
         "history of", "biography of", "capital of", "population of",
         "founded", "founder of", "ceo of", "president of", "prime minister of",
-        "mayor of", "about ", "how old is", "how big is", "how far",
+        "mayor of", "facts about", "how old is", "how big is", "how far",
         "how many people", "highest", "tallest", "largest", "smallest",
         "first ", "oldest", "newest ", "wikipedia", "officially", "meaning of",
         "definition of", "difference between", "vs ", " vs", "compare",
@@ -178,7 +178,12 @@ class SearchPlanner {
 
         // ── 5. Unknown facts / low confidence topics ──────────────────────
         // A question with a proper question word we didn't classify as
-        // offline is likely a factual lookup.
+        // offline is likely a factual lookup. Greetings ("hi how are you")
+        // are excluded — they're not factual queries.
+        val greetings = listOf("hi how are you", "how are you", "how are you doing", "what's up", "wassup")
+        if (greetings.any { lower.contains(it) }) {
+            return SearchPlan.none("greeting — conversation only")
+        }
         val questionWords = listOf("who", "what", "where", "when", "why", "how", "which", "whose")
         if (questionWords.any { lower.startsWith("$it ") || lower.contains(" $it ") }) {
             return buildPlan(text, lower, confidence = 0.55f,

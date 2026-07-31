@@ -26,7 +26,7 @@ class ResultRankerTest {
             result("https://developer.android.com/guide")
         )
         val ranked = ResultRanker.rank(results, maxResults = 10)
-        assertEquals("developer.android.com/guide", ranked.first().url)
+        assertEquals("https://developer.android.com/guide", ranked.first().url)
     }
 
     @Test
@@ -36,7 +36,7 @@ class ResultRankerTest {
             result("https://stackoverflow.com/questions/123")
         )
         val ranked = ResultRanker.rank(results, maxResults = 10)
-        assertEquals("stackoverflow.com", ranked.first().url)
+        assertEquals("https://stackoverflow.com/questions/123", ranked.first().url)
     }
 
     @Test
@@ -46,7 +46,7 @@ class ResultRankerTest {
             result("https://b.example.com", snippet = "A much longer and more detailed snippet that clearly contains useful information about the topic at hand.")
         )
         val ranked = ResultRanker.rank(results, maxResults = 10)
-        assertEquals("b.example.com", ranked.first().url)
+        assertEquals("https://b.example.com", ranked.first().url)
     }
 
     @Test
