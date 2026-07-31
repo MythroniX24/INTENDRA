@@ -28,6 +28,8 @@ class GeminiSearchProvider(
     private val model: String = "gemini-2.5-flash"
 ) : KeyedSearchProvider(apiKey) {
 
+    override val id: SearchProviderId = SearchProviderId.GEMINI
+
     companion object {
         private const val TAG = "GeminiSearch"
         private const val GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
@@ -100,19 +102,21 @@ class GeminiSearchProvider(
                 var idx = 0
                 while (idx < chunks.size() && results.size < maxResults) {
                     val chunk = chunks.get(idx).asJsonObject
-                    val web = chunk.getAsJsonObject("web") ?: run { idx++; continue }
-                    val title = web.get("title")?.asString?.trim() ?: ""
-                    val uri = web.get("uri")?.asString?.trim() ?: ""
-                    if (title.isNotBlank() && uri.isNotBlank()) {
-                        val snippet = extractSnippetForChunk(supports, idx)
-                        results.add(
-                            SearchResult(
-                                title = title,
-                                url = uri,
-                                snippet = snippet,
-                                provider = SearchProviderId.GEMINI
+                    val web = chunk.getAsJsonObject("web")
+                    if (web != null) {
+                        val title = web.get("title")?.asString?.trim() ?: ""
+                        val uri = web.get("uri")?.asString?.trim() ?: ""
+                        if (title.isNotBlank() && uri.isNotBlank()) {
+                            val snippet = extractSnippetForChunk(supports, idx)
+                            results.add(
+                                SearchResult(
+                                    title = title,
+                                    url = uri,
+                                    snippet = snippet,
+                                    provider = SearchProviderId.GEMINI
+                                )
                             )
-                        )
+                        }
                     }
                     idx++
                 }

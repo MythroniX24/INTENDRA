@@ -22,6 +22,8 @@ class BraveSearchProvider(
     apiKey: String
 ) : KeyedSearchProvider(apiKey) {
 
+    override val id: SearchProviderId = SearchProviderId.BRAVE
+
     companion object {
         private const val TAG = "BraveSearch"
         const val BASE_URL = com.interndra.util.Constants.BRAVE_SEARCH_URL
