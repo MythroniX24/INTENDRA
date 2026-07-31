@@ -57,8 +57,8 @@ class SmartMemoryEngineTest {
         )
 
         assertThat(result.decision.shouldRetrieve).isTrue()
-        assertThat(result.records.map { it.id }).containsExactly(1, 3, 4)
-        assertThat(result.records.map { it.id }).doesNotContain(2)
+        assertThat(result.records.map { it.id.toInt() }).containsExactly(1, 3, 4)
+        assertThat(result.records.map { it.id.toInt() }).doesNotContain(2)
     }
 
     @Test
@@ -73,7 +73,7 @@ class SmartMemoryEngineTest {
             maxTokens = 400
         )
 
-        assertThat(result.records.map { it.id }).containsExactly(1)
+        assertThat(result.records.map { it.id.toInt() }).containsExactly(1)
     }
 
     @Test
@@ -90,7 +90,7 @@ class SmartMemoryEngineTest {
             policy = SmartMemoryPolicy(projectEnabled = false, chatEnabled = false)
         )
 
-        assertThat(result.records.map { it.id }).containsExactly(1)
+        assertThat(result.records.map { it.id.toInt() }).containsExactly(1)
     }
 
     @Test

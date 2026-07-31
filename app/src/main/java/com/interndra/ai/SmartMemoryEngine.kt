@@ -148,7 +148,9 @@ class SmartMemoryEngine {
             .filter { (_, score) -> score > 0 }
             .sortedWith(compareByDescending<Pair<SmartMemoryEntity, Int>> { it.second }
                 .thenByDescending { it.first.importanceScore }
-                .thenByDescending { it.first.lastAccessedAt })
+                .thenByDescending { it.first.lastAccessedAt }
+                // Stable ordering is required when fixtures share timestamps.
+                .thenByDescending { it.first.id })
             .map { it.first }
             .toList()
 
