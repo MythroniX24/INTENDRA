@@ -1,5 +1,6 @@
 package com.interndra.data.local
 
+import com.interndra.ai.SmartMemoryEngine
 import com.interndra.data.model.*
 import kotlinx.coroutines.flow.Flow
 
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.Flow
 class AgentRepository(private val db: AgentDatabase) {
 
     private val dao get() = db.dao()
+    private val smartMemoryEngine = SmartMemoryEngine()
 
     // ── Session tracking ────────────────────────────────────────────────────
     private var currentSession: String = ""
@@ -44,7 +46,7 @@ class AgentRepository(private val db: AgentDatabase) {
      * Gives the AI proper memory of the current conversation.
      */
     suspend fun getChatHistory(limit: Int = 12): List<Pair<String, String>> {
-        val msgs = dao.getRecentMessages(limit)
+        val msgs = dao.getRecentMessages(currentWorkspaceId, limit)
         return msgs.reversed().mapNotNull { msg ->
             when (msg.role) {
                 MessageRole.USER -> Pair("user", msg.content)
@@ -107,8 +109,79 @@ class AgentRepository(private val db: AgentDatabase) {
     suspend fun touchMemory(id: Long)                     = dao.touchMemory(id)
     suspend fun clearMemory()                             = dao.clearAllMemories()
 
+    // ── Unified smart memory ────────────────────────────────────────────────
+    fun getAllSmartMemories(): Flow<List<SmartMemoryEntity>> = dao.getAllSmartMemories()
+
+    suspend fun buildSmartMemoryContext(
+        query: String,
+        chatId: Long,
+        projectId: Long? = null,
+        maxTokens: Int = SmartMemoryEngine.SMALL_MODEL_BUDGET,
+        policy: SmartMemoryPolicy = SmartMemoryPolicy()
+    ): List<CommandMemory> {
+        if (!policy.enabled) return emptyList()
+        val candidates = dao.getSmartMemoryCandidates(projectId, chatId)
+        val retrieval = smartMemoryEngine.retrieve(
+            query = query,
+            candidates = candidates,
+            scope = SmartMemoryScope(chatId = chatId, projectId = projectId),
+            maxTokens = minOf(maxTokens, policy.maxTokens).coerceIn(0, SmartMemoryEngine.LARGE_MODEL_BUDGET),
+            policy = policy,
+            projectName = ""
+        )
+        if (retrieval.records.isNotEmpty()) {
+            dao.touchSmartMemories(retrieval.records.map { it.id })
+        }
+        return smartMemoryEngine.toCommandMemory(retrieval)
+    }
+
+    suspend fun addSmartMemory(
+        type: SmartMemoryType,
+        title: String,
+        summary: String,
+        keywords: String = "",
+        chatId: Long? = null,
+        projectId: Long? = null,
+        importanceScore: Int = 5
+    ): Long {
+        val cleanSummary = SmartMemoryEngine.compress(summary)
+        val existing = dao.getSmartMemoryCandidates(projectId, chatId)
+            .firstOrNull { it.memoryType() == type && smartMemoryEngine.isDuplicate(cleanSummary, it) }
+        if (existing != null) {
+            dao.updateSmartMemory(existing.copy(
+                title = title.ifBlank { existing.title },
+                summary = cleanSummary,
+                keywords = keywords.ifBlank { existing.keywords },
+                embeddingJson = SmartMemoryEngine.embeddingJson(cleanSummary),
+                importanceScore = maxOf(existing.importanceScore, importanceScore.coerceIn(1, 10)),
+                isArchived = false,
+                lastAccessedAt = System.currentTimeMillis()
+            ))
+            return existing.id
+        }
+        return dao.insertSmartMemory(SmartMemoryEntity(
+            type = type.name,
+            title = title.take(120),
+            summary = cleanSummary,
+            keywords = keywords.take(240),
+            embeddingJson = SmartMemoryEngine.embeddingJson(cleanSummary),
+            chatId = chatId,
+            projectId = projectId,
+            importanceScore = importanceScore.coerceIn(1, 10)
+        ))
+    }
+
+    suspend fun updateSmartMemory(memory: SmartMemoryEntity) = dao.updateSmartMemory(memory)
+    suspend fun deleteSmartMemory(id: Long) = dao.deleteSmartMemory(id)
+    suspend fun archiveSmartMemory(id: Long) = dao.archiveSmartMemory(id)
+    suspend fun searchSmartMemories(query: String): List<SmartMemoryEntity> = dao.searchSmartMemories(query)
+    suspend fun clearSmartMemory() = dao.clearAllSmartMemories()
+    suspend fun archiveStaleSmartMemories(before: Long, maxImportance: Int = 3): Int =
+        dao.archiveStaleSmartMemories(before, maxImportance)
+
     /**
-     * Builds a privacy-safe memory context for the AI.
+     * Builds a privacy-safe legacy memory context for older callers.
+
      *
      * SECURITY FIX (Phase 10): the previous implementation shipped raw
      * `memory.content` (which is the user's original input text) to the AI
@@ -165,13 +238,23 @@ class AgentRepository(private val db: AgentDatabase) {
         userInput: String, action: String,
         commands: List<ShellCommand>, aiSource: String
     ) {
-        val commandsJson = com.google.gson.Gson().toJson(commands)
+        if (!SmartMemoryEngine.shouldPersistCandidate(userInput)) return
+        val compressed = SmartMemoryEngine.compress(userInput)
         addMemory(
-            title        = userInput.take(80),
-            content      = userInput,
+            title        = compressed.take(80),
+            content      = compressed,
             actionType   = action,
-            commandsJson = commandsJson,
-            tags         = aiSource.lowercase()
+            commandsJson = "",
+            tags         = aiSource.lowercase(),
+            importanceScore = 7
+        )
+        addSmartMemory(
+            type = SmartMemoryType.CHAT,
+            title = action.ifBlank { "Successful command" },
+            summary = compressed,
+            keywords = "$action ${aiSource.lowercase()}",
+            chatId = currentWorkspaceId,
+            importanceScore = 7
         )
     }
 

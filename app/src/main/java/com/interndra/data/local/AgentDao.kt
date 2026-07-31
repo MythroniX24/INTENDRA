@@ -20,8 +20,8 @@ interface AgentDao {
     @Query("SELECT * FROM chat_messages WHERE id = :id LIMIT 1")
     suspend fun getMessageById(id: Long): ChatMessage?
 
-    @Query("SELECT * FROM chat_messages ORDER BY id DESC LIMIT :limit")
-    suspend fun getRecentMessages(limit: Int): List<ChatMessage>
+    @Query("SELECT * FROM chat_messages WHERE workspaceId = :workspaceId ORDER BY id DESC LIMIT :limit")
+    suspend fun getRecentMessages(workspaceId: Long, limit: Int): List<ChatMessage>
 
     @Query("DELETE FROM chat_messages WHERE id = :messageId")
     suspend fun deleteMessage(messageId: Long)
@@ -84,6 +84,40 @@ interface AgentDao {
 
     @Query("DELETE FROM memories")
     suspend fun clearAllMemories()
+
+    // ── Unified smart memory ────────────────────────────────────────────────
+    @Insert
+    suspend fun insertSmartMemory(memory: SmartMemoryEntity): Long
+
+    @Update
+    suspend fun updateSmartMemory(memory: SmartMemoryEntity)
+
+    @Query("SELECT * FROM smart_memories WHERE isArchived = 0 ORDER BY importanceScore DESC, lastAccessedAt DESC")
+    fun getAllSmartMemories(): Flow<List<SmartMemoryEntity>>
+
+    @Query("SELECT * FROM smart_memories WHERE isArchived = 0 AND (type = 'USER' OR (type = 'PROJECT' AND projectId = :projectId) OR (type = 'CHAT' AND chatId = :chatId)) ORDER BY importanceScore DESC, lastAccessedAt DESC")
+    suspend fun getSmartMemoryCandidates(projectId: Long?, chatId: Long?): List<SmartMemoryEntity>
+
+    @Query("SELECT * FROM smart_memories WHERE id = :id LIMIT 1")
+    suspend fun getSmartMemory(id: Long): SmartMemoryEntity?
+
+    @Query("UPDATE smart_memories SET accessCount = accessCount + 1, lastAccessedAt = :now WHERE id IN (:ids)")
+    suspend fun touchSmartMemories(ids: List<Long>, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE smart_memories SET isArchived = 1 WHERE id = :id")
+    suspend fun archiveSmartMemory(id: Long)
+
+    @Query("DELETE FROM smart_memories WHERE id = :id")
+    suspend fun deleteSmartMemory(id: Long)
+
+    @Query("DELETE FROM smart_memories")
+    suspend fun clearAllSmartMemories()
+
+    @Query("UPDATE smart_memories SET isArchived = 1 WHERE isArchived = 0 AND importanceScore <= :maxImportance AND lastAccessedAt < :before")
+    suspend fun archiveStaleSmartMemories(before: Long, maxImportance: Int = 3): Int
+
+    @Query("SELECT * FROM smart_memories WHERE (title LIKE '%' || :query || '%' OR summary LIKE '%' || :query || '%' OR keywords LIKE '%' || :query || '%') AND isArchived = 0 ORDER BY importanceScore DESC, lastAccessedAt DESC LIMIT 50")
+    suspend fun searchSmartMemories(query: String): List<SmartMemoryEntity>
 
     // ── Workspaces ──────────────────────────────────────────────────────────
     @Insert

@@ -49,31 +49,42 @@ class CloudAiEngine(
         val startMs = System.currentTimeMillis()
 
         // Inject jailbreak into system prompt if active
-        val basePrompt = Constants.aiSystemPrompt(runtimeContext)
+        // Runtime state can contain paths, package names, or command output;
+        // sanitize it before it is embedded in a cloud system prompt.
+        val basePrompt = Constants.aiSystemPrompt(SmartMemoryEngine.sanitizeForExternal(runtimeContext))
         val systemPrompt = if (jailbreakActive && jailbreakLevel != JailbreakLevel.OFF) {
             JailbreakEngine.injectJailbreak(basePrompt, jailbreakLevel)
         } else {
             basePrompt
         }
 
+        // Redact secrets at the cloud boundary only. Local mode receives the
+        // original input; cloud requests must not forward credentials or PII.
+        val safeInput = SmartMemoryEngine.sanitizeForExternal(userInput)
         val obfuscatedInput = if (jailbreakActive && jailbreakLevel != JailbreakLevel.OFF) {
-            JailbreakEngine.obfuscateInput(userInput, jailbreakLevel)
+            JailbreakEngine.obfuscateInput(safeInput, jailbreakLevel)
         } else {
-            userInput
+            safeInput
         }
 
         val messages = buildList {
             add(mapOf("role" to "system", "content" to systemPrompt))
-            // Real conversation history — gives AI memory of what was said
-            chatHistory.takeLast(16).forEach { (role, content) ->
-                add(mapOf("role" to role, "content" to content))
+            // Durable smart memory is independent from the short chat window.
+            // Include it even when chat history exists; otherwise the memory
+            // engine would be silently ignored in normal conversations.
+            if (memory.isNotEmpty()) {
+                val memoryText = memory.joinToString("\n") { item ->
+                    "- ${SmartMemoryEngine.sanitizeForExternal(item.userInput).take(500)}" +
+                        if (item.actionType.isBlank()) "" else " (${item.actionType})"
+                }.take(4_000)
+                add(mapOf(
+                    "role" to "system",
+                    "content" to "Relevant user-approved memory (use only when applicable):\n$memoryText"
+                ))
             }
-            // Fallback: command memory if no chat history
-            if (chatHistory.isEmpty()) {
-                memory.takeLast(6).forEach { m ->
-                    add(mapOf("role" to "user", "content" to m.userInput))
-                    add(mapOf("role" to "assistant", "content" to "Action: ${m.actionType}"))
-                }
+            // Real conversation history — gives AI memory of what was said
+            chatHistory.takeLast(8).forEach { (role, content) ->
+                add(mapOf("role" to role, "content" to SmartMemoryEngine.sanitizeForExternal(content)))
             }
             add(mapOf("role" to "user", "content" to obfuscatedInput))
         }

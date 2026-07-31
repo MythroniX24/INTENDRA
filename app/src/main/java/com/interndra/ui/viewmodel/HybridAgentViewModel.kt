@@ -80,6 +80,11 @@ private val OFFLINE_CHAT_MODEL_PREF = stringPreferencesKey("offline_chat_model")
 private val OFFLINE_REASONING_MODEL_PREF = stringPreferencesKey("offline_reasoning_model")
 private val OFFLINE_VISION_MODEL_PREF = stringPreferencesKey("offline_vision_model")
 private val OFFLINE_EMBEDDINGS_MODEL_PREF = stringPreferencesKey("offline_embeddings_model")
+private val SMART_MEMORY_ENABLED_PREF = booleanPreferencesKey("smart_memory_enabled")
+private val SMART_USER_MEMORY_PREF = booleanPreferencesKey("smart_user_memory_enabled")
+private val SMART_PROJECT_MEMORY_PREF = booleanPreferencesKey("smart_project_memory_enabled")
+private val SMART_CHAT_MEMORY_PREF = booleanPreferencesKey("smart_chat_memory_enabled")
+private val SMART_MEMORY_BUDGET_PREF = stringPreferencesKey("smart_memory_token_budget")
 
 // ── Active command tracking for chat UI (like Claude's command indicator) ──
 enum class CommandStatus { RUNNING, SUCCESS, FAILED }
@@ -389,6 +394,29 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         safeStateFlow(repo.getPinnedMemories(), emptyList())
     }
 
+    val smartMemories: StateFlow<List<SmartMemoryEntity>> by lazy {
+        safeStateFlow(repo.getAllSmartMemories(), emptyList())
+    }
+
+    val smartMemoryEnabled: StateFlow<Boolean> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[SMART_MEMORY_ENABLED_PREF] ?: true }, true)
+    }
+    val smartUserMemoryEnabled: StateFlow<Boolean> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[SMART_USER_MEMORY_PREF] ?: true }, true)
+    }
+    val smartProjectMemoryEnabled: StateFlow<Boolean> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[SMART_PROJECT_MEMORY_PREF] ?: true }, true)
+    }
+    val smartChatMemoryEnabled: StateFlow<Boolean> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[SMART_CHAT_MEMORY_PREF] ?: true }, true)
+    }
+    val smartMemoryBudget: StateFlow<Int> by lazy {
+        safeStateFlow(app.dataStore.data.map {
+            it[SMART_MEMORY_BUDGET_PREF]?.toIntOrNull()?.coerceIn(100, SmartMemoryEngine.LARGE_MODEL_BUDGET)
+                ?: SmartMemoryEngine.SMALL_MODEL_BUDGET
+        }, SmartMemoryEngine.SMALL_MODEL_BUDGET)
+    }
+
     val workspaces: StateFlow<List<Workspace>> by lazy {
         safeStateFlow(repo.getAllWorkspaces(), emptyList())
     }
@@ -534,6 +562,11 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 val memCount = repo.memoryCount()
                 val knCount  = db.dao().knowledgeCount()
                 val tlCount  = db.dao().timelineCount()
+                // Low-importance memories that have not been used for 90 days
+                // leave the active index but remain recoverable in archive storage.
+                repo.archiveStaleSmartMemories(
+                    before = System.currentTimeMillis() - 90L * 24L * 60L * 60L * 1000L
+                )
                 _uiState.update { it.copy(
                     localModelReady = ready,
                     memoryCount     = memCount,
@@ -1144,8 +1177,30 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 // ── Route + parse ─────────────────────────────────────────
                 repo.log(session, LogType.INFO, "🧠 Routing: ${effectiveMode.emoji} ${effectiveMode.label} (privacyMode: ${mode.name})")
 
-                val memoryContext = repo.buildMemoryContext()
-                val chatHistory  = repo.getChatHistory(limit = 16)
+                val memoryPolicy = SmartMemoryPolicy(
+                    enabled = smartMemoryEnabled.value,
+                    userEnabled = smartUserMemoryEnabled.value,
+                    projectEnabled = smartProjectMemoryEnabled.value,
+                    chatEnabled = smartChatMemoryEnabled.value,
+                    maxTokens = smartMemoryBudget.value
+                )
+                val memoryContext = repo.buildSmartMemoryContext(
+                    query = augmentedInput,
+                    chatId = activeWorkspaceId.value,
+                    // A workspace is the current project namespace when the
+                    // user explicitly saves project memory; this keeps it
+                    // isolated from other workspaces without a cloud account.
+                    projectId = activeWorkspaceId.value,
+                    maxTokens = if (effectiveMode == PrivacyMode.LOCAL_ONLY) {
+                        SmartMemoryEngine.SMALL_MODEL_BUDGET
+                    } else {
+                        SmartMemoryEngine.LARGE_MODEL_BUDGET
+                    },
+                    policy = memoryPolicy
+                )
+                // Keep only a small recency window; durable context is handled
+                // by SmartMemoryEngine and is never the complete chat database.
+                val chatHistory  = repo.getChatHistory(limit = 8)
                 val runtimeContext = withContext(Dispatchers.IO) { buildTerminalRuntimeContext() }
                 val orchResult = orchestrator.process(
                     userInput   = augmentedInput,
@@ -1519,7 +1574,60 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     }
     fun clearMemory() = viewModelScope.launch {
         repo.clearMemory()
+        repo.clearSmartMemory()
         _uiState.update { it.copy(memoryCount = 0) }
+    }
+
+    fun searchSmartMemories(query: String, onResult: (List<SmartMemoryEntity>) -> Unit) = viewModelScope.launch {
+        onResult(repo.searchSmartMemories(query))
+    }
+
+    fun updateSmartMemory(memory: SmartMemoryEntity) = viewModelScope.launch {
+        repo.updateSmartMemory(memory)
+    }
+
+    fun archiveSmartMemory(memory: SmartMemoryEntity) = viewModelScope.launch {
+        repo.archiveSmartMemory(memory.id)
+    }
+
+    fun deleteSmartMemory(memory: SmartMemoryEntity) = viewModelScope.launch {
+        repo.deleteSmartMemory(memory.id)
+    }
+
+    fun rememberUserPreference(title: String, summary: String) = viewModelScope.launch {
+        repo.addSmartMemory(SmartMemoryType.USER, title, summary, importanceScore = 9)
+    }
+
+    fun rememberProjectDecision(title: String, summary: String) = viewModelScope.launch {
+        val projectId = activeWorkspaceId.value
+        repo.addSmartMemory(SmartMemoryType.PROJECT, title, summary, projectId = projectId, importanceScore = 9)
+    }
+
+    fun saveSmartMemorySettings(
+        enabled: Boolean? = null,
+        userEnabled: Boolean? = null,
+        projectEnabled: Boolean? = null,
+        chatEnabled: Boolean? = null,
+        budget: Int? = null
+    ) = viewModelScope.launch {
+        app.dataStore.edit { prefs ->
+            enabled?.let { prefs[SMART_MEMORY_ENABLED_PREF] = it }
+            userEnabled?.let { prefs[SMART_USER_MEMORY_PREF] = it }
+            projectEnabled?.let { prefs[SMART_PROJECT_MEMORY_PREF] = it }
+            chatEnabled?.let { prefs[SMART_CHAT_MEMORY_PREF] = it }
+            budget?.let { prefs[SMART_MEMORY_BUDGET_PREF] = it.coerceIn(100, SmartMemoryEngine.LARGE_MODEL_BUDGET).toString() }
+        }
+    }
+
+    fun rememberInCurrentChat(title: String, summary: String, importance: Int = 8) = viewModelScope.launch {
+        if (summary.isBlank()) return@launch
+        repo.addSmartMemory(
+            type = SmartMemoryType.CHAT,
+            title = title.ifBlank { "Saved conversation" },
+            summary = summary,
+            chatId = activeWorkspaceId.value,
+            importanceScore = importance
+        )
     }
 
     // ── Knowledge Vault management ────────────────────────────────────────

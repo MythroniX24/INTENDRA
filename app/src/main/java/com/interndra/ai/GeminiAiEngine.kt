@@ -47,7 +47,9 @@ class GeminiAiEngine(
     ): AiEngineResult = withContext(Dispatchers.IO) {
         val startMs = System.currentTimeMillis()
 
-        val basePrompt = Constants.aiSystemPrompt(runtimeContext)
+        // Runtime state can contain paths, package names, or command output;
+        // sanitize it before it is embedded in a cloud system prompt.
+        val basePrompt = Constants.aiSystemPrompt(SmartMemoryEngine.sanitizeForExternal(runtimeContext))
         val systemPrompt = if (jailbreakActive && jailbreakLevel != JailbreakLevel.OFF) {
             JailbreakEngine.injectJailbreak(basePrompt, jailbreakLevel)
         } else {
@@ -56,27 +58,39 @@ class GeminiAiEngine(
 
         // Build Gemini contents array
         val contents = mutableListOf<Map<String, Any>>().apply {
+            // Durable smart memory is separate from the short chat window and
+            // must remain available even when chat history is non-empty.
+            if (memory.isNotEmpty()) {
+                val memoryText = memory.joinToString("\n") { item ->
+                    "- ${SmartMemoryEngine.sanitizeForExternal(item.userInput).take(500)}" +
+                        if (item.actionType.isBlank()) "" else " (${item.actionType})"
+                }.take(4_000)
+                add(mapOf(
+                    "role" to "user",
+                    "parts" to listOf(mapOf("text" to "Relevant user-approved memory (use only when applicable):\n$memoryText"))
+                ))
+                add(mapOf(
+                    "role" to "model",
+                    "parts" to listOf(mapOf("text" to "Understood. I will use relevant memory only."))
+                ))
+            }
             // System instruction is passed separately in Gemini API
             // Chat history
-            chatHistory.takeLast(16).forEach { (role, content) ->
+            chatHistory.takeLast(8).forEach { (role, content) ->
                 val geminiRole = when (role.lowercase()) {
                     "assistant" -> "model"
                     else -> "user"
                 }
-                add(mapOf("role" to geminiRole, "parts" to listOf(mapOf("text" to content))))
-            }
-            // Command memory fallback if no chat history
-            if (chatHistory.isEmpty()) {
-                memory.takeLast(6).forEach { m ->
-                    add(mapOf("role" to "user", "parts" to listOf(mapOf("text" to m.userInput))))
-                    add(mapOf("role" to "model", "parts" to listOf(mapOf("text" to "Action: ${m.actionType}"))))
-                }
+                add(mapOf("role" to geminiRole, "parts" to listOf(mapOf("text" to SmartMemoryEngine.sanitizeForExternal(content)))) )
             }
             // Current user input
+            // Redact secrets at the cloud boundary only. Local mode receives
+            // the original input; Gemini must not receive credentials or PII.
+            val safeInput = SmartMemoryEngine.sanitizeForExternal(userInput)
             val obfuscatedInput = if (jailbreakActive && jailbreakLevel != JailbreakLevel.OFF) {
-                JailbreakEngine.obfuscateInput(userInput, jailbreakLevel)
+                JailbreakEngine.obfuscateInput(safeInput, jailbreakLevel)
             } else {
-                userInput
+                safeInput
             }
             add(mapOf("role" to "user", "parts" to listOf(mapOf("text" to obfuscatedInput))))
         }
@@ -109,7 +123,9 @@ class GeminiAiEngine(
                 ?: throw IllegalStateException("Empty response from Gemini")
 
             if (!response.isSuccessful) {
-                throw IllegalStateException("Gemini HTTP ${response.code}: ${body.take(200)}")
+                // Never include the provider response body in logs/errors: it
+                // may echo user input or other sensitive request details.
+                throw IllegalStateException("Gemini HTTP ${response.code}")
             }
 
             val envelope = gson.fromJson(body, JsonObject::class.java)

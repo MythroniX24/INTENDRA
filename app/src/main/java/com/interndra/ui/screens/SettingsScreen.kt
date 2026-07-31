@@ -58,6 +58,11 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     val offlineAiMode by vm.offlineAiMode.collectAsState()
     val offlinePlannerModelId by vm.offlinePlannerModelId.collectAsState()
     val offlineChatModelId by vm.offlineChatModelId.collectAsState()
+    val smartMemoryEnabled by vm.smartMemoryEnabled.collectAsState()
+    val smartUserMemoryEnabled by vm.smartUserMemoryEnabled.collectAsState()
+    val smartProjectMemoryEnabled by vm.smartProjectMemoryEnabled.collectAsState()
+    val smartChatMemoryEnabled by vm.smartChatMemoryEnabled.collectAsState()
+    val smartMemoryBudget by vm.smartMemoryBudget.collectAsState()
 
     var tempKey  by remember { mutableStateOf(apiKey) }
     var tempGeminiKey by remember { mutableStateOf(geminiKey) }
@@ -68,6 +73,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     var isTesting by remember { mutableStateOf(false) }
     var offlinePlannerExpanded by remember { mutableStateOf(false) }
     var offlineChatExpanded by remember { mutableStateOf(false) }
+    var smartBudgetDraft by remember(smartMemoryBudget) { mutableFloatStateOf(smartMemoryBudget.toFloat()) }
 
     Column(Modifier.fillMaxSize().background(Background800)) {
 
@@ -737,6 +743,56 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                 }
             }
 
+            // ── Smart Memory ───────────────────────────────────────────────
+            DashboardCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionHeader("🧠 Smart Memory", modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = smartMemoryEnabled,
+                        onCheckedChange = { vm.saveSmartMemorySettings(enabled = it) },
+                        colors = SwitchDefaults.colors(checkedTrackColor = Accent)
+                    )
+                }
+                Text(
+                    "Local-first memory retrieves only relevant facts when needed. It never syncs automatically or sends the complete database to AI.",
+                    color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp
+                )
+                if (smartMemoryEnabled) {
+                    SmartMemoryToggle("User memory", smartUserMemoryEnabled) {
+                        vm.saveSmartMemorySettings(userEnabled = it)
+                    }
+                    SmartMemoryToggle("Project memory", smartProjectMemoryEnabled) {
+                        vm.saveSmartMemorySettings(projectEnabled = it)
+                    }
+                    SmartMemoryToggle("Chat memory", smartChatMemoryEnabled) {
+                        vm.saveSmartMemorySettings(chatEnabled = it)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text("Maximum injected memory: $smartMemoryBudget tokens",
+                        color = TerminalWhite.copy(alpha = 0.7f), fontSize = 12.sp)
+                    Slider(
+                        value = smartBudgetDraft,
+                        onValueChange = { smartBudgetDraft = it },
+                        onValueChangeFinished = { vm.saveSmartMemorySettings(budget = smartBudgetDraft.toInt()) },
+                        valueRange = 100f..1200f,
+                        steps = 10,
+                        colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent)
+                    )
+                    Text("Small local models use a smaller budget; cloud models can use more.",
+                        color = TerminalWhite.copy(alpha = 0.4f), fontSize = 11.sp)
+                    OutlinedButton(
+                        onClick = {
+                            vm.clearMemory()
+                            Toast.makeText(context, "All memory cleared", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, TerminalRed.copy(alpha = 0.6f))
+                    ) {
+                        Text("Delete all memories", color = TerminalRed, fontSize = 12.sp)
+                    }
+                }
+            }
+
             // ── System & Actions ───────────────────────────────────────────
             DashboardCard {
                 SectionHeader("System", modifier = Modifier.padding(bottom = 8.dp))
@@ -804,5 +860,24 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                     fontSize = 12.sp)
             }
         }
+    }
+}
+
+@Composable
+private fun SmartMemoryToggle(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, color = TerminalWhite, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(checkedTrackColor = Accent)
+        )
     }
 }

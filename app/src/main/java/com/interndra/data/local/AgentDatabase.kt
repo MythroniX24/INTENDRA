@@ -19,9 +19,10 @@ import com.interndra.data.model.*
         KnowledgeEntry::class,
         TimelineEntry::class,
         PluginEntry::class,
-        AutomationRule::class
+        AutomationRule::class,
+        SmartMemoryEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 abstract class AgentDatabase : RoomDatabase() {
@@ -134,6 +135,33 @@ abstract class AgentDatabase : RoomDatabase() {
             }
         }
 
+        // ── Migration 4 → 5: unified, scoped smart memory ──────────────────
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS smart_memories (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        type TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        summary TEXT NOT NULL,
+                        keywords TEXT NOT NULL DEFAULT '',
+                        embeddingJson TEXT NOT NULL DEFAULT '',
+                        projectId INTEGER,
+                        chatId INTEGER,
+                        importanceScore INTEGER NOT NULL DEFAULT 5,
+                        createdAt INTEGER NOT NULL,
+                        lastAccessedAt INTEGER NOT NULL,
+                        accessCount INTEGER NOT NULL DEFAULT 0,
+                        isArchived INTEGER NOT NULL DEFAULT 0
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_smart_memories_type ON smart_memories(type)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_smart_memories_projectId ON smart_memories(projectId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_smart_memories_chatId ON smart_memories(chatId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_smart_memories_isArchived ON smart_memories(isArchived)")
+            }
+        }
+
         fun getInstance(context: Context): AgentDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -141,8 +169,8 @@ abstract class AgentDatabase : RoomDatabase() {
                     AgentDatabase::class.java,
                     "agent_db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
-                    .fallbackToDestructiveMigrationFrom(1) // only nuke v1; v2→v4 migrate cleanly
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .fallbackToDestructiveMigrationFrom(1) // only nuke v1; v2→v5 migrate cleanly
                     .build()
                     .also { instance = it }
             }

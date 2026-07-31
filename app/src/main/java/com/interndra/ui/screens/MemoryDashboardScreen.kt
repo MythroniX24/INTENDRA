@@ -20,7 +20,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.interndra.ai.SmartMemoryEngine
 import com.interndra.data.model.MemoryEntry
+import com.interndra.data.model.SmartMemoryEntity
+import com.interndra.data.model.SmartMemoryType
 import com.interndra.ui.components.*
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
@@ -32,11 +35,17 @@ import java.util.Locale
 fun MemoryDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     val allMemories  by vm.allMemories.collectAsState()
     val pinned       by vm.pinnedMemories.collectAsState()
+    val smartMemories by vm.smartMemories.collectAsState()
     val uiState      by vm.uiState.collectAsState()
 
     var searchQuery      by remember { mutableStateOf("") }
     var searchResults    by remember { mutableStateOf<List<MemoryEntry>?>(null) }
+    var smartSearchResults by remember { mutableStateOf<List<SmartMemoryEntity>?>(null) }
     var selectedTab      by remember { mutableStateOf(0) }
+    var showRememberDialog by remember { mutableStateOf(false) }
+    var rememberTitle by remember { mutableStateOf("") }
+    var rememberSummary by remember { mutableStateOf("") }
+    var rememberScope by remember { mutableStateOf(SmartMemoryType.CHAT) }
     val kbController     = LocalSoftwareKeyboardController.current
 
     Column(Modifier.fillMaxSize().background(Background800)) {
@@ -44,6 +53,9 @@ fun MemoryDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {
         // ── Subtitle bar (actions only, title is in AppShell) ─────────────
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.End) {
+            IconButton(onClick = { showRememberDialog = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Remember this", tint = Accent)
+            }
             IconButton(onClick = { vm.clearMemory() }) {
                 Icon(Icons.Default.DeleteSweep, contentDescription = "Clear all", tint = TerminalRed.copy(alpha = 0.7f))
             }
@@ -56,7 +68,11 @@ fun MemoryDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {
             placeholder = "Search memories...",
             accentColor = Accent,
             onSearch = {
-                vm.searchMemories(searchQuery) { results -> searchResults = results }
+                if (selectedTab == 3) {
+                    vm.searchSmartMemories(searchQuery) { results -> smartSearchResults = results }
+                } else {
+                    vm.searchMemories(searchQuery) { results -> searchResults = results }
+                }
             },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
         )
@@ -79,8 +95,20 @@ fun MemoryDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {
                 Text("Search", modifier = Modifier.padding(vertical = 12.dp),
                     color = if (selectedTab == 2) Accent else TerminalWhite.copy(alpha = 0.6f))
             }
+            Tab(selected = selectedTab == 3, onClick = { selectedTab = 3; searchResults = null; smartSearchResults = null }) {
+                Text("Smart (${smartMemories.size})", modifier = Modifier.padding(vertical = 12.dp),
+                    color = if (selectedTab == 3) Accent else TerminalWhite.copy(alpha = 0.6f))
+            }
         }
 
+        if (selectedTab == 3) {
+            SmartMemoryPanel(
+                memories = smartSearchResults ?: smartMemories,
+                onUpdate = vm::updateSmartMemory,
+                onArchive = vm::archiveSmartMemory,
+                onDelete = vm::deleteSmartMemory
+            )
+        } else {
         val displayList = when {
             searchResults != null -> searchResults!!
             selectedTab == 1     -> pinned
@@ -113,6 +141,151 @@ fun MemoryDashboardScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {
                 }
             }
         }
+        }
+    }
+
+    if (showRememberDialog) {
+        AlertDialog(
+            onDismissRequest = { showRememberDialog = false },
+            title = { Text("Remember in this chat") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = rememberTitle,
+                        onValueChange = { rememberTitle = it },
+                        label = { Text("Title") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = rememberSummary,
+                        onValueChange = { rememberSummary = it },
+                        label = { Text("What should INTENDRA remember?") },
+                        minLines = 3
+                    )
+                    Text("Memory scope", color = TerminalWhite.copy(alpha = 0.6f), fontSize = 12.sp)
+                    SmartMemoryType.values().forEach { type ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = rememberScope == type,
+                                onClick = { rememberScope = type },
+                                colors = RadioButtonDefaults.colors(selectedColor = Accent)
+                            )
+                            Text(type.name.lowercase().replaceFirstChar { it.uppercase() }, color = TerminalWhite, fontSize = 12.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = rememberSummary.isNotBlank(),
+                    onClick = {
+                        when (rememberScope) {
+                            SmartMemoryType.CHAT -> vm.rememberInCurrentChat(rememberTitle, rememberSummary)
+                            SmartMemoryType.USER -> vm.rememberUserPreference(rememberTitle, rememberSummary)
+                            SmartMemoryType.PROJECT -> vm.rememberProjectDecision(rememberTitle, rememberSummary)
+                        }
+                        rememberTitle = ""
+                        rememberSummary = ""
+                        rememberScope = SmartMemoryType.CHAT
+                        showRememberDialog = false
+                    }
+                ) { Text("Remember") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRememberDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun SmartMemoryPanel(
+    memories: List<SmartMemoryEntity>,
+    onUpdate: (SmartMemoryEntity) -> Unit,
+    onArchive: (SmartMemoryEntity) -> Unit,
+    onDelete: (SmartMemoryEntity) -> Unit
+) {
+    if (memories.isEmpty()) {
+        EmptyState(
+            emoji = "🧠",
+            title = "No smart memories yet",
+            subtitle = "Use ‘remember this’ or save a project decision to create one."
+        )
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(memories, key = { it.id }) { memory ->
+            SmartMemoryCard(memory, onUpdate, onArchive, onDelete)
+        }
+    }
+}
+
+@Composable
+private fun SmartMemoryCard(
+    memory: SmartMemoryEntity,
+    onUpdate: (SmartMemoryEntity) -> Unit,
+    onArchive: (SmartMemoryEntity) -> Unit,
+    onDelete: (SmartMemoryEntity) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
+    var title by remember(memory.id) { mutableStateOf(memory.title) }
+    var summary by remember(memory.id) { mutableStateOf(memory.summary) }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${memory.memoryType().name} · ${memory.title}", color = Accent,
+                    fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 2)
+                IconButton(onClick = { expanded = !expanded }, modifier = Modifier.size(32.dp)) {
+                    Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = "Expand smart memory", tint = TerminalWhite.copy(0.6f))
+                }
+            }
+            Text(memory.summary, color = TerminalWhite.copy(0.8f), fontSize = 13.sp, maxLines = if (expanded) 8 else 2)
+            if (expanded) {
+                Spacer(Modifier.height(8.dp))
+                Text("Importance ${memory.importanceScore}/10 · Used ${memory.accessCount} times",
+                    color = TerminalWhite.copy(0.45f), fontSize = 11.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { editing = true }, modifier = Modifier.weight(1f)) {
+                        Text("Edit", color = TerminalWhite, fontSize = 12.sp)
+                    }
+                    OutlinedButton(onClick = { onArchive(memory) }, modifier = Modifier.weight(1f)) {
+                        Text("Archive", color = TerminalYellow, fontSize = 12.sp)
+                    }
+                    OutlinedButton(onClick = { onDelete(memory) }, modifier = Modifier.weight(1f)) {
+                        Text("Delete", color = TerminalRed, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+    if (editing) {
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text("Edit smart memory") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") })
+                    OutlinedTextField(value = summary, onValueChange = { summary = it }, label = { Text("Summary") })
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onUpdate(memory.copy(title = title.trim().take(120), summary = SmartMemoryEngine.compress(summary)))
+                    editing = false
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("Cancel") } }
+        )
     }
 }
 
