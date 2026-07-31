@@ -36,6 +36,7 @@ import com.interndra.ui.viewmodel.HybridAgentViewModel
 @Composable
 fun MainScreen(viewModel: HybridAgentViewModel) {
     var selectedAppTab by remember { mutableStateOf(AppTab.CHAT) }
+    var showProviderSettings by remember { mutableStateOf(false) }
     // Track sub-tab for DASHBOARDS tab
     var selectedDashboard by remember { mutableStateOf(0) } // 0=Memory, 1=Vault, 2=Research, 3=Timeline, 4=Security, 5=Workspace
 
@@ -365,7 +366,12 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
                     .padding(paddingValues),
                 color = Background800
             ) {
-                AnimatedContent(
+                if (showProviderSettings) {
+                    ProviderSettingsScreen(
+                        vm = viewModel,
+                        onBack = { showProviderSettings = false }
+                    )
+                } else AnimatedContent(
                     targetState = selectedAppTab to selectedDashboard,
                     transitionSpec = {
                         val fromTab = initialState.first.ordinal
@@ -430,7 +436,8 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
                         }
                         AppTab.SETTINGS -> SettingsScreen(
                             vm = viewModel,
-                            onOpenDrawer = { scope.launch { drawerState.open() } }
+                            onOpenDrawer = { scope.launch { drawerState.open() } },
+                            onOpenProviders = { showProviderSettings = true }
                         )
                     }
                 }

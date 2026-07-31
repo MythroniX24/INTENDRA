@@ -12,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings as SettingsIcon
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -36,7 +37,11 @@ import com.interndra.ui.viewmodel.HybridAgentViewModel
 import com.interndra.util.Constants
 
 @Composable
-fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
+fun SettingsScreen(
+    vm: HybridAgentViewModel,
+    onOpenDrawer: () -> Unit = {},
+    onOpenProviders: () -> Unit = {}
+) {
     val context       = LocalContext.current
     val apiKey        by vm.apiKey.collectAsState()
     val geminiKey     by vm.geminiApiKey.collectAsState()
@@ -110,6 +115,28 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                 }
             }
 
+            // ── New provider manager entry ────────────────────────────────
+            DashboardCard {
+                SectionHeader("Provider Manager", modifier = Modifier.padding(bottom = 4.dp))
+                Text(
+                    "Manage cloud, local, and custom AI endpoints from one secure place.",
+                    color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = onOpenProviders,
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(SettingsIcon, contentDescription = null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("AI → Providers", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                }
+            }
+
+            // ── Legacy compatibility status ───────────────────────────────
+            // Existing OpenRouter/Gemini controls remain visible during the
+            // migration release; new installs should use Provider Manager.
             // ── Cloud AI Model (OpenRouter) ────────────────────────────────
             if (provider == Constants.AiProvider.OPENROUTER) {
                 DashboardCard {

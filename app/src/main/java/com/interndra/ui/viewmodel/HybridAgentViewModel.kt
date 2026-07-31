@@ -16,6 +16,16 @@ import androidx.work.WorkManager
 import com.interndra.agent.TerminalAgent
 import com.interndra.ai.*
 import com.interndra.ai.model.*
+import com.interndra.ai.provider.ProviderCapability
+import com.interndra.ai.provider.ProviderConfig
+import com.interndra.ai.provider.ProviderDefaults
+import com.interndra.ai.provider.ProviderKind
+import com.interndra.ai.provider.ProviderManager as AiProviderManager
+import com.interndra.ai.provider.ProviderModel
+import com.interndra.ai.provider.ProviderRole
+import com.interndra.ai.provider.ProviderState
+import com.interndra.ai.provider.ProviderStatus
+import com.interndra.ai.provider.ProviderValidation
 import com.interndra.ai.system.AiSystemHealthMonitor
 import com.interndra.ai.tasks.TaskManager
 import com.interndra.ai.tasks.TaskPlan
@@ -156,6 +166,13 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     val searchCache      = SearchCache(db.dao())
     val webpageReader    = WebpageReader()
     val providerSettings = ProviderSettings(app)
+    // New provider manager is independent from AI engines and from the
+    // autonomous web-search resolver below. It owns provider metadata,
+    // encrypted secrets, defaults, model sync, and custom endpoints.
+    val aiProviderManager = AiProviderManager(app)
+    val providerState: StateFlow<ProviderState> by lazy {
+        safeStateFlow(aiProviderManager.state, ProviderState())
+    }
     val providerManager = ProviderManager(app) {
         // Build the Gemini search provider lazily from current AI settings.
         val gKey = geminiApiKey.value
@@ -541,6 +558,78 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         safeStateFlow(providerSettings.settings.map { it.preferBrave }, false)
     }
 
+    // ── New Provider Manager API ──────────────────────────────────────────
+    fun initializeProviderManager() = viewModelScope.launch(Dispatchers.IO) {
+        runCatching {
+            aiProviderManager.initialize()
+            // Read the legacy DataStore snapshot directly instead of using
+            // StateFlow.value, which may still contain its initial default on a
+            // cold start. This makes migration deterministic and idempotent.
+            val legacy = app.dataStore.data.first()
+            aiProviderManager.migrateLegacy(
+                legacy[API_KEY_PREF].orEmpty(),
+                legacy[GEMINI_KEY_PREF].orEmpty(),
+                legacy[MODEL_PREF].orEmpty(),
+                legacy[GEMINI_MODEL_PREF].orEmpty()
+            )
+        }.onFailure { Log.e(TAG, "Provider manager init failed: ${it.message}") }
+    }
+
+    fun toggleProvider(providerId: String, enabled: Boolean) = viewModelScope.launch(Dispatchers.IO) {
+        aiProviderManager.setEnabled(providerId, enabled)
+    }
+
+    fun testProvider(providerId: String, onResult: (ProviderStatus) -> Unit = {}) = viewModelScope.launch(Dispatchers.IO) {
+        val result = aiProviderManager.testConnection(providerId)
+        withContext(Dispatchers.Main.immediate) { onResult(result) }
+    }
+
+    fun refreshProviderModels(providerId: String, onResult: (Result<List<ProviderModel>>) -> Unit = {}) = viewModelScope.launch(Dispatchers.IO) {
+        val result = aiProviderManager.refreshModels(providerId)
+        withContext(Dispatchers.Main.immediate) { onResult(result) }
+    }
+
+    fun setProviderDefault(role: ProviderRole, providerId: String) = viewModelScope.launch(Dispatchers.IO) {
+        aiProviderManager.setDefault(role, providerId)
+        // Keep the currently supported chat engines compatible while the
+        // generic provider adapter is introduced: selecting a built-in chat
+        // provider in the new manager also updates the legacy router's enum.
+        if (role == ProviderRole.CHAT) {
+            val legacyProvider = when (providerId) {
+                "openrouter" -> Constants.AiProvider.OPENROUTER
+                "gemini" -> Constants.AiProvider.GEMINI
+                else -> null
+            }
+            if (legacyProvider != null) {
+                app.dataStore.edit { it[PROVIDER_PREF] = legacyProvider.name }
+                withContext(Dispatchers.Main.immediate) {
+                    _uiState.update { it.copy(aiProvider = legacyProvider) }
+                }
+            }
+        }
+    }
+
+    fun saveCustomProvider(
+        name: String,
+        baseUrl: String,
+        apiKey: String,
+        authType: com.interndra.ai.provider.ProviderAuthType,
+        headersJson: String = "",
+        organizationId: String = "",
+        projectId: String = "",
+        apiVersion: String = "",
+        endpointPath: String = "/v1/models",
+        notes: String = "",
+        onResult: (ProviderValidation) -> Unit = {}
+    ) = viewModelScope.launch(Dispatchers.IO) {
+        val result = aiProviderManager.createCustomProvider(name, baseUrl, apiKey, authType, headersJson, organizationId, projectId, apiVersion, endpointPath, notes)
+        withContext(Dispatchers.Main.immediate) { onResult(result) }
+    }
+
+    fun deleteProvider(providerId: String) = viewModelScope.launch(Dispatchers.IO) {
+        aiProviderManager.deleteProvider(providerId)
+    }
+
     // ── Init ──────────────────────────────────────────────────────────────
     // UPGRADE: Entire init block is wrapped in try-catch so that a crash in
     // ANY component (TTS, Room, DataStore, JNI, plugins, etc.) does NOT take
@@ -554,6 +643,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         }
         refreshStatus()
         refreshDeviceSnapshot()
+        initializeProviderManager()
 
         viewModelScope.launch {
             try {                localEngine.setPreferredModel(offlineChatModelId.value)
@@ -731,9 +821,23 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     }
 
     // ── Preference save ───────────────────────────────────────────────────
-    fun saveApiKey(key: String)           = viewModelScope.launch { app.dataStore.edit { it[API_KEY_PREF] = key } }
+    fun saveApiKey(key: String)           = viewModelScope.launch {
+        app.dataStore.edit { it[API_KEY_PREF] = key.trim() }
+        val legacy = app.dataStore.data.first()
+        // Keep the new provider manager as the source of truth while retaining
+        // the legacy preference during this migration release.
+        aiProviderManager.migrateLegacy(
+            legacy[API_KEY_PREF].orEmpty(), legacy[GEMINI_KEY_PREF].orEmpty(),
+            legacy[MODEL_PREF].orEmpty(), legacy[GEMINI_MODEL_PREF].orEmpty()
+        )
+    }
     fun saveGeminiApiKey(key: String)     = viewModelScope.launch {
-        app.dataStore.edit { it[GEMINI_KEY_PREF] = key }
+        app.dataStore.edit { it[GEMINI_KEY_PREF] = key.trim() }
+        val legacy = app.dataStore.data.first()
+        aiProviderManager.migrateLegacy(
+            legacy[API_KEY_PREF].orEmpty(), legacy[GEMINI_KEY_PREF].orEmpty(),
+            legacy[MODEL_PREF].orEmpty(), legacy[GEMINI_MODEL_PREF].orEmpty()
+        )
     }
 
     /** Test Gemini API key by making an actual API call. Returns true on success. */
@@ -760,8 +864,22 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             _uiState.update { it.copy(isLoading = false) }
         }
     }
-    fun saveModel(model: String)          = viewModelScope.launch { app.dataStore.edit { it[MODEL_PREF] = model } }
-    fun saveGeminiModel(model: String)    = viewModelScope.launch { app.dataStore.edit { it[GEMINI_MODEL_PREF] = model } }
+    fun saveModel(model: String)          = viewModelScope.launch {
+        app.dataStore.edit { it[MODEL_PREF] = model }
+        val legacy = app.dataStore.data.first()
+        aiProviderManager.migrateLegacy(
+            legacy[API_KEY_PREF].orEmpty(), legacy[GEMINI_KEY_PREF].orEmpty(),
+            legacy[MODEL_PREF].orEmpty(), legacy[GEMINI_MODEL_PREF].orEmpty()
+        )
+    }
+    fun saveGeminiModel(model: String)    = viewModelScope.launch {
+        app.dataStore.edit { it[GEMINI_MODEL_PREF] = model }
+        val legacy = app.dataStore.data.first()
+        aiProviderManager.migrateLegacy(
+            legacy[API_KEY_PREF].orEmpty(), legacy[GEMINI_KEY_PREF].orEmpty(),
+            legacy[MODEL_PREF].orEmpty(), legacy[GEMINI_MODEL_PREF].orEmpty()
+        )
+    }
     fun saveProvider(provider: Constants.AiProvider) = viewModelScope.launch {
         app.dataStore.edit { it[PROVIDER_PREF] = provider.name }
         _uiState.update { it.copy(aiProvider = provider) }
