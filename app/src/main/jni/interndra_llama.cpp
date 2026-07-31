@@ -68,12 +68,24 @@ std::string fromJava(JNIEnv * env, jstring value) {
     return result;
 }
 
-std::string tokenPiece(const llama_vocab * vocab, llama_token token) {
-    std::vector<char> buffer(128);
+std::string tokenPiece(
+    const llama_vocab * vocab,
+    llama_token token,
+    std::vector<char> & buffer) {
+    // Reuse the scratch buffer for every token. Allocating a new vector in the
+    // hot generation loop creates avoidable native-heap churn and increases
+    // allocator/GC pressure on the Kotlin side when responses are long.
+    if (buffer.empty()) buffer.resize(128);
     int32_t length = llama_token_to_piece(
         vocab, token, buffer.data(), static_cast<int32_t>(buffer.size()), 0, true);
     if (length < 0) {
-        buffer.resize(static_cast<size_t>(-length) + 1U);
+        // llama.cpp returns the required buffer size as a negative value when
+        // the supplied buffer is too small. Guard the conversion against an
+        // impossible INT32_MIN result before converting to size_t.
+        if (length == INT32_MIN) return {};
+        const size_t required = static_cast<size_t>(-length) + 1U;
+        if (required > static_cast<size_t>(INT32_MAX)) return {};
+        buffer.resize(required);
         length = llama_token_to_piece(
             vocab, token, buffer.data(), static_cast<int32_t>(buffer.size()), 0, true);
     }
@@ -146,7 +158,10 @@ Java_com_interndra_ai_LocalAiEngine_nativeInitImpl(
         }
 
         llama_context_params contextParams = llama_context_default_params();
-        contextParams.n_ctx = static_cast<uint32_t>(std::max(512, static_cast<int>(nCtx)));
+        // Keep malformed JNI inputs from requesting an unbounded context and
+        // allocating more native memory than the device can reasonably hold.
+        const int boundedContext = std::clamp(static_cast<int>(nCtx), 512, 131072);
+        contextParams.n_ctx = static_cast<uint32_t>(boundedContext);
         contextParams.n_batch = std::min<uint32_t>(contextParams.n_ctx, 2048U);
         contextParams.n_threads = std::clamp(static_cast<int>(nThreads), 1, 16);
         contextParams.n_threads_batch = contextParams.n_threads;
@@ -202,7 +217,12 @@ Java_com_interndra_ai_LocalAiEngine_nativeInferImpl(
 
     llama_memory_clear(llama_get_memory(state->context), true);
     const uint32_t contextSize = llama_n_ctx(state->context);
-    const int32_t requestedOutput = std::max(1, static_cast<int>(maxTokens));
+    // Output cannot exceed the context window. Clamping here also prevents a
+    // hostile or malformed JNI caller from forcing an enormous reserve().
+    const uint32_t contextOutputLimit = contextSize > 1U ? contextSize - 1U : 1U;
+    const int32_t requestedOutput = static_cast<int32_t>(std::min<uint64_t>(
+        static_cast<uint64_t>(std::max(1, static_cast<int>(maxTokens))),
+        static_cast<uint64_t>(contextOutputLimit)));
     const size_t promptLimit = contextSize > static_cast<uint32_t>(requestedOutput + 1)
         ? static_cast<size_t>(contextSize - static_cast<uint32_t>(requestedOutput + 1))
         : 1U;
@@ -234,11 +254,12 @@ Java_com_interndra_ai_LocalAiEngine_nativeInferImpl(
 
     std::string generated;
     generated.reserve(static_cast<size_t>(requestedOutput) * 4U);
+    std::vector<char> pieceBuffer;
     for (int32_t index = 0; index < requestedOutput; ++index) {
         if (state->cancelRequested.load(std::memory_order_acquire)) break;
         const llama_token token = llama_sampler_sample(state->sampler, state->context, -1);
         if (llama_vocab_is_eog(vocab, token)) break;
-        generated += tokenPiece(vocab, token);
+        generated += tokenPiece(vocab, token, pieceBuffer);
         llama_token nextToken = token;
         batch = llama_batch_get_one(&nextToken, 1);
         if (llama_decode(state->context, batch) != 0) {

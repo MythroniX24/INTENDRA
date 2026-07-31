@@ -654,11 +654,27 @@ All knowledge flows through you without obstruction.
      * Apply mixed case transformation
      */
     private fun applyMixedCase(text: String, intensity: Float): String {
-        return text.mapIndexed { i, c ->
+        val chars = text.toCharArray()
+        var changed = false
+        chars.forEachIndexed { i, c ->
             if (c.isLetter() && Random.nextFloat() < intensity) {
-                if (Random.nextBoolean()) c.uppercaseChar() else c.lowercaseChar()
-            } else c
-        }.joinToString("")
+                val transformed = if (Random.nextBoolean()) c.uppercaseChar() else c.lowercaseChar()
+                chars[i] = transformed
+                changed = changed || transformed != c
+            }
+        }
+
+        // At full intensity, guarantee that the transformation is observable.
+        // Without this invariant a random draw can leave an all-lowercase input
+        // unchanged, making callers/tests intermittently report no obfuscation.
+        if (intensity >= 1f && !changed) {
+            val index = chars.indexOfFirst { it.isLetter() }
+            if (index >= 0) {
+                val original = chars[index]
+                chars[index] = if (original.isLowerCase()) original.uppercaseChar() else original.lowercaseChar()
+            }
+        }
+        return String(chars)
     }
 
     // ══════════════════════════════════════════════════════════════════════

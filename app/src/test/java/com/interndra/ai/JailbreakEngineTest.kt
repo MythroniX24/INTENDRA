@@ -147,13 +147,19 @@ class JailbreakEngineTest {
         val savedIntensity = JailbreakEngine.obfuscationIntensity
         JailbreakEngine.obfuscationTechnique = ObfuscationTechnique.MIXED_CASE
         JailbreakEngine.obfuscationIntensity = 1.0f
-        val result = JailbreakEngine.obfuscateInput("hello world", JailbreakLevel.EXTREME)
-        val afterPrefix = result.substringAfter("] ")
-        assertThat(afterPrefix).isNotEqualTo("hello world")
-        // At least some letters should change case
-        assertThat(afterPrefix.any { it.isUpperCase() }).isTrue()
-        JailbreakEngine.obfuscationTechnique = savedTechnique
-        JailbreakEngine.obfuscationIntensity = savedIntensity
+        try {
+            // Mixed-case obfuscation is intentionally randomized. The
+            // implementation guarantees a visible change at full intensity.
+            val samples = (0 until 64).map {
+                JailbreakEngine.obfuscateInput("hello world", JailbreakLevel.EXTREME)
+                    .substringAfter("] ")
+            }
+            assertThat(samples).doesNotContain("hello world")
+            assertThat(samples.all { it.length == "hello world".length }).isTrue()
+        } finally {
+            JailbreakEngine.obfuscationTechnique = savedTechnique
+            JailbreakEngine.obfuscationIntensity = savedIntensity
+        }
     }
 
     @Test
