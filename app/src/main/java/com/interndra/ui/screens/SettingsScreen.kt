@@ -26,6 +26,9 @@ import androidx.compose.ui.unit.sp
 import com.interndra.ai.JailbreakEngine
 import com.interndra.ai.JailbreakLevel
 import com.interndra.ai.ObfuscationTechnique
+import com.interndra.ai.model.ModelRole
+import com.interndra.ai.model.OfflineAiMode
+import com.interndra.ai.model.OfflineModelCatalog
 import com.interndra.data.model.PrivacyMode
 import com.interndra.ui.components.*
 import com.interndra.ui.theme.*
@@ -51,6 +54,10 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     val braveEnabled by vm.braveEnabled.collectAsState()
     val braveKey by vm.braveApiKey.collectAsState()
     val preferBrave by vm.preferBrave.collectAsState()
+    val offlineAiEnabled by vm.offlineAiEnabled.collectAsState()
+    val offlineAiMode by vm.offlineAiMode.collectAsState()
+    val offlinePlannerModelId by vm.offlinePlannerModelId.collectAsState()
+    val offlineChatModelId by vm.offlineChatModelId.collectAsState()
 
     var tempKey  by remember { mutableStateOf(apiKey) }
     var tempGeminiKey by remember { mutableStateOf(geminiKey) }
@@ -59,6 +66,8 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     var geminiExpanded by remember { mutableStateOf(false) }
     var geminiTestResult by remember { mutableStateOf<String?>(null) }
     var isTesting by remember { mutableStateOf(false) }
+    var offlinePlannerExpanded by remember { mutableStateOf(false) }
+    var offlineChatExpanded by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().background(Background800)) {
 
@@ -392,6 +401,108 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                 }
             }
 
+            // ── Offline AI ─────────────────────────────────────────────────
+            DashboardCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionHeader("📴 Offline AI", modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = offlineAiEnabled,
+                        onCheckedChange = { vm.saveOfflineAiEnabled(it) },
+                        colors = SwitchDefaults.colors(checkedTrackColor = TerminalGreen)
+                    )
+                }
+                Text(
+                    "Run supported models on-device. Models are replaceable by role; no cloud request is needed in Offline-only mode.",
+                    color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp
+                )
+                if (offlineAiEnabled) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("AI Mode", color = TerminalWhite, fontSize = 13.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+                    OfflineAiMode.values().forEach { mode ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = mode == offlineAiMode,
+                                onClick = { vm.saveOfflineAiMode(mode) },
+                                colors = RadioButtonDefaults.colors(selectedColor = Accent)
+                            )
+                            Text(mode.label, color = TerminalWhite, fontSize = 13.sp)
+                        }
+                    }
+
+                    val device = uiState.deviceSnapshot
+                    if (device != null) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = SurfaceLight.copy(alpha = 0.15f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text("Device recommendation", color = TerminalWhite.copy(0.6f), fontSize = 11.sp)
+                                Text("RAM ${device.ramTotalMb} MB · ${"%.1f".format(device.storageFreeGb)} GB free · ${device.cpuAbi}",
+                                    color = TerminalWhite, fontSize = 12.sp)
+                                Text(
+                                    vm.recommendedOfflineModel(ModelRole.CHAT)?.displayName
+                                        ?.let { "Recommended chat: $it" }
+                                        ?: "No downloadable chat model fits this device profile",
+                                    color = TerminalGreen, fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    Text("Planner model", color = TerminalWhite, fontSize = 12.sp)
+                    Box {
+                        OutlinedTextField(
+                            value = OfflineModelCatalog.find(offlinePlannerModelId)?.displayName ?: offlinePlannerModelId,
+                            onValueChange = {}, readOnly = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            trailingIcon = { Icon(Icons.Default.ArrowDropDown, "planner model") },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TerminalWhite, unfocusedTextColor = TerminalWhite,
+                                focusedBorderColor = Accent, unfocusedBorderColor = SurfaceLight
+                            )
+                        )
+                        Box(Modifier.matchParentSize().clickable { offlinePlannerExpanded = true })
+                        DropdownMenu(expanded = offlinePlannerExpanded, onDismissRequest = { offlinePlannerExpanded = false }, modifier = Modifier.background(SurfaceCard)) {
+                            OfflineModelCatalog.forRole(ModelRole.PLANNER).forEach { model ->
+                                DropdownMenuItem(
+                                    text = { Text(model.displayName, color = TerminalWhite, fontSize = 12.sp) },
+                                    onClick = { vm.saveOfflineModel(ModelRole.PLANNER, model.id); offlinePlannerExpanded = false }
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+                    Text("Chat model", color = TerminalWhite, fontSize = 12.sp)
+                    Box {
+                        OutlinedTextField(
+                            value = OfflineModelCatalog.find(offlineChatModelId)?.displayName ?: offlineChatModelId,
+                            onValueChange = {}, readOnly = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            trailingIcon = { Icon(Icons.Default.ArrowDropDown, "chat model") },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TerminalWhite, unfocusedTextColor = TerminalWhite,
+                                focusedBorderColor = Accent, unfocusedBorderColor = SurfaceLight
+                            )
+                        )
+                        Box(Modifier.matchParentSize().clickable { offlineChatExpanded = true })
+                        DropdownMenu(expanded = offlineChatExpanded, onDismissRequest = { offlineChatExpanded = false }, modifier = Modifier.background(SurfaceCard)) {
+                            OfflineModelCatalog.forRole(ModelRole.CHAT).forEach { model ->
+                                DropdownMenuItem(
+                                    text = { Text(model.displayName, color = TerminalWhite, fontSize = 12.sp) },
+                                    onClick = { vm.saveOfflineModel(ModelRole.CHAT, model.id); offlineChatExpanded = false }
+                                )
+                            }
+                        }
+                    }
+                    Text("Vision and embeddings are listed only after a verified Android backend is available; no fake download is offered.",
+                        color = TerminalYellow, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                }
+            }
+
             // ── Local AI Model ─────────────────────────────────────────────
             DashboardCard {
                 SectionHeader("Local AI Model", modifier = Modifier.padding(bottom = 4.dp))
@@ -438,7 +549,7 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                             Button(onClick = { vm.downloadModel(true) },
                                 colors = ButtonDefaults.buttonColors(containerColor = Accent),
                                 modifier = Modifier.fillMaxWidth()) {
-                                Text("Download Model (~500 MB)", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                Text("Download Fast Local Model (~400 MB)", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                             }
                         }
                     }

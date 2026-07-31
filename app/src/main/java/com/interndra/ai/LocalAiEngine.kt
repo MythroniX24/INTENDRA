@@ -3,6 +3,7 @@ package com.interndra.ai
 import android.content.Context
 import android.util.Log
 import com.interndra.data.model.*
+import com.interndra.ai.model.OfflineModelCatalog
 import com.interndra.util.Constants
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -81,10 +82,19 @@ class LocalAiEngine(private val context: Context) {
     private var modelHandle: Long = 0L
     private var isReady = false
     private var loadedModelPath = ""
+    @Volatile private var loadedModelId = ""
+
+    /** Catalog id selected for the chat role. The native engine remains replaceable. */
+    @Volatile var preferredModelId: String = OfflineModelCatalog.CHAT_MODEL_ID
+        private set
+
+    fun setPreferredModel(modelId: String) {
+        if (OfflineModelCatalog.find(modelId) != null) preferredModelId = modelId
+    }
 
     // ── Model loading ──────────────────────────────────────────────────────
-    suspend fun loadModel(): Boolean = withContext(Dispatchers.IO) {
-        val modelPath = findModelPath()
+    suspend fun loadModel(modelId: String = preferredModelId): Boolean = withContext(Dispatchers.IO) {
+        val modelPath = findModelPath(modelId)
         if (modelPath == null) {
             Log.w(TAG, "No GGUF model found. Download via Settings → Download Local Model")
             return@withContext false
@@ -97,6 +107,10 @@ class LocalAiEngine(private val context: Context) {
                 if (modelHandle != 0L) nativeFree(modelHandle)
                 modelHandle     = handle
                 loadedModelPath = modelPath
+                loadedModelId   = OfflineModelCatalog.models
+                    .firstOrNull { it.filename == File(modelPath).name }
+                    ?.id
+                    ?: modelId
                 isReady         = true
                 Log.i(TAG, "Model loaded ✓  handle=$handle  threads=$threads")
                 true
@@ -115,6 +129,8 @@ class LocalAiEngine(private val context: Context) {
             nativeFree(modelHandle)
             modelHandle = 0L
             isReady     = false
+            loadedModelId = ""
+            loadedModelPath = ""
             Log.i(TAG, "Model unloaded")
         }
     }
@@ -156,7 +172,8 @@ class LocalAiEngine(private val context: Context) {
             AiEngineResult(
                 intentJson = json,
                 source     = AiSource.LOCAL,
-                modelUsed  = "Qwen2.5-3B Q4_K_M",
+                modelUsed  = OfflineModelCatalog.find(loadedModelId)?.displayName
+                    ?: File(loadedModelPath).name,
                 latencyMs  = System.currentTimeMillis() - startMs
             )
         } catch (e: Exception) {
@@ -243,21 +260,26 @@ class LocalAiEngine(private val context: Context) {
     }
 
     // ── Model file finder with size validation ────────────────────────────
-    fun findModelPath(): String? {
-        val searchPaths = getSearchPaths(context)
-        for (dir in searchPaths) {
-            val file = File("$dir/$DEFAULT_MODEL_FILENAME")
-            if (file.exists() && file.length() >= MIN_MODEL_BYTES_3B) {
-                return file.absolutePath
-            }
-            // Also accept the smaller model
-            val small = File("$dir/$SMALL_MODEL_FILENAME")
-            if (small.exists() && small.length() >= MIN_MODEL_BYTES_05B) {
-                return small.absolutePath
+    fun findModelPath(modelId: String = preferredModelId): String? {
+        val selected = OfflineModelCatalog.find(modelId)
+        val candidates = linkedSetOf(
+            selected?.filename ?: DEFAULT_MODEL_FILENAME,
+            DEFAULT_MODEL_FILENAME,
+            SMALL_MODEL_FILENAME
+        )
+        val minBytes = { filename: String ->
+            if (filename == SMALL_MODEL_FILENAME) MIN_MODEL_BYTES_05B else MIN_MODEL_BYTES_3B
+        }
+        for (dir in getSearchPaths(context)) {
+            for (filename in candidates) {
+                val file = File(dir, filename)
+                if (ModelIntegrity.isValidGguf(file, minBytes(filename))) return file.absolutePath
             }
         }
         return null
     }
 
-    fun isModelDownloaded() = findModelPath() != null
+    fun isModelDownloaded(): Boolean = OfflineModelCatalog.models.any { spec ->
+        findModelPath(spec.id) != null
+    }
 }

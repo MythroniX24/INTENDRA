@@ -15,6 +15,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.interndra.agent.TerminalAgent
 import com.interndra.ai.*
+import com.interndra.ai.model.*
 import com.interndra.ai.system.AiSystemHealthMonitor
 import com.interndra.ai.tasks.TaskManager
 import com.interndra.ai.tasks.TaskPlan
@@ -72,6 +73,13 @@ private val PRE_LOCK_MODE_PREF    = stringPreferencesKey("pre_lock_privacy_mode"
 // "The boolean literal does not conform to the expected type String".
 private val EMERGENCY_LOCK_PREF   = booleanPreferencesKey("emergency_lock_active")
 private val TTS_ENABLED_PREF      = booleanPreferencesKey("tts_enabled")
+private val OFFLINE_AI_ENABLED_PREF = booleanPreferencesKey("offline_ai_enabled")
+private val OFFLINE_AI_MODE_PREF    = stringPreferencesKey("offline_ai_mode")
+private val OFFLINE_PLANNER_MODEL_PREF = stringPreferencesKey("offline_planner_model")
+private val OFFLINE_CHAT_MODEL_PREF = stringPreferencesKey("offline_chat_model")
+private val OFFLINE_REASONING_MODEL_PREF = stringPreferencesKey("offline_reasoning_model")
+private val OFFLINE_VISION_MODEL_PREF = stringPreferencesKey("offline_vision_model")
+private val OFFLINE_EMBEDDINGS_MODEL_PREF = stringPreferencesKey("offline_embeddings_model")
 
 // ── Active command tracking for chat UI (like Claude's command indicator) ──
 enum class CommandStatus { RUNNING, SUCCESS, FAILED }
@@ -421,6 +429,76 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         safeStateFlow(app.dataStore.data.map { it[TTS_ENABLED_PREF] ?: false }, false)
     }
 
+    // ── Offline AI settings ──────────────────────────────────────────────
+    // Each role stores only a catalog id. Engines resolve metadata through
+    // OfflineModelCatalog, so changing a GGUF never requires UI changes.
+    val offlineAiEnabled: StateFlow<Boolean> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[OFFLINE_AI_ENABLED_PREF] ?: true }, true)
+    }
+    val offlineAiMode: StateFlow<OfflineAiMode> by lazy {
+        safeStateFlow(app.dataStore.data.map {
+            runCatching { OfflineAiMode.valueOf(it[OFFLINE_AI_MODE_PREF] ?: OfflineAiMode.AUTOMATIC.name) }
+                .getOrDefault(OfflineAiMode.AUTOMATIC)
+        }, OfflineAiMode.AUTOMATIC)
+    }
+    val offlinePlannerModelId: StateFlow<String> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[OFFLINE_PLANNER_MODEL_PREF] ?: OfflineModelCatalog.PLANNER_MODEL_ID }, OfflineModelCatalog.PLANNER_MODEL_ID)
+    }
+    val offlineChatModelId: StateFlow<String> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[OFFLINE_CHAT_MODEL_PREF] ?: OfflineModelCatalog.CHAT_MODEL_ID }, OfflineModelCatalog.CHAT_MODEL_ID)
+    }
+    val offlineReasoningModelId: StateFlow<String> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[OFFLINE_REASONING_MODEL_PREF] ?: OfflineModelCatalog.CHAT_MODEL_ID }, OfflineModelCatalog.CHAT_MODEL_ID)
+    }
+    val offlineVisionModelId: StateFlow<String> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[OFFLINE_VISION_MODEL_PREF] ?: "" }, "")
+    }
+    val offlineEmbeddingsModelId: StateFlow<String> by lazy {
+        safeStateFlow(app.dataStore.data.map { it[OFFLINE_EMBEDDINGS_MODEL_PREF] ?: "" }, "")
+    }
+
+    fun saveOfflineAiEnabled(enabled: Boolean) = viewModelScope.launch {
+        app.dataStore.edit { it[OFFLINE_AI_ENABLED_PREF] = enabled }
+    }
+
+    fun saveOfflineAiMode(mode: OfflineAiMode) = viewModelScope.launch {
+        app.dataStore.edit { it[OFFLINE_AI_MODE_PREF] = mode.name }
+    }
+
+    fun saveOfflineModel(role: ModelRole, modelId: String) = viewModelScope.launch {
+        val key = when (role) {
+            ModelRole.PLANNER -> OFFLINE_PLANNER_MODEL_PREF
+            ModelRole.CHAT -> OFFLINE_CHAT_MODEL_PREF
+            ModelRole.REASONING -> OFFLINE_REASONING_MODEL_PREF
+            ModelRole.VISION -> OFFLINE_VISION_MODEL_PREF
+            ModelRole.EMBEDDINGS -> OFFLINE_EMBEDDINGS_MODEL_PREF
+            ModelRole.SPEECH -> return@launch
+        }
+        val selected = OfflineModelCatalog.find(modelId)
+        val roleCompatible = selected != null &&
+            (selected.role == role || (role == ModelRole.REASONING && selected.role == ModelRole.CHAT))
+        if (!roleCompatible) return@launch
+        app.dataStore.edit { it[key] = modelId }
+        if (role == ModelRole.CHAT) {
+            localEngine.setPreferredModel(modelId)
+            // Reload only when the selected model is already available. This
+            // avoids starting a large download as a side effect of a dropdown.
+            if (localEngine.findModelPath(modelId) != null) {
+                localEngine.unload()
+                val loaded = localEngine.loadModel(modelId)
+                _uiState.update { it.copy(localModelReady = loaded) }
+            }
+        }
+    }
+
+    fun recommendedOfflineModel(role: ModelRole): OfflineModelSpec? {
+        val snapshot = _uiState.value.deviceSnapshot ?: return null
+        return OfflineModelCatalog.recommended(
+            DeviceModelProfile(snapshot.ramTotalMb, snapshot.storageFreeGb, snapshot.cpuAbi, android.os.Build.VERSION.SDK_INT),
+            role
+        )
+    }
+
     // ── Autonomous web search settings ───────────────────────────────────
     val webSearchEnabled: StateFlow<Boolean> by lazy {
         safeStateFlow(providerSettings.settings.map { it.searchEnabled }, true)
@@ -447,10 +525,12 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             Log.e(TAG, "TTS init failed: ${e.message}")
         }
         refreshStatus()
+        refreshDeviceSnapshot()
 
         viewModelScope.launch {
-            try {
-                val ready    = localEngine.isModelDownloaded()
+            try {                localEngine.setPreferredModel(offlineChatModelId.value)
+                val ready = localEngine.isModelDownloaded()
+
                 val memCount = repo.memoryCount()
                 val knCount  = db.dao().knowledgeCount()
                 val tlCount  = db.dao().timelineCount()
@@ -772,6 +852,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         if (!commandGate.compareAndSet(false, true)) return
 
         val mode = privacyMode.value
+        val offlineMode = offlineAiMode.value
         val provider = aiProvider.value
         val key  = apiKey.value
         val geminiKey = geminiApiKey.value
@@ -789,6 +870,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         // don't force CLOUD_ENHANCED — stay in HYBRID so the error check below
         // doesn't falsely report "set your API key". The user can just re-send.
         val effectiveMode = when {
+            !offlineAiEnabled.value -> mode
+            offlineMode == OfflineAiMode.OFFLINE_ONLY -> PrivacyMode.LOCAL_ONLY
+            offlineMode == OfflineAiMode.CLOUD_ONLY -> PrivacyMode.CLOUD_ENHANCED
             mode == PrivacyMode.LOCAL_ONLY -> PrivacyMode.LOCAL_ONLY
             provider == Constants.AiProvider.GEMINI && geminiKey.isNotBlank() -> PrivacyMode.CLOUD_ENHANCED
             provider == Constants.AiProvider.GEMINI -> PrivacyMode.HYBRID  // key not loaded yet
@@ -1563,6 +1647,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
 
     // ── Model management ──────────────────────────────────────────────────
     fun downloadModel(useSmall: Boolean = false) = viewModelScope.launch {
+        if (useSmall) localEngine.setPreferredModel(OfflineModelCatalog.PLANNER_MODEL_ID)
         modelDownloader.downloadModel(useSmall).collect { state ->
             _downloadState.value = state
             if (state is ModelDownloadManager.DownloadState.Complete) {
