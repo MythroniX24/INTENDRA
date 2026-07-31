@@ -277,6 +277,7 @@ class LocalAiEngine(private val context: Context) {
                 if (modelHandle == handle && isReady) nativeCancel(handle)
             }
         }
+        }
     }
 
     /** Releases the native model and the dedicated inference executor. */
