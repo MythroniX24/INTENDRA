@@ -26,12 +26,16 @@ class ProviderManager(
         )
     }
 
-    /** Cache the Gemini provider so we don't rebuild OkHttpClient per check. */
-    private val geminiProvider: SearchProvider? by lazy {
+    /**
+     * Resolve the Gemini provider freshly on every call. NOT cached: the
+     * factory reads the app's current Gemini key + model, so a user who adds
+     * or changes their key mid-session must be picked up immediately.
+     * OkHttpClient construction is negligible for infrequent searches.
+     */
+    private fun geminiProvider(): SearchProvider? =
         geminiProviderFactory()?.takeIf { it.isAvailable() }
-    }
 
-    override fun hasGeminiConfigured(): Boolean = geminiProvider != null
+    override fun hasGeminiConfigured(): Boolean = geminiProvider() != null
 
     /** Returns the ordered provider chain for a given plan + settings. */
     override fun buildChain(plan: SearchPlan, settings: WebSearchSettings): List<SearchProvider> {
@@ -42,7 +46,7 @@ class ProviderManager(
         if (settings.braveConfigured && settings.braveEnabled) {
             available[SearchProviderId.BRAVE] = BraveSearchProvider(settings.braveApiKey)
         }
-        geminiProvider?.let { available[SearchProviderId.GEMINI] = it }
+        geminiProvider()?.let { available[SearchProviderId.GEMINI] = it }
         available[SearchProviderId.DUCKDUCKGO] = ddgProvider
 
         for (id in plan.preferredProviders) {

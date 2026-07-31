@@ -58,7 +58,8 @@ class SearchPlanner {
         "release notes", "supported", "compatibility", "requirements",
         "download link", "official website", "official site", "setup",
         "config", "configure", "integration", "migration", "upgrade",
-        "deprecated", "end of life", "eol", "roadmap", "status", "status page",
+        "deprecated", "end of life", "eol", "roadmap", "status page", "server status",
+        "site status", "service status", "status of",
         "registry", "pypi", "crates.io", "maven central", "changelog"
     )
 
