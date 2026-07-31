@@ -31,7 +31,7 @@ import com.interndra.data.local.AgentDatabase
 import com.interndra.data.local.AgentRepository
 import com.interndra.data.model.*
 import com.interndra.plugin.PluginManager
-import com.interndra.search.WebSearchEngine
+import com.interndra.search.*
 import com.interndra.service.AgentAccessibilityService
 import com.interndra.service.ShizukuManager
 import com.interndra.service.ShizukuShell
@@ -136,6 +136,25 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     private val localEngine     = LocalAiEngine(app)
     val modelDownloader         = ModelDownloadManager(app)
     private val webSearch       = WebSearchEngine(db.dao())
+
+    // ── Autonomous web search system ──────────────────────────────────
+    val searchPlanner    = SearchPlanner()
+    val searchHistory    = SearchHistory()
+    val searchCache      = SearchCache(db.dao())
+    val webpageReader    = WebpageReader()
+    val providerSettings = ProviderSettings(app)
+    val providerManager = ProviderManager(app) {
+        // Build the Gemini search provider lazily from current AI settings.
+        val gKey = geminiApiKey.value
+        if (gKey.isNotBlank()) GeminiSearchProvider(gKey, selectedGeminiModel.value) else null
+    }
+    val searchManager    = SearchManager(
+        planner = searchPlanner,
+        cache = searchCache,
+        history = searchHistory,
+        webpageReader = webpageReader,
+        providerManager = providerManager
+    )
 
     // ── New AI OS systems ─────────────────────────────────────────────────
     val knowledgeRepo           = KnowledgeRepository(db.dao(), app)
@@ -402,6 +421,20 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         safeStateFlow(app.dataStore.data.map { it[TTS_ENABLED_PREF] ?: false }, false)
     }
 
+    // ── Autonomous web search settings ───────────────────────────────────
+    val webSearchEnabled: StateFlow<Boolean> by lazy {
+        safeStateFlow(providerSettings.settings.map { it.searchEnabled }, true)
+    }
+    val braveEnabled: StateFlow<Boolean> by lazy {
+        safeStateFlow(providerSettings.settings.map { it.braveEnabled }, true)
+    }
+    val braveApiKey: StateFlow<String> by lazy {
+        safeStateFlow(providerSettings.settings.map { it.braveApiKey }, "")
+    }
+    val preferBrave: StateFlow<Boolean> by lazy {
+        safeStateFlow(providerSettings.settings.map { it.preferBrave }, false)
+    }
+
     // ── Init ──────────────────────────────────────────────────────────────
     // UPGRADE: Entire init block is wrapped in try-catch so that a crash in
     // ANY component (TTS, Room, DataStore, JNI, plugins, etc.) does NOT take
@@ -637,6 +670,47 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     }
     fun saveTtsEnabled(enabled: Boolean) = viewModelScope.launch {
         app.dataStore.edit { it[TTS_ENABLED_PREF] = enabled }
+    }
+    fun saveWebSearchEnabled(enabled: Boolean) = viewModelScope.launch {
+        providerSettings.setSearchEnabled(enabled)
+    }
+    fun saveBraveEnabled(enabled: Boolean) = viewModelScope.launch {
+        providerSettings.setBraveEnabled(enabled)
+    }
+    fun saveBraveApiKey(key: String) = viewModelScope.launch {
+        providerSettings.setBraveApiKey(key)
+    }
+    fun savePreferBrave(prefer: Boolean) = viewModelScope.launch {
+        providerSettings.setPreferBrave(prefer)
+    }
+    fun clearBraveApiKey() = viewModelScope.launch {
+        providerSettings.clearBraveKey()
+    }
+    fun resetSearchSettings() = viewModelScope.launch {
+        providerSettings.resetAll()
+    }
+
+    /** Test the Brave Search API key with a live request. */
+    fun testBraveApi(onResult: (Boolean, String) -> Unit) = viewModelScope.launch {
+        val key = braveApiKey.value
+        if (key.isBlank()) {
+            onResult(false, "❌ Brave API key is empty. Save your key first.")
+            return@launch
+        }
+        _uiState.update { it.copy(isLoading = true, error = null) }
+        try {
+            val ok = providerManager.testBraveApiKey(key)
+            if (ok) {
+                onResult(true, "✅ Brave Search API is working!\nKey: ${key.takeLast(4)}")
+            } else {
+                onResult(false, "❌ Brave API returned an error.\nPossible causes:\n- Invalid API key\n- Check your internet connection\n\nTry: re-save your key.")
+            }
+        } catch (e: Exception) {
+            val msg = e.message?.replace(key, "***") ?: "Unknown error"
+            onResult(false, "❌ Brave API test failed:\n$msg")
+        } finally {
+            _uiState.update { it.copy(isLoading = false) }
+        }
     }
     fun savePrivacyMode(mode: PrivacyMode) = viewModelScope.launch {
         if (_uiState.value.emergencyLockActive) return@launch
@@ -933,27 +1007,53 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                     }
                 }
 
-                // ── Web search ────────────────────────────────────────────
-                // Phase 2 FIX: wrapped in withContext(Dispatchers.IO) — OkHttp's
-                // synchronous execute() would otherwise block the main thread
-                // (viewModelScope.launch defaults to Dispatchers.Main).
-                // Phase 4: also fetch + extract page content for top results so
-                // the AI can summarize the actual article, not just the snippet.
-                var webSources: List<WebSearchEngine.SearchResult> = emptyList()
-                if (!_uiState.value.emergencyLockActive && webSearch.shouldSearch(trimmed)) {
-                    repo.log(session, LogType.INFO, "🔍 Web search for context...")
-                    repo.logNetworkEvent("html.duckduckgo.com", "WebSearch")
-                    val (sources, pageDigest) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        val s = webSearch.search(trimmed)
-                        val digest = webSearch.fetchAndExtract(s, maxPages = 2)
-                        s to digest
+                // ── AUTONOMOUS web search ─────────────────────────────────
+                // Fully automatic: the SearchPlanner silently decides whether a
+                // search is needed (freshness, entities, tech docs…). No search
+                // button, no mode, no toggle — just natural chat. The manager
+                // picks providers (Gemini Google Search primary, Brave secondary,
+                // DuckDuckGo fallback), caches, ranks, reads pages, and reports
+                // subtle progress so the chat shows what's happening.
+                var webSources: List<SearchResult> = emptyList()
+                if (!_uiState.value.emergencyLockActive && webSearchEnabled.value) {
+                    val settings = WebSearchSettings(
+                        searchEnabled = webSearchEnabled.value,
+                        braveEnabled = braveEnabled.value,
+                        braveApiKey = braveApiKey.value,
+                        preferBrave = preferBrave.value
+                    )
+                    repo.log(session, LogType.INFO, "🔍 Autonomous web search planner running...")
+                    val digest = searchManager.runAutonomous(trimmed, settings) { status ->
+                        // Subtle progress inside the chat — no user interaction.
+                        val hint = when (status) {
+                            is SearchStatus.Searching -> "🔍 Searching the web..."
+                            is SearchStatus.Found -> "✅ Found ${status.count} trusted sources..."
+                            is SearchStatus.Reading -> "📖 Reading webpages..."
+                            is SearchStatus.Analyzing -> "🧠 Analyzing information..."
+                            is SearchStatus.Done -> "✅ Search complete"
+                            is SearchStatus.Failed -> "⚠️ ${status.message}"
+                        }
+                        viewModelScope.launch { repo.updateAiMessage(placeholderId, hint) }
                     }
-                    webSources = sources
-                    val ctx = webSearch.buildContext(sources)
-                    val fullCtx = if (pageDigest.isNotEmpty()) "$ctx\n\n$pageDigest" else ctx
-                    if (fullCtx.isNotEmpty()) {
+                    webSources = digest.results
+                    val fullCtx = buildString {
+                        if (digest.context.isNotBlank()) append(digest.context)
+                        if (digest.pageDigests.isNotBlank()) append("\n\n").append(digest.pageDigests)
+                    }
+                    if (fullCtx.isNotBlank()) {
                         augmentedInput = "$augmentedInput\n\n$fullCtx"
-                        repo.log(session, LogType.INFO, "✅ Web: ${sources.size} sources, ${pageDigest.length} chars of page content")
+                        repo.log(session, LogType.INFO,
+                            "✅ Web (${digest.providersUsed.joinToString { it.label }}): " +
+                                "${digest.results.size} sources, cacheHit=${digest.cacheHit}")
+                        // Network transparency: report the actual domain(s) used.
+                        digest.providersUsed.forEach { provider ->
+                            val domain = when (provider) {
+                                SearchProviderId.GEMINI -> Constants.GEMINI_DOMAIN
+                                SearchProviderId.BRAVE -> Constants.BRAVE_DOMAIN
+                                else -> "html.duckduckgo.com"
+                            }
+                            repo.logNetworkEvent(domain, "WebSearch")
+                        }
                     }
                 }
 
@@ -1775,7 +1875,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
      * component, which turns `[title](url)` into a tappable link — so the user
      * sees a clean clickable title, not a long raw URL cluttering the chat.
      */
-    private fun buildSourcesBlock(sources: List<WebSearchEngine.SearchResult>): String {
+    private fun buildSourcesBlock(sources: List<SearchResult>): String {
         if (sources.isEmpty()) return ""
         val sb = StringBuilder("\n\n**🔗 Sources:**\n")
         sources.take(5).forEachIndexed { i, r ->

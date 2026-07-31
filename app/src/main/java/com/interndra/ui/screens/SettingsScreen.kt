@@ -47,6 +47,10 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
     val jailbreakLevel by vm.jailbreakLevel.collectAsState()
     val obfuscationTech by vm.obfuscationTechnique.collectAsState()
     val ttsEnabled by vm.ttsEnabled.collectAsState()
+    val webSearchEnabled by vm.webSearchEnabled.collectAsState()
+    val braveEnabled by vm.braveEnabled.collectAsState()
+    val braveKey by vm.braveApiKey.collectAsState()
+    val preferBrave by vm.preferBrave.collectAsState()
 
     var tempKey  by remember { mutableStateOf(apiKey) }
     var tempGeminiKey by remember { mutableStateOf(geminiKey) }
@@ -455,6 +459,171 @@ fun SettingsScreen(vm: HybridAgentViewModel, onOpenDrawer: () -> Unit = {}) {
                     "When enabled, the AI will read its replies aloud using Hindi/English text-to-speech.",
                     color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp
                 )
+            }
+
+            // ── Web Search (Autonomous) ─────────────────────────────────────
+            DashboardCard {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
+                    SectionHeader("🌐 Web Search (Autonomous)", modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = webSearchEnabled,
+                        onCheckedChange = { vm.saveWebSearchEnabled(it) },
+                        colors = SwitchDefaults.colors(checkedTrackColor = Accent)
+                    )
+                }
+                Text(
+                    "The AI automatically searches the web when your question needs fresh or verifiable info — no search button needed.",
+                    color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp
+                )
+
+                if (webSearchEnabled) {
+                    Spacer(Modifier.height(8.dp))
+                    // ── Brave Search toggle ────────────────────────────────
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🛡️ Brave Search (secondary provider)",
+                            color = TerminalWhite, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = braveEnabled,
+                            onCheckedChange = { vm.saveBraveEnabled(it) },
+                            colors = SwitchDefaults.colors(checkedTrackColor = TerminalBlue)
+                        )
+                    }
+                    Text(
+                        "Primary: Gemini Google Search (uses your Gemini key). Brave adds independent verification when its key is set.",
+                        color = TerminalWhite.copy(alpha = 0.4f), fontSize = 11.sp
+                    )
+
+                    if (braveEnabled) {
+                        Spacer(Modifier.height(8.dp))
+                        var tempBraveKey by remember { mutableStateOf(braveKey) }
+                        var showBraveKey by remember { mutableStateOf(false) }
+                        var braveTestResult by remember { mutableStateOf<String?>(null) }
+                        var isTestingBrave by remember { mutableStateOf(false) }
+
+                        OutlinedTextField(
+                            value = tempBraveKey,
+                            onValueChange = { tempBraveKey = it },
+                            label = { Text("Brave Search API Key (optional)") },
+                            visualTransformation = if (showBraveKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            trailingIcon = {
+                                IconButton(onClick = { showBraveKey = !showBraveKey }) {
+                                    Icon(
+                                        if (showBraveKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        "Toggle visibility",
+                                        tint = TerminalWhite.copy(0.5f)
+                                    )
+                                }
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TerminalWhite,
+                                unfocusedTextColor = TerminalWhite,
+                                focusedBorderColor = Accent,
+                                unfocusedBorderColor = SurfaceLight
+                            )
+                        )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    vm.saveBraveApiKey(tempBraveKey)
+                                    Toast.makeText(context, "Brave key saved", Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = TerminalBlue),
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Save Key", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) }
+                            Button(
+                                onClick = {
+                                    isTestingBrave = true
+                                    braveTestResult = null
+                                    vm.testBraveApi { ok, msg ->
+                                        braveTestResult = msg
+                                        isTestingBrave = false
+                                    }
+                                },
+                                enabled = !isTestingBrave && tempBraveKey.isNotBlank(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Accent.copy(0.2f)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                if (isTestingBrave) {
+                                    CircularProgressIndicator(Modifier.size(14.dp), color = Accent, strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Testing...", color = Accent, fontSize = 12.sp)
+                                } else {
+                                    Text("🧪 Test", color = Accent, fontSize = 12.sp,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                }
+                            }
+                        }
+                        braveTestResult?.let { result ->
+                            val isOk = result.startsWith("✅")
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isOk) TerminalGreen.copy(0.1f) else TerminalRed.copy(0.1f),
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                            ) {
+                                Text(result, color = if (isOk) TerminalGreen else TerminalRed,
+                                    fontSize = 12.sp, modifier = Modifier.padding(10.dp))
+                            }
+                        }
+
+                        if (braveKey.isNotBlank()) {
+                            Spacer(Modifier.height(6.dp))
+                            Button(
+                                onClick = { vm.clearBraveApiKey() },
+                                colors = ButtonDefaults.buttonColors(containerColor = TerminalRed.copy(0.15f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("🗑️ Clear Brave API Key", color = TerminalRed, fontSize = 12.sp) }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("⚖️ Prefer Brave over Gemini",
+                                color = TerminalWhite, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                            Switch(
+                                checked = preferBrave,
+                                onCheckedChange = { vm.savePreferBrave(it) },
+                                colors = SwitchDefaults.colors(checkedTrackColor = TerminalYellow)
+                            )
+                        }
+                        Text(
+                            "When both keys are set, prefer Brave for fast lookups (Gemini remains the default).",
+                            color = TerminalWhite.copy(alpha = 0.4f), fontSize = 11.sp
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    // ── Provider status ──────────────────────────────────────
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = SurfaceLight.copy(0.15f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Provider Status", color = TerminalWhite.copy(0.6f), fontSize = 11.sp)
+                            Text(if (geminiKey.isNotBlank()) "🟢 Gemini Google Search — ready" else "🟡 Gemini Google Search — add Gemini key in AI Provider",
+                                color = TerminalWhite, fontSize = 12.sp)
+                            Text(
+                                if (braveEnabled && braveKey.isNotBlank()) "🟢 Brave Search — configured"
+                                else if (braveEnabled) "⚪ Brave Search — no key (optional)"
+                                else "⚪ Brave Search — disabled",
+                                color = TerminalWhite, fontSize = 12.sp
+                            )
+                            Text("🟢 DuckDuckGo — always available (fallback)",
+                                color = TerminalWhite.copy(0.7f), fontSize = 12.sp)
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            vm.resetSearchSettings()
+                            Toast.makeText(context, "Web search settings reset", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceLight),
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("♻️ Reset Web Search Settings", color = TerminalWhite, fontSize = 12.sp) }
+                }
             }
 
             // ── System & Actions ───────────────────────────────────────────

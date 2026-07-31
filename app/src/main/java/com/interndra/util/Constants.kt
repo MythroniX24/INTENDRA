@@ -7,6 +7,9 @@ object Constants {
     const val OPENROUTER_DOMAIN   = "openrouter.ai"
     const val GEMINI_BASE_URL     = "https://generativelanguage.googleapis.com/v1beta"
     const val GEMINI_DOMAIN       = "generativelanguage.googleapis.com"
+    // ── Autonomous Web Search ───────────────────────────────────────────
+    const val BRAVE_SEARCH_URL    = "https://api.search.brave.com/res/v1/web/search"
+    const val BRAVE_DOMAIN        = "api.search.brave.com"
     const val HTTP_TIMEOUT_SEC    = 60L
     const val DEFAULT_MODEL       = "openrouter/auto"
     const val DEFAULT_GEMINI_MODEL = "gemini/gemini-2.5-flash"
