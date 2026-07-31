@@ -1,7 +1,7 @@
 package com.interndra.ui.screens
 
 import android.content.Intent
-import android.provider.Settings
+import android.provider.Settings as AndroidSettings
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -825,7 +825,7 @@ fun SettingsScreen(
                 SectionHeader("System", modifier = Modifier.padding(bottom = 8.dp))
                 Button(
                     onClick = {
-                        try { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                        try { context.startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS)) }
                         catch (e: Exception) { Toast.makeText(context, "Settings not available", Toast.LENGTH_SHORT).show() }
                     },
                     colors   = ButtonDefaults.buttonColors(containerColor = SurfaceLight),
