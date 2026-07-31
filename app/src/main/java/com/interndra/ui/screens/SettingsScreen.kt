@@ -12,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings as SettingsIcon
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -127,7 +128,7 @@ fun SettingsScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = Accent),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(17.dp))
+                    Icon(SettingsIcon, contentDescription = null, modifier = Modifier.size(17.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("AI → Providers", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                 }
