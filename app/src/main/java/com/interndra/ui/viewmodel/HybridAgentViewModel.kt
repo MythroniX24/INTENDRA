@@ -2001,7 +2001,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     override fun onCleared() {
         super.onCleared()
         tts?.shutdown()
-        localEngine.unload()
+        localEngine.close()
         shizukuManager.shutdown()
         terminalAgent.shutdown()
         healthMonitor.saveReport()

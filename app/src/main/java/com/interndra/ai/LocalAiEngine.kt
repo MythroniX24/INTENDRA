@@ -6,8 +6,14 @@ import com.interndra.data.model.*
 import com.interndra.ai.model.OfflineModelCatalog
 import com.interndra.util.Constants
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
+import java.util.concurrent.Executors
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * LocalAiEngine — runs Qwen2.5-3B-Instruct-Q4_K_M.gguf via llama.cpp JNI.
@@ -61,6 +67,8 @@ class LocalAiEngine(private val context: Context) {
         // ── JNI function declarations ─────────────────────────────────────
         @JvmStatic private external fun nativeInitImpl(modelPath: String, nThreads: Int, nCtx: Int): Long
         @JvmStatic private external fun nativeInferImpl(handle: Long, prompt: String, maxTokens: Int, temp: Float): String
+        @JvmStatic private external fun nativeBeginInferenceImpl(handle: Long)
+        @JvmStatic private external fun nativeCancelImpl(handle: Long)
         @JvmStatic private external fun nativeFreeImpl(handle: Long)
         @JvmStatic private external fun nativeIsLoadedImpl(handle: Long): Boolean
 
@@ -70,6 +78,14 @@ class LocalAiEngine(private val context: Context) {
         fun nativeInfer(handle: Long, prompt: String, maxTokens: Int, temp: Float): String =
             if (nativeLibLoaded && handle != 0L) nativeInferImpl(handle, prompt, maxTokens, temp)
             else """{"action":"stub","reply":"Local model not loaded.","commands":[]}"""
+
+        fun nativeBeginInference(handle: Long) {
+            if (nativeLibLoaded && handle != 0L) nativeBeginInferenceImpl(handle)
+        }
+
+        fun nativeCancel(handle: Long) {
+            if (nativeLibLoaded && handle != 0L) nativeCancelImpl(handle)
+        }
 
         fun nativeFree(handle: Long) {
             if (nativeLibLoaded && handle != 0L) nativeFreeImpl(handle)
@@ -81,6 +97,16 @@ class LocalAiEngine(private val context: Context) {
 
     private var modelHandle: Long = 0L
     private var isReady = false
+    // One queue serializes inference, model replacement, and teardown. The
+    // native cancel flag remains callable from another thread, so cancellation
+    // can interrupt the queued/active generation without a use-after-free.
+    private val nativeLifecycleLock = Any()
+    private val nativeInferenceGate = Mutex()
+    private val nativeExecutor by lazy {
+        Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "intendra-llama").apply { isDaemon = true }
+        }
+    }
     private var loadedModelPath = ""
     @Volatile private var loadedModelId = ""
 
@@ -102,16 +128,25 @@ class LocalAiEngine(private val context: Context) {
         try {
             Log.i(TAG, "Loading model: $modelPath")
             val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
-            val handle  = nativeInit(modelPath, threads, 2048)
+            val handle = synchronized(nativeLifecycleLock) {
+                nativeExecutor.submit<Long> { nativeInit(modelPath, threads, 2048) }.get()
+            }
             return@withContext if (handle != 0L && nativeIsLoaded(handle)) {
-                if (modelHandle != 0L) nativeFree(modelHandle)
-                modelHandle     = handle
-                loadedModelPath = modelPath
-                loadedModelId   = OfflineModelCatalog.models
-                    .firstOrNull { it.filename == File(modelPath).name }
-                    ?.id
-                    ?: modelId
-                isReady         = true
+                val previousHandle = synchronized(nativeLifecycleLock) {
+                    val previous = modelHandle
+                    modelHandle = handle
+                    loadedModelPath = modelPath
+                    loadedModelId = OfflineModelCatalog.models
+                        .firstOrNull { it.filename == File(modelPath).name }
+                        ?.id
+                        ?: modelId
+                    isReady = true
+                    previous
+                }
+                if (previousHandle != 0L) {
+                    nativeCancel(previousHandle)
+                    nativeExecutor.submit { nativeFree(previousHandle) }.get()
+                }
                 Log.i(TAG, "Model loaded ✓  handle=$handle  threads=$threads")
                 true
             } else {
@@ -125,17 +160,33 @@ class LocalAiEngine(private val context: Context) {
     }
 
     fun unload() {
-        if (modelHandle != 0L) {
-            nativeFree(modelHandle)
+        val handle = synchronized(nativeLifecycleLock) {
+            val current = modelHandle
             modelHandle = 0L
-            isReady     = false
+            isReady = false
             loadedModelId = ""
             loadedModelPath = ""
+            current
+        }
+        if (handle != 0L) {
+            nativeCancel(handle)
+            runCatching { nativeExecutor.submit { nativeFree(handle) }.get() }
+                .onFailure { Log.w(TAG, "Native model teardown failed: ${it.message}") }
             Log.i(TAG, "Model unloaded")
         }
     }
 
-    fun isModelReady() = isReady && modelHandle != 0L
+    fun isModelReady(): Boolean = synchronized(nativeLifecycleLock) {
+        isReady && modelHandle != 0L
+    }
+
+    /** Requests cooperative cancellation of the current native generation. */
+    fun cancelInference() {
+        synchronized(nativeLifecycleLock) {
+            val handle = modelHandle
+            if (handle != 0L && isReady) nativeCancel(handle)
+        }
+    }
 
     fun getModelInfo(): String = when {
         isReady       -> "✅ Loaded: ${File(loadedModelPath).name}"
@@ -166,7 +217,7 @@ class LocalAiEngine(private val context: Context) {
 
         return@withContext try {
             val prompt = buildPrompt(userInput, memory, runtimeContext)
-            val raw    = nativeInfer(modelHandle, prompt, maxTokens = 512, temp = 0.1f)
+            val raw    = inferNativeCancellable(prompt, maxTokens = 512, temperature = 0.1f)
             val json   = extractJson(raw)
             Log.d(TAG, "Local inference ${System.currentTimeMillis() - startMs}ms")
             AiEngineResult(
@@ -186,6 +237,52 @@ class LocalAiEngine(private val context: Context) {
                 latencyMs  = System.currentTimeMillis() - startMs
             )
         }
+    }
+
+    /**
+     * Runs the blocking native call on a dedicated daemon thread. Coroutine
+     * cancellation signals the native atomic flag immediately; nativeFree()
+     * still waits on the C++ operation mutex before tearing the state down.
+     */
+    private suspend fun inferNativeCancellable(
+        prompt: String,
+        maxTokens: Int,
+        temperature: Float
+    ): String = nativeInferenceGate.withLock {
+        suspendCancellableCoroutine { continuation ->
+        var handle = 0L
+        synchronized(nativeLifecycleLock) {
+            handle = modelHandle
+            if (handle == 0L || !isReady) {
+                continuation.resume("")
+                return@suspendCancellableCoroutine
+            }
+            // Reset cancellation before queueing. If the coroutine is
+            // cancelled while waiting in the queue, invokeOnCancellation
+            // calls nativeCancel after this reset and nativeInferImpl no
+            // longer clears the flag at generation start.
+            nativeBeginInference(handle)
+            nativeExecutor.submit {
+            try {
+                val result = nativeInfer(handle, prompt, maxTokens, temperature)
+                if (continuation.isActive) continuation.resume(result)
+            } catch (error: Throwable) {
+                if (continuation.isActive) continuation.resumeWithException(error)
+            }
+            }
+        }
+        continuation.invokeOnCancellation {
+            synchronized(nativeLifecycleLock) {
+                // Do not dereference a handle after unload replaced it.
+                if (modelHandle == handle && isReady) nativeCancel(handle)
+            }
+        }
+    }
+
+    /** Releases the native model and the dedicated inference executor. */
+    fun close() {
+        unload()
+        nativeExecutor.shutdown()
     }
 
     // ── Prompt builder — Qwen2.5 ChatML format ────────────────────────────

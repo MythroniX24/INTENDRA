@@ -1,29 +1,63 @@
-# CMakeLists.txt — NDK build for termux JNI library
+# CMakeLists.txt — INTENDRA native backends
 #
-# Builds libtermux.so from termux.c, providing:
-#   - PTY subprocess creation (forkpty)
-#   - Window resize (TIOCSWINSZ)
-#   - Process wait/close
+# Builds two independent shared libraries:
+#   libtermux.so          — real PTY/forkpty terminal backend
+#   libinterndra_llama.so — llama.cpp GGUF inference backend
 #
-# The resulting .so is automatically placed into
-# app/build/intermediates/.../jni/<abi>/libtermux.so
-# and bundled into the APK.
+# llama.cpp is fetched at configure time from an immutable commit. Keeping the
+# dependency pinned makes the JNI wrapper reproducible while avoiding a huge
+# vendored source tree in the Android project.
 
 cmake_minimum_required(VERSION 3.22.1)
+project("intendra-native" C CXX)
 
-# ── Project ──────────────────────────────────────────────────────────────
-project("termux" C)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# ── C compiler flags ─────────────────────────────────────────────────────
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -std=gnu11 -O2")
+# Android builds should use portable CPU kernels. GPU backends and OpenMP are
+# intentionally disabled for this first production slice; they can be added as
+# separate, device-capability-gated targets later.
+set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+set(GGML_OPENCL OFF CACHE BOOL "" FORCE)
+set(GGML_METAL OFF CACHE BOOL "" FORCE)
+set(GGML_CUDA OFF CACHE BOOL "" FORCE)
+set(GGML_BLAS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
+set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
+set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
 
-# ── Build the shared library ─────────────────────────────────────────────
-add_library(termux SHARED
-    termux.c
+# ── Real PTY terminal backend ─────────────────────────────────────────────
+add_library(termux SHARED termux.c)
+target_compile_options(termux PRIVATE -Wall -Wextra -O2)
+
+# ── Pinned llama.cpp backend ──────────────────────────────────────────────
+include(FetchContent)
+FetchContent_Declare(
+    llama_cpp
+    GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git
+    # Pin an immutable commit. Do not use GIT_SHALLOW here: CMake/Git
+    # cannot reliably shallow-clone an arbitrary commit hash on all runners.
+    GIT_TAG        000547513f1530346ecd163db8b3e13962949961
 )
+FetchContent_MakeAvailable(llama_cpp)
 
-# ── Link libraries ───────────────────────────────────────────────────────
-# No extra libs needed — termux.c uses only POSIX/Android libc functions
-# which are already available through the NDK's built-in libc.
-# (log library not needed — no __android_log_print calls in termux.c)
-# target_link_libraries(termux log)
+add_library(interndra_llama SHARED interndra_llama.cpp)
+target_compile_options(interndra_llama PRIVATE -O3 -ffast-math)
+target_compile_definitions(interndra_llama PRIVATE INTERNDRA_LLAMA_PINNED=1)
+target_link_libraries(interndra_llama PRIVATE llama log)
+
+# llama's public target exports include/ and ggml/include/. Keep this explicit
+# as well so the wrapper remains robust if upstream target visibility changes.
+target_include_directories(interndra_llama PRIVATE
+    "${llama_cpp_SOURCE_DIR}/include"
+    "${llama_cpp_SOURCE_DIR}/ggml/include"
+)
