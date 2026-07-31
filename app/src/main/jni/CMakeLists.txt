@@ -20,6 +20,10 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # intentionally disabled for this first production slice; they can be added as
 # separate, device-capability-gated targets later.
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+# LLAMAFILE's ARM FP16 sgemm path is not portable to armeabi-v7a with
+# Android NDK 27 (vld1q_f16/vld1_f16 are unavailable there). Use ggml's
+# portable CPU kernels so every declared Android ABI can compile reliably.
+set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
 set(GGML_OPENCL OFF CACHE BOOL "" FORCE)
