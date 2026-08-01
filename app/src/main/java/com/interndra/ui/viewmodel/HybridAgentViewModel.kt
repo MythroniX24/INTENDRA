@@ -56,6 +56,8 @@ import com.interndra.service.TermuxEnvironment
 import com.interndra.terminal.TerminalSession
 import com.interndra.services.InterndraNotificationListener
 import com.interndra.util.Constants
+import com.interndra.security.SensitiveDataRedactor
+import com.interndra.ai.provider.ProviderSecretStore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.flow.firstOrNull
@@ -64,8 +66,12 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 private val Context.dataStore by preferencesDataStore("interndra_prefs_v2")
+// Legacy keys are read only for one-time migration. New runtime reads use
+// Keystore-encrypted values below, then the legacy entries are deleted.
 private val API_KEY_PREF          = stringPreferencesKey("openrouter_api_key")
 private val GEMINI_KEY_PREF       = stringPreferencesKey("gemini_api_key")
+private val API_KEY_ENCRYPTED_PREF = stringPreferencesKey("openrouter_api_key_keystore_v1")
+private val GEMINI_KEY_ENCRYPTED_PREF = stringPreferencesKey("gemini_api_key_keystore_v1")
 private val PROVIDER_PREF         = stringPreferencesKey("ai_provider")
 private val MODEL_PREF            = stringPreferencesKey("selected_model")
 private val GEMINI_MODEL_PREF     = stringPreferencesKey("gemini_model")
@@ -156,6 +162,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     private val db              = AgentDatabase.getInstance(app)
     val repo                    = AgentRepository(db)
     private val safety          = SafetyEngine()
+    private val legacySecretStore = ProviderSecretStore()
     private val localEngine     = LocalAiEngine(app)
     val modelDownloader         = ModelDownloadManager(app)
     private val webSearch       = WebSearchEngine(db.dao())
@@ -199,8 +206,15 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     val workflowPlanner         = WorkflowPlanner()
     val workflowEngine          = WorkflowEngine(app, repo, ShellExecutor, safety)
     val taskManager              = TaskManager(viewModelScope) { command ->
-        val result = ShellExecutor.runAsync(command)
-        TaskStepResult(success = result.isSuccess, output = result.stdout, error = result.stderr)
+        // TaskManager can run without a confirmation dialog. Never let a
+        // confirmation-required command execute as an autonomous task.
+        val report = safety.validate(command)
+        if (report.result != SafetyEngine.ValidationResult.SAFE) {
+            TaskStepResult(success = false, error = "Refused by SafetyEngine: ${report.reason}")
+        } else {
+            val result = ShellExecutor.runAsync(command)
+            TaskStepResult(success = result.isSuccess, output = result.stdout, error = result.stderr)
+        }
     }
 
     private var tts: TextToSpeech? = null
@@ -256,11 +270,21 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     // still completes and the error is logged on first access instead of
     // crashing the entire app.
     val apiKey: StateFlow<String> by lazy {
-        safeStateFlow(app.dataStore.data.map { it[API_KEY_PREF] ?: "" }, "")
+        safeStateFlow(
+            app.dataStore.data.map { prefs ->
+                legacySecretStore.decrypt(prefs[API_KEY_ENCRYPTED_PREF].orEmpty())
+                    .ifBlank { prefs[API_KEY_PREF].orEmpty() }
+            }, ""
+        )
     }
 
     val geminiApiKey: StateFlow<String> by lazy {
-        safeStateFlow(app.dataStore.data.map { it[GEMINI_KEY_PREF] ?: "" }, "")
+        safeStateFlow(
+            app.dataStore.data.map { prefs ->
+                legacySecretStore.decrypt(prefs[GEMINI_KEY_ENCRYPTED_PREF].orEmpty())
+                    .ifBlank { prefs[GEMINI_KEY_PREF].orEmpty() }
+            }, ""
+        )
     }
 
     val aiProvider: StateFlow<Constants.AiProvider> by lazy {
@@ -566,12 +590,32 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             // StateFlow.value, which may still contain its initial default on a
             // cold start. This makes migration deterministic and idempotent.
             val legacy = app.dataStore.data.first()
+            val legacyOpenRouter = legacy[API_KEY_PREF].orEmpty()
+            val legacyGemini = legacy[GEMINI_KEY_PREF].orEmpty()
             aiProviderManager.migrateLegacy(
-                legacy[API_KEY_PREF].orEmpty(),
-                legacy[GEMINI_KEY_PREF].orEmpty(),
+                legacyOpenRouter,
+                legacyGemini,
                 legacy[MODEL_PREF].orEmpty(),
                 legacy[GEMINI_MODEL_PREF].orEmpty()
             )
+            // Keep the autonomous search resolver in sync with the new
+            // Provider Manager. Its provider factory is synchronous, while
+            // provider secrets are suspend-read from the encrypted store, so
+            // mirror only the encrypted Gemini bridge here.
+            syncGeminiSearchBridge()
+            // Migrate legacy AI keys into Keystore-backed DataStore values and
+            // remove the plaintext copies only after encryption succeeds.
+            app.dataStore.edit { prefs ->
+                if (legacyOpenRouter.isNotBlank()) {
+                    prefs[API_KEY_ENCRYPTED_PREF] = legacySecretStore.encrypt(legacyOpenRouter.trim())
+                    prefs.remove(API_KEY_PREF)
+                }
+                if (legacyGemini.isNotBlank()) {
+                    prefs[GEMINI_KEY_ENCRYPTED_PREF] = legacySecretStore.encrypt(legacyGemini.trim())
+                    prefs.remove(GEMINI_KEY_PREF)
+                }
+            }
+            providerSettings.migrateLegacySecret()
         }.onFailure { Log.e(TAG, "Provider manager init failed: ${it.message}") }
     }
 
@@ -589,12 +633,68 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         withContext(Dispatchers.Main.immediate) { onResult(result) }
     }
 
+    fun saveProviderCredentials(
+        providerId: String,
+        apiKey: String,
+        headersJson: String = "",
+        onResult: (ProviderValidation) -> Unit = {}
+    ) = viewModelScope.launch(Dispatchers.IO) {
+        val result = aiProviderManager.saveCredentials(providerId, apiKey, headersJson)
+        if (result.isValid && providerId == "gemini") syncGeminiSearchBridge()
+        withContext(Dispatchers.Main.immediate) { onResult(result) }
+    }
+
+    /**
+     * Clears a managed provider secret and removes the corresponding legacy
+     * search bridge. The bridge is encrypted; it exists only because the
+     * autonomous search provider factory is a synchronous callback.
+     */
+    fun clearProviderCredentials(
+        providerId: String,
+        onResult: (ProviderValidation) -> Unit = {}
+    ) = viewModelScope.launch(Dispatchers.IO) {
+        val result = aiProviderManager.clearCredentials(providerId)
+        if (result.isValid && providerId == "gemini") {
+            app.dataStore.edit { it.remove(GEMINI_KEY_ENCRYPTED_PREF) }
+        }
+        withContext(Dispatchers.Main.immediate) { onResult(result) }
+    }
+
+    private suspend fun syncGeminiSearchBridge() {
+        val managedKey = aiProviderManager.getApiKey("gemini")
+        app.dataStore.edit { prefs ->
+            if (managedKey.isBlank()) prefs.remove(GEMINI_KEY_ENCRYPTED_PREF)
+            else prefs[GEMINI_KEY_ENCRYPTED_PREF] = legacySecretStore.encrypt(managedKey)
+            prefs.remove(GEMINI_KEY_PREF)
+        }
+    }
+
+    fun addProviderModel(
+        providerId: String,
+        modelId: String,
+        displayName: String = modelId,
+        onResult: (Boolean) -> Unit = {}
+    ) = viewModelScope.launch(Dispatchers.IO) {
+        val added = aiProviderManager.addManualModel(providerId, modelId, displayName)
+        withContext(Dispatchers.Main.immediate) { onResult(added) }
+    }
+
+    fun setActiveProviderModel(providerId: String, modelId: String) = viewModelScope.launch(Dispatchers.IO) {
+        if (!aiProviderManager.setActiveModel(providerId, modelId)) return@launch
+        when (providerId) {
+            "openrouter" -> app.dataStore.edit { it[MODEL_PREF] = modelId }
+            "gemini" -> app.dataStore.edit { it[GEMINI_MODEL_PREF] = modelId }
+        }
+    }
+
     fun setProviderDefault(role: ProviderRole, providerId: String) = viewModelScope.launch(Dispatchers.IO) {
-        aiProviderManager.setDefault(role, providerId)
+        val accepted = aiProviderManager.setDefault(role, providerId)
         // Keep the currently supported chat engines compatible while the
         // generic provider adapter is introduced: selecting a built-in chat
         // provider in the new manager also updates the legacy router's enum.
-        if (role == ProviderRole.CHAT) {
+        // Do this only after the managed repository accepts the ready provider;
+        // otherwise the two routing sources can disagree.
+        if (accepted && role == ProviderRole.CHAT) {
             val legacyProvider = when (providerId) {
                 "openrouter" -> Constants.AiProvider.OPENROUTER
                 "gemini" -> Constants.AiProvider.GEMINI
@@ -821,23 +921,23 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     }
 
     // ── Preference save ───────────────────────────────────────────────────
-    fun saveApiKey(key: String)           = viewModelScope.launch {
-        app.dataStore.edit { it[API_KEY_PREF] = key.trim() }
-        val legacy = app.dataStore.data.first()
-        // Keep the new provider manager as the source of truth while retaining
-        // the legacy preference during this migration release.
-        aiProviderManager.migrateLegacy(
-            legacy[API_KEY_PREF].orEmpty(), legacy[GEMINI_KEY_PREF].orEmpty(),
-            legacy[MODEL_PREF].orEmpty(), legacy[GEMINI_MODEL_PREF].orEmpty()
-        )
+    fun saveApiKey(key: String) = viewModelScope.launch {
+        val value = key.trim()
+        app.dataStore.edit { prefs ->
+            if (value.isBlank()) prefs.remove(API_KEY_ENCRYPTED_PREF)
+            else prefs[API_KEY_ENCRYPTED_PREF] = legacySecretStore.encrypt(value)
+            prefs.remove(API_KEY_PREF)
+        }
+        aiProviderManager.migrateLegacy(value, geminiApiKey.value, selectedModel.value, selectedGeminiModel.value)
     }
-    fun saveGeminiApiKey(key: String)     = viewModelScope.launch {
-        app.dataStore.edit { it[GEMINI_KEY_PREF] = key.trim() }
-        val legacy = app.dataStore.data.first()
-        aiProviderManager.migrateLegacy(
-            legacy[API_KEY_PREF].orEmpty(), legacy[GEMINI_KEY_PREF].orEmpty(),
-            legacy[MODEL_PREF].orEmpty(), legacy[GEMINI_MODEL_PREF].orEmpty()
-        )
+    fun saveGeminiApiKey(key: String) = viewModelScope.launch {
+        val value = key.trim()
+        app.dataStore.edit { prefs ->
+            if (value.isBlank()) prefs.remove(GEMINI_KEY_ENCRYPTED_PREF)
+            else prefs[GEMINI_KEY_ENCRYPTED_PREF] = legacySecretStore.encrypt(value)
+            prefs.remove(GEMINI_KEY_PREF)
+        }
+        aiProviderManager.migrateLegacy(apiKey.value, value, selectedModel.value, selectedGeminiModel.value)
     }
 
     /** Test Gemini API key by making an actual API call. Returns true on success. */
@@ -994,6 +1094,18 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         safeStateFlow(app.dataStore.data.map { it[EMERGENCY_LOCK_PREF] ?: false }, false)
     }
 
+    /**
+     * Returns the configured Provider Manager chat provider, if one is enabled,
+     * credentialed (or local), and has at least one selectable model.
+     * This is the runtime source of truth; legacy preferences are fallback only.
+     */
+    private fun currentManagedChatProvider(): ProviderConfig? {
+        val state = providerState.value
+        fun usable(config: ProviderConfig): Boolean = config.isReadyForChat
+        return state.providers.firstOrNull { it.id == state.defaults.chat && usable(it) }
+            ?: state.providers.firstOrNull(::usable)
+    }
+
     // ── Main command handler ──────────────────────────────────────────────
     fun sendCommand(input: String) {
         val trimmed = input.trim()
@@ -1004,7 +1116,14 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
 
         val mode = privacyMode.value
         val offlineMode = offlineAiMode.value
-        val provider = aiProvider.value
+        val legacyProvider = aiProvider.value
+        val managedProvider = currentManagedChatProvider()
+        val provider = when (managedProvider?.id) {
+            "gemini" -> Constants.AiProvider.GEMINI
+            "openrouter" -> Constants.AiProvider.OPENROUTER
+            else -> legacyProvider
+        }
+        val managedProviderReady = managedProvider != null
         val key  = apiKey.value
         val geminiKey = geminiApiKey.value
 
@@ -1025,6 +1144,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             offlineMode == OfflineAiMode.OFFLINE_ONLY -> PrivacyMode.LOCAL_ONLY
             offlineMode == OfflineAiMode.CLOUD_ONLY -> PrivacyMode.CLOUD_ENHANCED
             mode == PrivacyMode.LOCAL_ONLY -> PrivacyMode.LOCAL_ONLY
+            managedProviderReady -> PrivacyMode.CLOUD_ENHANCED
             provider == Constants.AiProvider.GEMINI && geminiKey.isNotBlank() -> PrivacyMode.CLOUD_ENHANCED
             provider == Constants.AiProvider.GEMINI -> PrivacyMode.HYBRID  // key not loaded yet
             provider == Constants.AiProvider.OPENROUTER && key.isNotBlank() -> PrivacyMode.CLOUD_ENHANCED
@@ -1033,7 +1153,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         }
 
         // FIX: Check the correct API key based on selected provider
-        if (effectiveMode == PrivacyMode.CLOUD_ENHANCED) {
+        if (effectiveMode == PrivacyMode.CLOUD_ENHANCED && !managedProviderReady) {
             when (provider) {
                 Constants.AiProvider.GEMINI -> {
                     if (geminiKey.isBlank()) {
@@ -1219,12 +1339,76 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             }
 
             try {
-                val cloudEngine  = CloudAiEngine(key, selectedModel.value)
-                val geminiEngineVal = GeminiAiEngine(geminiApiKey.value, selectedGeminiModel.value)
-                val orchestrator = AiOrchestrator(app, localEngine, cloudEngine, geminiEngineVal)
+                val managedState = providerState.value
+                val managedProvider = managedState.providers.firstOrNull { providerConfig ->
+                    providerConfig.id == managedState.defaults.chat &&
+                        providerConfig.isReadyForChat
+                } ?: managedState.providers.firstOrNull { providerConfig ->
+                    providerConfig.isReadyForChat
+                }
+                val managedGeminiKey = if (managedProvider?.id == "gemini") {
+                    aiProviderManager.getApiKey("gemini").ifBlank { geminiApiKey.value }
+                } else geminiApiKey.value
+                val managedGeminiModel = if (managedProvider?.id == "gemini") {
+                    managedProvider.activeModelId.ifBlank { managedProvider.models.firstOrNull()?.id.orEmpty() }
+                        .ifBlank { selectedGeminiModel.value }
+                } else selectedGeminiModel.value
+                val cloudEngine  = CloudAiEngine(
+                    if (managedProvider?.id == "openrouter") aiProviderManager.getApiKey("openrouter").ifBlank { key } else key,
+                    if (managedProvider?.id == "openrouter") {
+                        managedProvider.activeModelId.ifBlank { managedProvider.models.firstOrNull()?.id.orEmpty() }
+                            .ifBlank { selectedModel.value }
+                    } else selectedModel.value
+                )
+                val geminiEngineVal = GeminiAiEngine(managedGeminiKey, managedGeminiModel)
+                val orchestrator = AiOrchestrator(
+                    app, localEngine, cloudEngine, geminiEngineVal,
+                    managedCloudConfigured = {
+                        managedProvider != null && managedProvider.id != "gemini"
+                    },
+                    managedCloudRequest = managedProvider?.takeIf { it.id != "gemini" }?.let { providerConfig ->
+                        { input, memoryItems, history, jailbreak, level, runtime ->
+                            runCatching {
+                                aiProviderManager.parseChat(
+                                    providerId = providerConfig.id,
+                                    modelId = providerConfig.activeModelId.ifBlank { providerConfig.models.firstOrNull()?.id.orEmpty() },
+                                    userInput = input,
+                                    memory = memoryItems,
+                                    chatHistory = history,
+                                    jailbreakActive = jailbreak,
+                                    jailbreakLevel = level,
+                                    runtimeContext = runtime
+                                )
+                            }.getOrElse { error ->
+                                // The selected Provider Manager endpoint is
+                                // authoritative. Do not silently send the same
+                                // request through a different legacy provider.
+                                Log.w(TAG, "Managed provider ${providerConfig.id} failed: ${error.message}")
+                                val safeMessage = error.message.orEmpty().take(180)
+                                AiEngineResult(
+                                    intentJson = com.google.gson.Gson().toJson(mapOf(
+                                        "action" to "chat",
+                                        "reply" to "⚠️ ${providerConfig.name} request failed: $safeMessage",
+                                        "commands" to emptyList<Any>()
+                                    )),
+                                    // This is an error from the selected cloud
+                                    // provider, not a fallback request.
+                                    source = AiSource.CLOUD,
+                                    modelUsed = "${providerConfig.id}-error",
+                                    latencyMs = 0L
+                                )
+                            }
+                        }
+                    } ?: { _, _, _, _, _, _ -> null }
+                )
 
-                // Set provider and jailbreak settings
-                orchestrator.activeProvider = aiProvider.value
+                // Set provider and jailbreak settings. Provider Manager defaults
+                // take precedence over the legacy two-provider preference.
+                orchestrator.activeProvider = when (managedProvider?.id) {
+                    "gemini" -> Constants.AiProvider.GEMINI
+                    "openrouter" -> Constants.AiProvider.OPENROUTER
+                    else -> provider
+                }
                 orchestrator.jailbreakActive = jailbreakEnabled.value
                 orchestrator.jailbreakLevel = jailbreakLevel.value
 
@@ -1379,7 +1563,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                             sessionId      = session,
                             message        = confirmReport.reason,
                             commandSummary = summary,
-                            onConfirm      = { executeCommands(session, trimmed, intent, commands) }
+                            onConfirm      = { executeCommands(session, trimmed, intent, commands, approvedByUser = true) }
                         )
                     )}
                     return
@@ -1477,7 +1661,8 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     private suspend fun executeCommands(
         session: String, userInput: String,
         intent: AiIntent, commands: List<ShellCommand>,
-        chatMessageId: Long? = null
+        chatMessageId: Long? = null,
+        approvedByUser: Boolean = false
     ) {
         if (!intent.triggerCondition.isNullOrBlank()) {
             val combinedCmd = commands.joinToString(" && ") { it.command }
@@ -1526,16 +1711,21 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         val trackedCmds = cmdList.map { it.copy(id = nextCommandId()) }
         _activeCommands.value = trackedCmds
 
-        engine.execute(session, userInput, intent.copy(commands = commands)) { result ->
+        engine.execute(
+            session = session,
+            userInput = userInput,
+            intent = intent.copy(commands = commands),
+            approvedByUser = approvedByUser,
+            onStepResult = { result ->
             if (!result.success) allSuccess = false
             val cmd   = commands.getOrNull(result.stepIndex)
             val label = cmd?.description?.ifBlank { null } ?: cmd?.command?.take(40) ?: "Command"
 
             if (result.success) {
-                val outputSnippet = result.output.trim().take(600).ifBlank { "Done" }
+                val outputSnippet = SensitiveDataRedactor.redact(result.output.trim()).take(600).ifBlank { "Done" }
                 chatOutputLines.add("**$label**\n```\n$outputSnippet\n```")
             } else {
-                val rawError = result.error.trim().take(200)
+                val rawError = SensitiveDataRedactor.redact(result.error.trim()).take(200)
                 val friendly = friendlyError(rawError)
                 chatOutputLines.add("**$label** — $friendly")
             }
@@ -2143,11 +2333,11 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             sb.appendLine("Chat messages: ${messages.size} | Logs: ${logs.size} | Knowledge: ${vault.size}")
             sb.appendLine("\n=== Chat Messages ===")
             messages.forEach { msg ->
-                sb.appendLine("[${msg.role}] ${msg.content}")
+                sb.appendLine("[${msg.role}] ${SensitiveDataRedactor.redact(msg.content)}")
             }
             sb.appendLine("\n=== Terminal Logs ===")
             logs.forEach { log ->
-                sb.appendLine("[${log.logType}] ${log.content}")
+                sb.appendLine("[${log.logType}] ${SensitiveDataRedactor.redact(log.content)}")
             }
             val exportDir = java.io.File(app.filesDir, "exports")
             exportDir.mkdirs()

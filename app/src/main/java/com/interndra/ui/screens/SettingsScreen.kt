@@ -11,7 +11,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -42,14 +41,11 @@ fun SettingsScreen(
     onOpenDrawer: () -> Unit = {},
     onOpenProviders: () -> Unit = {}
 ) {
-    val context       = LocalContext.current
-    val apiKey        by vm.apiKey.collectAsState()
-    val geminiKey     by vm.geminiApiKey.collectAsState()
-    val provider      by vm.aiProvider.collectAsState()
+    val context = LocalContext.current
+    val providerState by vm.providerState.collectAsState()
+
     val privacyMode   by vm.privacyMode.collectAsState()
     val uiState       by vm.uiState.collectAsState()
-    val selectedModel by vm.selectedModel.collectAsState()
-    val selectedGeminiModel by vm.selectedGeminiModel.collectAsState()
     val downloadState by vm.downloadState.collectAsState()
     val jailbreakEnabled by vm.jailbreakEnabled.collectAsState()
     val jailbreakLevel by vm.jailbreakLevel.collectAsState()
@@ -69,13 +65,6 @@ fun SettingsScreen(
     val smartChatMemoryEnabled by vm.smartChatMemoryEnabled.collectAsState()
     val smartMemoryBudget by vm.smartMemoryBudget.collectAsState()
 
-    var tempKey  by remember { mutableStateOf(apiKey) }
-    var tempGeminiKey by remember { mutableStateOf(geminiKey) }
-    var showGeminiKey by remember { mutableStateOf(false) }
-    var expanded by remember { mutableStateOf(false) }
-    var geminiExpanded by remember { mutableStateOf(false) }
-    var geminiTestResult by remember { mutableStateOf<String?>(null) }
-    var isTesting by remember { mutableStateOf(false) }
     var offlinePlannerExpanded by remember { mutableStateOf(false) }
     var offlineChatExpanded by remember { mutableStateOf(false) }
     var smartBudgetDraft by remember(smartMemoryBudget) { mutableFloatStateOf(smartMemoryBudget.toFloat()) }
@@ -87,35 +76,11 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
-            // ── AI Provider ────────────────────────────────────────────────
-            DashboardCard {
-                SectionHeader("AI Provider", modifier = Modifier.padding(bottom = 4.dp))
-                Text("Choose which AI provider to use for cloud requests.",
-                    color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp)
+            // Provider credentials and model management live in AI → Providers.
+            // Normal settings only exposes models that are actually configured there.
+            ConfiguredChatModelSelector(vm = vm)
 
-                Constants.AiProvider.values().forEach { prov ->
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(
-                            selected = (prov == provider),
-                            onClick  = { vm.saveProvider(prov) },
-                            colors   = RadioButtonDefaults.colors(selectedColor = Accent),
-                            enabled  = !uiState.emergencyLockActive
-                        )
-                        Column(Modifier.weight(1f)) {
-                            Text("${prov.emoji} ${prov.label}", color = TerminalWhite, fontSize = 14.sp)
-                            Text(
-                                when (prov) {
-                                    Constants.AiProvider.OPENROUTER -> "Access to 200+ models via OpenRouter API"
-                                    Constants.AiProvider.GEMINI -> "Google's Gemini models (requires free API key)"
-                                },
-                                color = TerminalWhite.copy(alpha = 0.5f), fontSize = 11.sp
-                            )
-                        }
-                    }
-                }
-            }
-
-            // ── New provider manager entry ────────────────────────────────
+            // ── Provider manager entry ───────────────────────────────────
             DashboardCard {
                 SectionHeader("Provider Manager", modifier = Modifier.padding(bottom = 4.dp))
                 Text(
@@ -134,179 +99,8 @@ fun SettingsScreen(
                 }
             }
 
-            // ── Legacy compatibility status ───────────────────────────────
-            // Existing OpenRouter/Gemini controls remain visible during the
-            // migration release; new installs should use Provider Manager.
-            // ── Cloud AI Model (OpenRouter) ────────────────────────────────
-            if (provider == Constants.AiProvider.OPENROUTER) {
-                DashboardCard {
-                    SectionHeader("OpenRouter AI Model", modifier = Modifier.padding(bottom = 4.dp))
-                    Box {
-                        OutlinedTextField(
-                            value         = selectedModel,
-                            onValueChange = { },
-                            readOnly      = true,
-                            label         = { Text("Selected Model") },
-                            modifier      = Modifier.fillMaxWidth(),
-                            trailingIcon  = { Icon(Icons.Default.ArrowDropDown, "dropdown") },
-                            colors        = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor     = TerminalWhite,
-                                unfocusedTextColor   = TerminalWhite,
-                                focusedBorderColor   = Accent,
-                                unfocusedBorderColor = SurfaceLight
-                            )
-                        )
-                        Box(Modifier.matchParentSize().clickable { expanded = true })
-                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false },
-                            modifier = Modifier.background(SurfaceCard)) {
-                            Constants.FREE_MODELS.forEach { (label, modelValue) ->
-                                DropdownMenuItem(
-                                    text    = { Text(label, color = TerminalWhite, fontSize = 13.sp) },
-                                    onClick = { vm.saveModel(modelValue); expanded = false }
-                                )
-                            }
-                        }
-                    }
-                }
 
-                // ── OpenRouter API Key ────────────────────────────────────────
-                DashboardCard {
-                    SectionHeader("OpenRouter API Key", modifier = Modifier.padding(bottom = 4.dp))
-                    Text("Required for Cloud and Hybrid mode. Get one at openrouter.ai/keys",
-                        color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp)
-                    OutlinedTextField(
-                        value         = tempKey,
-                        onValueChange = { tempKey = it },
-                        label         = { Text("API Key") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier      = Modifier.fillMaxWidth(),
-                        singleLine    = true,
-                        colors        = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor     = TerminalWhite,
-                            unfocusedTextColor   = TerminalWhite,
-                            focusedBorderColor   = Accent,
-                            unfocusedBorderColor = SurfaceLight
-                        )
-                    )
-                    Button(
-                        onClick = { vm.saveApiKey(tempKey); Toast.makeText(context, "OpenRouter key saved", Toast.LENGTH_SHORT).show() },
-                        colors  = ButtonDefaults.buttonColors(containerColor = Accent),
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Save Key", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) }
-                }
-            }
-
-            // ── Gemini Section ────────────────────────────────────────────
-            if (provider == Constants.AiProvider.GEMINI) {
-                DashboardCard {
-                    SectionHeader("Google Gemini Model", modifier = Modifier.padding(bottom = 4.dp))
-                    Box {
-                        OutlinedTextField(
-                            value         = selectedGeminiModel,
-                            onValueChange = { },
-                            readOnly      = true,
-                            label         = { Text("Selected Gemini Model") },
-                            modifier      = Modifier.fillMaxWidth(),
-                            trailingIcon  = { Icon(Icons.Default.ArrowDropDown, "dropdown") },
-                            colors        = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor     = TerminalWhite,
-                                unfocusedTextColor   = TerminalWhite,
-                                focusedBorderColor   = Accent,
-                                unfocusedBorderColor = SurfaceLight
-                            )
-                        )
-                        Box(Modifier.matchParentSize().clickable { geminiExpanded = true })
-                        DropdownMenu(expanded = geminiExpanded, onDismissRequest = { geminiExpanded = false },
-                            modifier = Modifier.background(SurfaceCard)) {
-                            Constants.GEMINI_MODELS.forEach { (label, modelValue) ->
-                                DropdownMenuItem(
-                                    text    = { Text(label, color = TerminalWhite, fontSize = 13.sp) },
-                                    onClick = { vm.saveGeminiModel(modelValue); geminiExpanded = false }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // ── Gemini API Key ────────────────────────────────────────────
-                DashboardCard {
-                    SectionHeader("Google Gemini API Key", modifier = Modifier.padding(bottom = 4.dp))
-                    Text("Get a free API key at makersuite.google.com/app/apikey",
-                        color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp)
-                    OutlinedTextField(
-                        value         = tempGeminiKey,
-                        onValueChange = { tempGeminiKey = it },
-                        label         = { Text("Gemini API Key") },
-                        visualTransformation = if (showGeminiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                        modifier      = Modifier.fillMaxWidth(),
-                        singleLine    = true,
-                        trailingIcon = {
-                            IconButton(onClick = { showGeminiKey = !showGeminiKey }) {
-                                Icon(
-                                    if (showGeminiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                    "Toggle visibility",
-                                    tint = TerminalWhite.copy(0.5f)
-                                )
-                            }
-                        },
-                        colors        = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor     = TerminalWhite,
-                            unfocusedTextColor   = TerminalWhite,
-                            focusedBorderColor   = Accent,
-                            unfocusedBorderColor = SurfaceLight
-                        )
-                    )
-                    Button(
-                        onClick = { vm.saveGeminiApiKey(tempGeminiKey); Toast.makeText(context, "Gemini key saved", Toast.LENGTH_SHORT).show() },
-                        colors  = ButtonDefaults.buttonColors(containerColor = TerminalGreen),
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Save Gemini Key", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) }
-
-                    Spacer(Modifier.height(4.dp))
-                    Button(
-                        onClick = {
-                            isTesting = true
-                            geminiTestResult = null
-                            vm.testGeminiApi { ok, msg ->
-                                geminiTestResult = msg
-                                isTesting = false
-                            }
-                        },
-                        enabled  = !isTesting && tempGeminiKey.isNotBlank(),
-                        colors   = ButtonDefaults.buttonColors(containerColor = Accent.copy(0.2f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        if (isTesting) {
-                            CircularProgressIndicator(
-                                Modifier.size(16.dp),
-                                color = Accent,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text("Testing...", color = Accent)
-                        } else {
-                            Text("🧪 Test Gemini API", color = Accent,
-                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                        }
-                    }
-                    geminiTestResult?.let { result ->
-                        val isOk = result.startsWith("✅")
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isOk) TerminalGreen.copy(0.1f) else TerminalRed.copy(0.1f)
-                        ) {
-                            Text(
-                                result,
-                                color = if (isOk) TerminalGreen else TerminalRed,
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(10.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // ── JAILBREAK SECTION ──────────────────────────────────────────
+            // ── Jailbreak section ────────────────────────────────────────
             DashboardCard {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
                     SectionHeader("🧠 Jailbreak Mode", modifier = Modifier.weight(1f))
@@ -633,7 +427,7 @@ fun SettingsScreen(
                         )
                     }
                     Text(
-                        "Primary: Gemini Google Search (uses your Gemini key). Brave adds independent verification when its key is set.",
+                        "Google Search is primary; Brave can add independent verification when configured.",
                         color = TerminalWhite.copy(alpha = 0.4f), fontSize = 11.sp
                     )
 
@@ -722,7 +516,7 @@ fun SettingsScreen(
 
                         Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("⚖️ Prefer Brave over Gemini",
+                            Text("⚖️ Prefer Brave over Google Search",
                                 color = TerminalWhite, fontSize = 13.sp, modifier = Modifier.weight(1f))
                             Switch(
                                 checked = preferBrave,
@@ -731,7 +525,7 @@ fun SettingsScreen(
                             )
                         }
                         Text(
-                            "When both keys are set, prefer Brave for fast lookups (Gemini remains the default).",
+                            "When both keys are set, prefer Brave for fast lookups; Google Search remains available as the primary provider.",
                             color = TerminalWhite.copy(alpha = 0.4f), fontSize = 11.sp
                         )
                     }
@@ -745,8 +539,14 @@ fun SettingsScreen(
                     ) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("Provider Status", color = TerminalWhite.copy(0.6f), fontSize = 11.sp)
-                            Text(if (geminiKey.isNotBlank()) "🟢 Gemini Google Search — ready" else "🟡 Gemini Google Search — add Gemini key in AI Provider",
-                                color = TerminalWhite, fontSize = 12.sp)
+                            val configuredProviders = providerState.providers.count { provider ->
+                                provider.isReadyForChat
+                            }
+                            Text(
+                                if (configuredProviders > 0) "🟢 AI Providers — $configuredProviders configured"
+                                else "🟡 AI Providers — add an API key and model in AI → Providers",
+                                color = TerminalWhite, fontSize = 12.sp
+                            )
                             Text(
                                 if (braveEnabled && braveKey.isNotBlank()) "🟢 Brave Search — configured"
                                 else if (braveEnabled) "⚪ Brave Search — no key (optional)"
@@ -880,12 +680,100 @@ fun SettingsScreen(
                 Text("Version 2.1.0 — Privacy-First AI OS", color = TerminalWhite.copy(0.7f), fontSize = 13.sp)
                 Text("Local model: Qwen2.5 Q4_K_M via llama.cpp",
                     color = TerminalWhite.copy(0.5f), fontSize = 12.sp)
-                Text("Cloud: OpenRouter + Google Gemini (switchable)",
+                Text("Cloud and local models are managed in AI → Providers.",
                     color = TerminalWhite.copy(0.5f), fontSize = 12.sp)
                 Text("Jailbreak: INSURGENT engine — multi-tier bypass",
                     color = if (jailbreakEnabled) TerminalGreen.copy(0.5f) else TerminalWhite.copy(0.3f),
                     fontSize = 12.sp)
             }
+        }
+    }
+}
+
+@Composable
+private fun ConfiguredChatModelSelector(vm: HybridAgentViewModel) {
+    val state by vm.providerState.collectAsState()
+    val configured = state.providers.filter { provider ->
+        provider.isReadyForChat
+    }
+    var providerMenuOpen by remember { mutableStateOf(false) }
+    var modelMenuOpen by remember { mutableStateOf(false) }
+    var selectedProviderId by remember(state.defaults.chat, configured.firstOrNull()?.id) {
+        mutableStateOf(state.defaults.chat?.takeIf { id -> configured.any { it.id == id } } ?: configured.firstOrNull()?.id.orEmpty())
+    }
+    val selectedProvider = configured.firstOrNull { it.id == selectedProviderId }
+    val selectedModel = selectedProvider?.models?.firstOrNull { it.id == selectedProvider.activeModelId }
+        ?: selectedProvider?.models?.firstOrNull()
+
+    DashboardCard {
+        SectionHeader("Chat model", modifier = Modifier.padding(bottom = 4.dp))
+        Text(
+            "Only providers with a saved credential and available models appear here.",
+            color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        if (configured.isEmpty()) {
+            Text(
+                "No configured models yet. Open AI → Providers, save a provider key, then refresh or add a model.",
+                color = TerminalYellow, fontSize = 12.sp
+            )
+        } else {
+            Box {
+                OutlinedTextField(
+                    value = selectedProvider?.name ?: "Select provider",
+                    onValueChange = {}, readOnly = true,
+                    label = { Text("Provider") }, modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = "Select provider") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TerminalWhite, unfocusedTextColor = TerminalWhite,
+                        focusedBorderColor = Accent, unfocusedBorderColor = SurfaceLight
+                    )
+                )
+                Box(Modifier.matchParentSize().clickable { providerMenuOpen = true })
+                DropdownMenu(providerMenuOpen, { providerMenuOpen = false }, modifier = Modifier.background(SurfaceCard)) {
+                    configured.forEach { provider ->
+                        DropdownMenuItem(
+                            text = { Text(provider.name, color = TerminalWhite) },
+                            onClick = {
+                                selectedProviderId = provider.id
+                                providerMenuOpen = false
+                                vm.setProviderDefault(com.interndra.ai.provider.ProviderRole.CHAT, provider.id)
+                                provider.models.firstOrNull()?.let { vm.setActiveProviderModel(provider.id, it.id) }
+                            }
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Box {
+                OutlinedTextField(
+                    value = selectedModel?.displayName ?: "Select model",
+                    onValueChange = {}, readOnly = true,
+                    label = { Text("Model") }, modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = "Select model") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TerminalWhite, unfocusedTextColor = TerminalWhite,
+                        focusedBorderColor = Accent, unfocusedBorderColor = SurfaceLight
+                    )
+                )
+                Box(Modifier.matchParentSize().clickable { modelMenuOpen = true })
+                DropdownMenu(modelMenuOpen, { modelMenuOpen = false }, modifier = Modifier.background(SurfaceCard)) {
+                    selectedProvider?.models?.forEach { model ->
+                        DropdownMenuItem(
+                            text = { Text(model.displayName, color = TerminalWhite, fontSize = 12.sp) },
+                            onClick = {
+                                vm.setActiveProviderModel(selectedProvider.id, model.id)
+                                modelMenuOpen = false
+                            }
+                        )
+                    }
+                }
+            }
+            Text(
+                "${selectedProvider?.models?.size ?: 0} model(s) available",
+                color = TerminalWhite.copy(alpha = 0.45f), fontSize = 11.sp,
+                modifier = Modifier.padding(top = 6.dp)
+            )
         }
     }
 }

@@ -1,6 +1,5 @@
 package com.interndra.ai.provider
 
-import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -11,8 +10,51 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Small Android Keystore wrapper. Secrets never enter logs or provider metadata. */
-class ProviderSecretStore {
+/**
+ * Crypto boundary used by [ProviderSecretStore].
+ *
+ * Production uses [AndroidKeyStoreCrypto]. Tests can inject a deterministic
+ * implementation without requiring the Android Keystore provider.
+ */
+interface ProviderSecretCrypto {
+    fun encrypt(value: String): String
+    fun decrypt(encoded: String): String
+}
+
+/** Small Android Keystore-backed provider secret store. */
+class ProviderSecretStore(
+    private val crypto: ProviderSecretCrypto = AndroidKeyStoreCrypto()
+) {
+    companion object {
+        private const val ENCRYPTED_PREFIX = "v1:"
+    }
+
+    fun encrypt(value: String): String {
+        if (value.isEmpty()) return ""
+        return ENCRYPTED_PREFIX + crypto.encrypt(value)
+    }
+
+    fun decrypt(value: String): String {
+        if (value.isBlank()) return ""
+
+        // Versioned values are unambiguously encrypted. Older releases did not
+        // write a prefix, so attempt legacy decryption for every unversioned
+        // value and preserve the original on failure. This avoids shape-based
+        // guesses that can misclassify long API keys.
+        return runCatching {
+            crypto.decrypt(value.removePrefix(ENCRYPTED_PREFIX))
+        }.getOrElse {
+            // Explicit v1 ciphertext fails closed; legacy/plaintext values are
+            // preserved so migration cannot silently erase credentials.
+            if (isEncrypted(value)) "" else value
+        }
+    }
+
+    /** True when the value was written by this versioned store format. */
+    fun isEncrypted(value: String): Boolean = value.startsWith(ENCRYPTED_PREFIX)
+}
+
+private class AndroidKeyStoreCrypto : ProviderSecretCrypto {
     companion object {
         private const val KEYSTORE = "AndroidKeyStore"
         private const val ALIAS = "intendra_provider_secrets_v1"
@@ -38,25 +80,20 @@ class ProviderSecretStore {
         return generator.generateKey()
     }
 
-    fun encrypt(value: String): String {
-        if (value.isEmpty()) return ""
+    override fun encrypt(value: String): String {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key())
-        val iv = cipher.iv
-        val ciphertext = cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8))
-        return Base64.encodeToString(iv + ciphertext, Base64.NO_WRAP)
+        val packed = cipher.iv + cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8))
+        return Base64.encodeToString(packed, Base64.NO_WRAP)
     }
 
-    fun decrypt(value: String): String {
-        if (value.isBlank()) return ""
-        return runCatching {
-            val packed = Base64.decode(value, Base64.NO_WRAP)
-            require(packed.size > IV_BYTES) { "Invalid encrypted provider secret" }
-            val iv = packed.copyOfRange(0, IV_BYTES)
-            val ciphertext = packed.copyOfRange(IV_BYTES, packed.size)
-            val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(TAG_BITS, iv))
-            String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8)
-        }.getOrDefault("")
+    override fun decrypt(encoded: String): String {
+        val packed = Base64.decode(encoded, Base64.NO_WRAP)
+        require(packed.size > IV_BYTES) { "Invalid encrypted provider secret" }
+        val iv = packed.copyOfRange(0, IV_BYTES)
+        val ciphertext = packed.copyOfRange(IV_BYTES, packed.size)
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(TAG_BITS, iv))
+        return String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8)
     }
 }

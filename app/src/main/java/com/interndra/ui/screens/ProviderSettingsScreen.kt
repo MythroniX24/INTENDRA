@@ -1,6 +1,7 @@
 package com.interndra.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -179,6 +182,7 @@ fun ProviderSettingsScreen(
                                 vm.testProvider(provider.id) { status ->
                                     operationMessage = when (status) {
                                         ProviderStatus.CONNECTED -> "✅ ${provider.name}: connected"
+                                        ProviderStatus.CONFIGURED -> "✅ ${provider.name}: key saved — tap Test to verify"
                                         ProviderStatus.NOT_CONFIGURED -> "⚠️ ${provider.name}: API key not configured"
                                         ProviderStatus.AUTHENTICATION_FAILED, ProviderStatus.INVALID_API_KEY -> "⚠️ ${provider.name}: authentication failed"
                                         ProviderStatus.OFFLINE -> "⚠️ ${provider.name}: offline"
@@ -198,7 +202,42 @@ fun ProviderSettingsScreen(
                                     )
                                 }
                             },
-                            onSetDefault = { vm.setProviderDefault(ProviderRole.CHAT, provider.id) },
+                            onSetDefault = {
+                                if (provider.supportsManagedChat) {
+                                    vm.setProviderDefault(ProviderRole.CHAT, provider.id)
+                                }
+                            },
+                            onSelectModel = { modelId -> vm.setActiveProviderModel(provider.id, modelId) },
+                            onSaveCredentials = { apiKey, headers, done ->
+                                vm.saveProviderCredentials(provider.id, apiKey, headers) { validation ->
+                                    if (validation.isValid) {
+                                        operationMessage = "✅ ${provider.name}: API key saved securely"
+                                    } else {
+                                        operationMessage = "⚠️ ${provider.name}: ${validation.errors.joinToString("; ")}"
+                                    }
+                                    done(validation.isValid, validation.errors.joinToString("\n"))
+                                }
+                            },
+                            onClearCredentials = { done ->
+                                vm.clearProviderCredentials(provider.id) { validation ->
+                                    operationMessage = if (validation.isValid) {
+                                        "✅ ${provider.name}: credentials cleared"
+                                    } else {
+                                        "⚠️ ${provider.name}: ${validation.errors.joinToString("; ")}"
+                                    }
+                                    done(validation.isValid, validation.errors.joinToString("\n"))
+                                }
+                            },
+                            onAddModel = { modelId, displayName, done ->
+                                vm.addProviderModel(provider.id, modelId, displayName) { added ->
+                                    operationMessage = if (added) {
+                                        "✅ ${provider.name}: model added"
+                                    } else {
+                                        "⚠️ ${provider.name}: model already exists or could not be added"
+                                    }
+                                    done(added)
+                                }
+                            },
                             onDelete = { vm.deleteProvider(provider.id) }
                         )
                     }
@@ -240,14 +279,23 @@ private fun ProviderCard(
     onTest: () -> Unit,
     onRefresh: () -> Unit,
     onSetDefault: () -> Unit,
+    onSelectModel: (String) -> Unit,
+    onSaveCredentials: (String, String, (Boolean, String) -> Unit) -> Unit,
+    onClearCredentials: ((Boolean, String) -> Unit) -> Unit,
+    onAddModel: (String, String, (Boolean) -> Unit) -> Unit,
     onDelete: () -> Unit
 ) {
     val statusColor = when (provider.status) {
-        ProviderStatus.CONNECTED -> TerminalGreen
+        ProviderStatus.CONNECTED, ProviderStatus.CONFIGURED -> TerminalGreen
         ProviderStatus.NOT_CONFIGURED -> TerminalYellow
         ProviderStatus.AUTHENTICATION_FAILED, ProviderStatus.INVALID_API_KEY -> TerminalRed
         else -> TerminalWhite.copy(.55f)
     }
+    var showCredentials by remember { mutableStateOf(false) }
+    var showAddModel by remember { mutableStateOf(false) }
+    var showClearConfirmation by remember { mutableStateOf(false) }
+    var credentialError by remember { mutableStateOf<String?>(null) }
+
     Surface(shape = RoundedCornerShape(16.dp), color = SurfaceCard, tonalElevation = 2.dp) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -262,7 +310,16 @@ private fun ProviderCard(
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(provider.name, color = TerminalWhite, fontWeight = FontWeight.SemiBold)
-                    Text(if (provider.isBuiltIn) "Built-in · ${provider.kind.name.lowercase()}" else "Custom · ${provider.kind.name.lowercase()}", color = TerminalWhite.copy(.5f), fontSize = 11.sp)
+                    Text(
+                    if (!provider.supportsManagedChat) {
+                        "Built-in · adapter not available yet"
+                    } else if (provider.isBuiltIn) {
+                        "Built-in · ${provider.kind.name.lowercase()}"
+                    } else {
+                        "Custom · OpenAI-compatible"
+                    },
+                    color = TerminalWhite.copy(.5f), fontSize = 11.sp
+                )
                 }
                 Text(if (provider.enabled) "Enabled" else "Disabled", color = if (provider.enabled) TerminalGreen else TerminalWhite.copy(.4f), fontSize = 11.sp)
                 Spacer(Modifier.width(4.dp))
@@ -277,6 +334,40 @@ private fun ProviderCard(
                 Spacer(Modifier.weight(1f))
                 Text(if (provider.apiKeyConfigured || provider.isLocal) "Credential ready" else "Needs key", color = TerminalWhite.copy(.5f), fontSize = 10.sp)
             }
+            if (provider.models.isNotEmpty()) {
+                var modelMenuOpen by remember { mutableStateOf(false) }
+                Box {
+                    OutlinedTextField(
+                        value = provider.models.firstOrNull { it.id == provider.activeModelId }?.displayName
+                            ?: provider.models.first().displayName,
+                        onValueChange = {}, readOnly = true, singleLine = true,
+                        label = { Text("Active chat model") }, modifier = Modifier.fillMaxWidth(),
+                        colors = providerFieldColors()
+                    )
+                    Box(Modifier.matchParentSize().clickable { modelMenuOpen = true })
+                    DropdownMenu(modelMenuOpen, { modelMenuOpen = false }, modifier = Modifier.background(SurfaceCard)) {
+                        provider.models.forEach { model ->
+                            DropdownMenuItem(
+                                text = { Text(model.displayName, color = TerminalWhite, fontSize = 12.sp) },
+                                onClick = { onSelectModel(model.id); modelMenuOpen = false }
+                            )
+                        }
+                    }
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = TerminalYellow.copy(alpha = .08f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "No model selected. Tap Add model to enter a model ID, or use Models to fetch the provider list.",
+                        color = TerminalYellow,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+            }
             if (provider.capabilities.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     provider.capabilities.take(5).forEach { capability ->
@@ -288,18 +379,149 @@ private fun ProviderCard(
             }
             Divider(color = TerminalWhite.copy(.08f))
             Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { credentialError = null; showCredentials = true }, enabled = provider.enabled) {
+                    Text(if (provider.apiKeyConfigured) "Edit API key" else "Add API key", color = Accent)
+                }
+                TextButton(onClick = { showAddModel = true }, enabled = provider.enabled) {
+                    Text("Add model", color = TerminalWhite.copy(.75f))
+                }
                 TextButton(onClick = onTest, enabled = provider.enabled) { Text("Test", color = Accent) }
                 TextButton(onClick = onRefresh, enabled = provider.enabled && !isRefreshing) {
                     if (isRefreshing) CircularProgressIndicator(Modifier.size(15.dp), color = Accent, strokeWidth = 2.dp)
                     else Icon(Icons.Default.Refresh, "Refresh models", tint = Accent, modifier = Modifier.size(17.dp))
                     Spacer(Modifier.width(4.dp)); Text("Models", color = Accent)
                 }
-                TextButton(onClick = onSetDefault, enabled = provider.enabled) { Text(if (isDefault) "Default ✓" else "Set default", color = if (isDefault) TerminalGreen else TerminalWhite.copy(.7f)) }
+                TextButton(
+                    onClick = onSetDefault,
+                    enabled = provider.isReadyForChat
+                ) {
+                    Text(
+                        when {
+                            isDefault -> "Default ✓"
+                            !provider.supportsManagedChat -> "Adapter pending"
+                            !provider.apiKeyConfigured && !provider.isLocal -> "Needs key + model"
+                            provider.models.isEmpty() && provider.activeModelId.isBlank() -> "Needs model"
+                            else -> "Set default"
+                        },
+                        color = if (isDefault) TerminalGreen else TerminalWhite.copy(.7f)
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 if (!provider.isBuiltIn) IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, "Delete provider", tint = TerminalRed.copy(.8f)) }
             }
         }
     }
+
+    if (showCredentials) {
+        CredentialDialog(
+            provider = provider,
+            errorText = credentialError,
+            onDismiss = { showCredentials = false },
+            onClearCredentials = { showClearConfirmation = true },
+            onSave = { key, headers ->
+                onSaveCredentials(key, headers) { success, error ->
+                    if (success) showCredentials = false else credentialError = error.ifBlank { "Could not save credentials" }
+                }
+            }
+        )
+    }
+    if (showClearConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirmation = false },
+            title = { Text("Clear credentials?") },
+            text = { Text("This removes the encrypted API key and custom headers for ${provider.name} from this device.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onClearCredentials { success, error ->
+                        if (success) {
+                            showClearConfirmation = false
+                            showCredentials = false
+                        } else {
+                            showClearConfirmation = false
+                            credentialError = error.ifBlank { "Could not clear credentials" }
+                        }
+                    }
+                }) {
+                    Text("Clear credentials", color = TerminalRed)
+                }
+            },
+            dismissButton = { TextButton(onClick = { showClearConfirmation = false }) { Text("Cancel") } }
+        )
+    }
+    if (showAddModel) {
+        AddModelDialog(
+            onDismiss = { showAddModel = false },
+            onAdd = { id, displayName ->
+                onAddModel(id, displayName) { added -> if (added) showAddModel = false }
+            }
+        )
+    }
+}
+
+@Composable
+private fun CredentialDialog(
+    provider: ProviderConfig,
+    errorText: String?,
+    onDismiss: () -> Unit,
+    onClearCredentials: () -> Unit,
+    onSave: (String, String) -> Unit
+) {
+    var key by remember { mutableStateOf("") }
+    var headers by remember { mutableStateOf("") }
+    var visible by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${provider.name} credentials") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Enter the API key here. It is encrypted and stored only on this device. Leave it blank to keep the existing key.", fontSize = 11.sp, color = TerminalWhite.copy(.6f))
+                errorText?.let { Text(it, color = TerminalRed, fontSize = 11.sp) }
+                OutlinedTextField(
+                    value = key, onValueChange = { key = it }, singleLine = true,
+                    label = { Text("API key") }, modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = { IconButton(onClick = { visible = !visible }) { Icon(if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility, "Toggle key") } },
+                    colors = providerFieldColors()
+                )
+                OutlinedTextField(
+                    value = headers, onValueChange = { headers = it }, singleLine = true,
+                    label = { Text("Headers JSON (optional)") }, modifier = Modifier.fillMaxWidth(), colors = providerFieldColors()
+                )
+            }
+        },
+        confirmButton = { Button(onClick = { onSave(key, headers) }) { Text("Save securely") } },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (provider.apiKeyConfigured) {
+                    TextButton(onClick = onClearCredentials) {
+                        Text("Clear credentials", color = TerminalRed)
+                    }
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
+    )
+}
+
+@Composable
+private fun AddModelDialog(
+    onDismiss: () -> Unit,
+    onAdd: (String, String) -> Unit
+) {
+    var id by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add model") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(id, { id = it }, label = { Text("Model ID") }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = providerFieldColors())
+                OutlinedTextField(name, { name = it }, label = { Text("Display name (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = providerFieldColors())
+            }
+        },
+        confirmButton = { Button(onClick = { onAdd(id.trim(), name.trim().ifBlank { id.trim() }) }, enabled = id.isNotBlank()) { Text("Add") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 private fun ProviderCapability.shortLabel(): String = when (this) {

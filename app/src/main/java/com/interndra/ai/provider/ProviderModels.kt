@@ -9,6 +9,7 @@ enum class ProviderAuthType { NONE, BEARER, API_KEY_HEADER, QUERY_PARAMETER }
 
 enum class ProviderStatus {
     CONNECTED,
+    CONFIGURED,
     NOT_CONFIGURED,
     INVALID_API_KEY,
     OFFLINE,
@@ -65,10 +66,39 @@ data class ProviderConfig(
     val models: List<ProviderModel> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
+    /** User-selected model for the provider's primary chat role. */
+    val activeModelId: String = "",
     val lastSyncAt: Long = 0L,
     @Transient val headersJson: String = ""
 ) {
     val isLocal: Boolean get() = kind == ProviderKind.LOCAL
+
+    /** A provider that can be shown in the normal chat model selector. */
+    val isReadyForChat: Boolean
+        get() = enabled && supportsManagedChat &&
+            (apiKeyConfigured || isLocal) &&
+            (activeModelId.isNotBlank() || models.isNotEmpty())
+
+    /**
+     * Whether the current chat router has a real adapter for this provider.
+     * Providers without an adapter remain visible for future configuration,
+     * but must not be selectable as the active chat backend.
+     */
+    val supportsManagedChat: Boolean
+        get() = when (id) {
+            // Native Gemini requests are handled by GeminiAiEngine.
+            "gemini" -> true
+            // These providers expose the OpenAI-compatible chat contract used
+            // by ProviderManager.parseChat().
+            "openai", "openrouter", "groq", "fireworks", "dashscope",
+            "deepseek", "ollama", "lmstudio", "vllm", "together",
+            "cerebras", "mistral", "xai", "nvidia-nim", "sambanova",
+            "perplexity" -> true
+            // Custom endpoints are explicitly described as OpenAI-compatible
+            // by the custom-provider UI.
+            else -> kind == ProviderKind.CUSTOM
+        }
+
     val modelCount: Int get() = models.size
 }
 
@@ -132,6 +162,10 @@ object ProviderValidator {
         }
         if (config.endpointPath.isBlank() || !config.endpointPath.startsWith("/")) {
             errors += "Endpoint path must start with '/'."
+        }
+        if (config.kind == ProviderKind.CLOUD && !config.supportsManagedChat) {
+            // The provider can still be saved for future adapters, but it must
+            // not be advertised as an active chat backend yet.
         }
         if (config.kind == ProviderKind.LOCAL && config.authType != ProviderAuthType.NONE && !config.apiKeyConfigured) {
             // Local servers may still require a key; do not reject them.

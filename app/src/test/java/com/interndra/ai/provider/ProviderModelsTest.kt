@@ -20,6 +20,16 @@ class ProviderModelsTest {
     }
 
     @Test
+    fun `managed chat support matches the currently implemented adapters`() {
+        assertThat(BuiltInProviderCatalog.providers.first { it.id == "anthropic" }.supportsManagedChat).isFalse()
+        assertThat(BuiltInProviderCatalog.providers.first { it.id == "bedrock" }.supportsManagedChat).isFalse()
+        assertThat(BuiltInProviderCatalog.providers.first { it.id == "vertex-ai" }.supportsManagedChat).isFalse()
+        assertThat(BuiltInProviderCatalog.providers.first { it.id == "openrouter" }.supportsManagedChat).isTrue()
+        assertThat(BuiltInProviderCatalog.providers.first { it.id == "gemini" }.supportsManagedChat).isTrue()
+        assertThat(ProviderConfig("custom", "Custom", ProviderKind.CUSTOM, "https://example.com").supportsManagedChat).isTrue()
+    }
+
+    @Test
     fun `valid https cloud provider passes validation`() {
         val config = ProviderConfig(
             id = "custom-cloud",
@@ -128,6 +138,46 @@ class ProviderModelsTest {
         )
 
         assertThat(ProviderValidator.validate(config).isValid).isTrue()
+    }
+
+    @Test
+    fun `gemini model resource prefixes are safe to normalize`() {
+        val raw = "models/gemini-2.5-flash"
+        val normalized = raw.removePrefix("models/").removePrefix("gemini/")
+        assertThat(normalized).isEqualTo("gemini-2.5-flash")
+    }
+
+    @Test
+    fun `provider is not ready for chat before credential and model are configured`() {
+        val provider = BuiltInProviderCatalog.providers.first { it.id == "openrouter" }
+
+        assertThat(provider.isReadyForChat).isFalse()
+        assertThat(provider.copy(apiKeyConfigured = true).isReadyForChat).isFalse()
+    }
+
+    @Test
+    fun `provider becomes ready for chat after credential and model are configured`() {
+        val provider = BuiltInProviderCatalog.providers.first { it.id == "openrouter" }
+            .copy(
+                apiKeyConfigured = true,
+                models = listOf(ProviderModel("openai/gpt-4o-mini")),
+                activeModelId = "openai/gpt-4o-mini"
+            )
+
+        assertThat(provider.isReadyForChat).isTrue()
+    }
+
+    @Test
+    fun `local provider can be ready without an api key when a model exists`() {
+        val provider = BuiltInProviderCatalog.providers.first { it.id == "ollama" }
+            .copy(models = listOf(ProviderModel("llama3.2")), activeModelId = "llama3.2")
+
+        assertThat(provider.isReadyForChat).isTrue()
+    }
+
+    @Test
+    fun `configured status is distinct from a successful connection`() {
+        assertThat(ProviderStatus.CONFIGURED).isNotEqualTo(ProviderStatus.CONNECTED)
     }
 
     @Test

@@ -3,6 +3,12 @@ package com.interndra.ai.provider
 import android.content.Context
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.interndra.ai.JailbreakLevel
+import com.interndra.ai.SmartMemoryEngine
+import com.interndra.data.model.AiEngineResult
+import com.interndra.data.model.AiSource
+import com.interndra.data.model.CommandMemory
+import com.interndra.util.Constants
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -72,8 +78,85 @@ class ProviderManager(context: Context) {
     suspend fun setEnabled(providerId: String, enabled: Boolean) = repository.setEnabled(providerId, enabled)
     suspend fun deleteProvider(providerId: String) = repository.delete(providerId)
     suspend fun setDefault(role: ProviderRole, providerId: String) = repository.setDefault(role, providerId)
+    suspend fun setActiveModel(providerId: String, modelId: String) = repository.setActiveModel(providerId, modelId)
+    suspend fun addManualModel(providerId: String, modelId: String, displayName: String = modelId) =
+        repository.addManualModel(
+            providerId,
+            ProviderModel(
+                id = modelId.trim().removePrefix("models/").removePrefix("gemini/"),
+                displayName = displayName.trim().ifBlank { modelId.trim() }
+                    .removePrefix("models/").removePrefix("gemini/")
+            )
+        )
+
+    suspend fun clearCredentials(providerId: String): ProviderValidation =
+        repository.clearCredentials(providerId)
+
+    suspend fun saveCredentials(providerId: String, apiKey: String, headersJson: String = ""): ProviderValidation {
+        val config = state.first().providers.firstOrNull { it.id == providerId }
+            ?: return ProviderValidation(listOf("Provider not found."))
+        // Blank means "leave the existing secret unchanged". This prevents an
+        // edit dialog opened only to add a model from accidentally deleting a key.
+        return repository.save(
+            config,
+            apiKey = apiKey.trim().takeIf { it.isNotBlank() },
+            headersJson = headersJson.trim().takeIf { it.isNotBlank() }
+        )
+    }
     suspend fun getApiKey(providerId: String) = repository.getApiKey(providerId)
     suspend fun getHeaders(providerId: String) = repository.getHeaders(providerId)
+
+    /**
+     * Runs a chat request for providers that expose the common OpenAI-compatible
+     * `/chat/completions` contract. Gemini keeps its native engine because its
+     * request schema is different.
+     */
+    suspend fun parseChat(
+        providerId: String,
+        modelId: String,
+        userInput: String,
+        memory: List<CommandMemory>,
+        chatHistory: List<Pair<String, String>> = emptyList(),
+        jailbreakActive: Boolean = false,
+        jailbreakLevel: JailbreakLevel = JailbreakLevel.OFF,
+        runtimeContext: String = ""
+    ): AiEngineResult = withContext(Dispatchers.IO) {
+        val config = state.first().providers.firstOrNull { it.id == providerId && it.enabled }
+            ?: error("Provider '$providerId' is not configured")
+        require(config.id != "gemini") { "Gemini uses its native API" }
+        val model = modelId.trim().ifBlank { config.activeModelId.ifBlank { config.models.firstOrNull()?.id.orEmpty() } }
+        require(model.isNotBlank()) { "No model selected for ${config.name}" }
+        val messages = buildList {
+            add(mapOf("role" to "system", "content" to Constants.aiSystemPrompt(SmartMemoryEngine.sanitizeForExternal(runtimeContext))))
+            if (memory.isNotEmpty()) add(mapOf("role" to "system", "content" to memory.joinToString("\\n") { "- ${SmartMemoryEngine.sanitizeForExternal(it.userInput).take(500)}" }.take(4000)))
+            chatHistory.takeLast(8).forEach { (role, content) ->
+                add(mapOf("role" to role, "content" to SmartMemoryEngine.sanitizeForExternal(content)))
+            }
+            add(mapOf("role" to "user", "content" to SmartMemoryEngine.sanitizeForExternal(userInput)))
+        }
+        val body = gson.toJson(mapOf("model" to model, "max_tokens" to 1024, "temperature" to 0.1, "messages" to messages))
+        val request = buildRequest(config, getApiKey(providerId), getHeaders(providerId), chatPath(config))
+            .newBuilder()
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .header("Content-Type", "application/json")
+            .build()
+        val started = System.currentTimeMillis()
+        client.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            if (!response.isSuccessful) error("${config.name} HTTP ${response.code}")
+            val root = JsonParser.parseString(responseBody).asJsonObject
+            val content = root.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject
+                ?.getAsJsonObject("message")?.get("content")?.asString
+                ?: error("${config.name} returned no message")
+            AiEngineResult(
+                intentJson = cleanProviderJson(content),
+                source = AiSource.CLOUD,
+                modelUsed = "$providerId/$model",
+                latencyMs = System.currentTimeMillis() - started,
+                tokenCount = root.getAsJsonObject("usage")?.get("total_tokens")?.asInt ?: 0
+            )
+        }
+    }
 
     suspend fun testConnection(providerId: String): ProviderStatus = withContext(Dispatchers.IO) {
         val config = state.first().providers.firstOrNull { it.id == providerId }
@@ -113,7 +196,7 @@ class ProviderManager(context: Context) {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) error("HTTP ${response.code}")
                 val body = response.body?.string().orEmpty()
-                val parsed = parseModels(body)
+                val parsed = parseModels(body, providerId)
                 repository.updateModels(providerId, parsed)
                 parsed
             }
@@ -152,7 +235,39 @@ class ProviderManager(context: Context) {
         return builder.build()
     }
 
-    private fun parseModels(body: String): List<ProviderModel> = runCatching {
+    private fun chatPath(config: ProviderConfig): String {
+        val base = config.baseUrl.trimEnd('/')
+        return if (base.endsWith("/v1")) "/chat/completions" else "/v1/chat/completions"
+    }
+
+    private fun cleanProviderJson(raw: String): String {
+        val stripped = raw.replace("```json", "").replace("```", "").trim()
+        val start = stripped.indexOf('{')
+        if (start >= 0) {
+            var depth = 0
+            var quoted = false
+            var escaped = false
+            for (index in start until stripped.length) {
+                val char = stripped[index]
+                if (escaped) { escaped = false; continue }
+                if (quoted && char == '\\\\') { escaped = true; continue }
+                if (char == '\"') quoted = !quoted
+                if (!quoted && char == '{') depth++
+                if (!quoted && char == '}') {
+                    depth--
+                    if (depth == 0) return stripped.substring(start, index + 1)
+                }
+            }
+        }
+        val safe = stripped.take(500)
+        return gson.toJson(mapOf(
+            "action" to "chat",
+            "reply" to safe,
+            "commands" to emptyList<Any>()
+        ) )
+    }
+
+    private fun parseModels(body: String, providerId: String): List<ProviderModel> = runCatching {
         val root = JsonParser.parseString(body)
         val array = when {
             root.isJsonObject && root.asJsonObject.has("data") -> root.asJsonObject.getAsJsonArray("data")
@@ -163,8 +278,11 @@ class ProviderManager(context: Context) {
         array.mapNotNull { item ->
             if (!item.isJsonObject) return@mapNotNull null
             val obj = item.asJsonObject
-            val id = obj.string("id") ?: obj.string("name") ?: return@mapNotNull null
-            ProviderModel(id = id, displayName = obj.string("name") ?: id)
+            val rawId = obj.string("id") ?: obj.string("name") ?: return@mapNotNull null
+            // Google returns model resources as `models/gemini-…`, while the
+            // native Gemini engine builds that resource prefix itself.
+            val id = if (providerId == "gemini") rawId.removePrefix("models/") else rawId
+            ProviderModel(id = id, displayName = obj.string("name")?.removePrefix("models/") ?: id)
         }.distinctBy { it.id }
     }.getOrDefault(emptyList())
 

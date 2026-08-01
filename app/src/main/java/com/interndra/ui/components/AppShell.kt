@@ -59,8 +59,13 @@ fun AppShell(
 ) {
     val uiState by vm.uiState.collectAsState()
     val activeWorkspaceName by remember { derivedStateOf { uiState.activeWorkspaceName } }
-    val provider by vm.aiProvider.collectAsState()
+    val providerState by vm.providerState.collectAsState()
     val privacyMode by vm.privacyMode.collectAsState()
+    val managedProviderName = remember(providerState.defaults.chat, providerState.providers) {
+        providerState.providers.firstOrNull {
+            it.id == providerState.defaults.chat && it.isReadyForChat
+        }?.name
+    }
     val shizukuAuth by vm.shizukuAuthorized.collectAsState()
     val shizukuAvail by vm.shizukuAvailable.collectAsState()
 
@@ -71,7 +76,7 @@ fun AppShell(
                 title = selectedTab.label,
                 subTitle = activeWorkspaceName.takeIf { it != "General" },
                 onOpenDrawer = onOpenDrawer,
-                provider = provider,
+                managedProviderName = managedProviderName,
                 privacyMode = privacyMode,
                 emergencyLock = uiState.emergencyLockActive,
                 localModelReady = uiState.localModelReady
@@ -93,7 +98,7 @@ private fun AppTopBar(
     title: String,
     subTitle: String?,
     onOpenDrawer: () -> Unit,
-    provider: com.interndra.util.Constants.AiProvider,
+    managedProviderName: String?,
     privacyMode: PrivacyMode,
     emergencyLock: Boolean,
     localModelReady: Boolean
@@ -154,16 +159,12 @@ private fun AppTopBar(
                     }
                 )
                 Spacer(Modifier.width(6.dp))
-                StatusChip(
-                    text = when (provider) {
-                        com.interndra.util.Constants.AiProvider.GEMINI -> "🧬 Gemini"
-                        com.interndra.util.Constants.AiProvider.OPENROUTER -> "⚡ OR"
-                    },
-                    color = when (provider) {
-                        com.interndra.util.Constants.AiProvider.GEMINI -> TerminalGreen
-                        com.interndra.util.Constants.AiProvider.OPENROUTER -> Accent
-                    }
-                )
+                managedProviderName?.let { name ->
+                    StatusChip(
+                        text = name,
+                        color = Accent
+                    )
+                }
                 if (localModelReady) {
                     Spacer(Modifier.width(6.dp))
                     StatusChip(text = "📱 Local", color = TerminalBlue)
