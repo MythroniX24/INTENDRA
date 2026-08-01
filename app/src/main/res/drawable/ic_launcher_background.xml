@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    INTENDRA adaptive launcher icon background.
+    Keep the background opaque so Android never supplies a white fallback
+    behind the foreground artwork.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#0D1117" />
+</shape>
