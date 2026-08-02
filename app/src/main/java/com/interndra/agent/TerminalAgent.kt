@@ -9,6 +9,7 @@ import com.interndra.service.ShellExecutor
 import com.interndra.service.ShizukuShell
 import com.interndra.service.TerminalConfig
 import com.interndra.service.TermuxEnvironment
+import com.interndra.security.SensitiveDataRedactor
 import com.interndra.terminal.TerminalSession as PtyTerminalSession
 import com.interndra.terminal.TerminalEmulator
 import com.google.gson.Gson
@@ -595,7 +596,7 @@ class TerminalAgent(
         // ── Try persistent shell first (handles both AI and scripted commands) ──
         val shell = getShell()
         val result: ShellExecutionResult = if (shell != null && shell.isAlive) {
-            Log.d(TAG, "Executing via persistent shell: $trimmed")
+            Log.d(TAG, "Executing via persistent shell: ${SensitiveDataRedactor.redact(trimmed)}")
             shell.execute(trimmed, timeoutMs) { line ->
                 session.outputLines.add(line)
                 _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
@@ -604,7 +605,7 @@ class TerminalAgent(
             // ── Termux mode: use TermuxEnvironment to wrap command with proper env ──
             val env = termuxEnvironment
             if (currentMode == TermuxEnvironment.ExecMode.TERMUX && env != null && env.hasTermux()) {
-                Log.d(TAG, "Executing via Termux backend: $trimmed")
+                Log.d(TAG, "Executing via Termux backend: ${SensitiveDataRedactor.redact(trimmed)}")
                 val execReq = env.buildExecutionCommand(trimmed, TermuxEnvironment.ExecMode.TERMUX)
                 val termuxCommand = execReq.command
                 if (execReq.useShizuku) {
@@ -619,19 +620,19 @@ class TerminalAgent(
                     }
                 }
             } else if (shizukuShell.isElevatedAvailable) {
-                Log.d(TAG, "Executing via Shizuku one-shot: $trimmed")
+                Log.d(TAG, "Executing via Shizuku one-shot: ${SensitiveDataRedactor.redact(trimmed)}")
                 shizukuShell.execute(trimmed, timeoutMs) { line ->
                     session.outputLines.add(line); _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
                 }
             } else if (termuxEnvironment != null && termuxEnvironment.hasTermux()) {
                 // Even without persistent shell, wrap with Termux env (PATH, LD_PRELOAD)
-                Log.d(TAG, "Executing via Termux wrapper (no persistent shell): $trimmed")
+                Log.d(TAG, "Executing via Termux wrapper (no persistent shell): ${SensitiveDataRedactor.redact(trimmed)}")
                 val execReq = termuxEnvironment!!.buildExecutionCommand(trimmed, TermuxEnvironment.ExecMode.TERMUX)
                 ShellExecutor.runStreaming(execReq.command, timeoutMs) { line ->
                     session.outputLines.add(line); _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
                 }
             } else {
-                Log.d(TAG, "Executing via ShellExecutor fallback: $trimmed")
+                Log.d(TAG, "Executing via ShellExecutor fallback: ${SensitiveDataRedactor.redact(trimmed)}")
                 ShellExecutor.runStreaming(trimmed, timeoutMs) { line ->
                     session.outputLines.add(line); _outputFlow.tryEmit(StreamEvent.Output(sessionName, line))
                 }

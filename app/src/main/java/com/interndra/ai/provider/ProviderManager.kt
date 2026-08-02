@@ -250,7 +250,7 @@ class ProviderManager(context: Context) {
             for (index in start until stripped.length) {
                 val char = stripped[index]
                 if (escaped) { escaped = false; continue }
-                if (quoted && char == '\\\\') { escaped = true; continue }
+                if (quoted && char == '\\') { escaped = true; continue }
                 if (char == '\"') quoted = !quoted
                 if (!quoted && char == '{') depth++
                 if (!quoted && char == '}') {

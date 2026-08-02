@@ -57,7 +57,6 @@ class PluginManager(private val context: Context) {
     }
 
     private val registry = mutableMapOf<String, IPlugin>()
-
     private val _plugins = MutableStateFlow<List<PluginEntry>>(emptyList())
     val plugins: StateFlow<List<PluginEntry>> = _plugins.asStateFlow()
 
@@ -116,6 +115,14 @@ class PluginManager(private val context: Context) {
     ): PluginResult = withContext(Dispatchers.IO) {
         val plugin = findPluginForCommand(command)
             ?: return@withContext PluginResult(false, "", error = "No plugin handles command: $command")
+
+        // Plugin execution is autonomous and has no confirmation dialog.
+        // Keep this boundary centralized so direct and registry calls share
+        // exactly the same argument and SafetyEngine policy.
+        PluginExecutionGuard.rejection(command, args)?.let { refusal ->
+            Log.w(TAG, "Plugin command refused: ${refusal.error}")
+            return@withContext refusal
+        }
         try {
             plugin.execute(command, args)
         } catch (e: Exception) {

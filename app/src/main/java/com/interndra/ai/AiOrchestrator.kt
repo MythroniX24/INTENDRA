@@ -25,7 +25,17 @@ class AiOrchestrator(
     private val localEngine: LocalAiEngine,
     private val cloudEngine: CloudAiEngine,
     private val geminiEngine: GeminiAiEngine? = null,
-    private val healthMonitor: AiSystemHealthMonitor? = null
+    private val healthMonitor: AiSystemHealthMonitor? = null,
+    /** Optional provider-manager bridge for configured OpenAI-compatible endpoints. */
+    private val managedCloudConfigured: () -> Boolean = { false },
+    private val managedCloudRequest: suspend (
+        userInput: String,
+        memory: List<CommandMemory>,
+        chatHistory: List<Pair<String, String>>,
+        jailbreakActive: Boolean,
+        jailbreakLevel: JailbreakLevel,
+        runtimeContext: String
+    ) -> AiEngineResult? = { _, _, _, _, _, _ -> null }
 ) {
     private val TAG  = "AiOrchestrator"
     private val gson = Gson()
@@ -110,7 +120,7 @@ class AiOrchestrator(
     }
 
     private fun isCloudConfigured(): Boolean {
-        return when (activeProvider) {
+        return managedCloudConfigured() || when (activeProvider) {
             Constants.AiProvider.OPENROUTER -> cloudEngine.isConfigured()
             Constants.AiProvider.GEMINI -> geminiEngine?.isConfigured() ?: false
         }
@@ -122,6 +132,15 @@ class AiOrchestrator(
         chatHistory: List<Pair<String, String>> = emptyList(),
         runtimeContext: String = ""
     ): AiEngineResult {
+        managedCloudRequest(
+            userInput,
+            memory,
+            chatHistory,
+            jailbreakActive,
+            jailbreakLevel,
+            runtimeContext
+        )?.let { return it }
+
         return when (activeProvider) {
             Constants.AiProvider.OPENROUTER -> {
                 try {

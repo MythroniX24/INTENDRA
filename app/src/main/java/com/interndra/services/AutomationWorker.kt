@@ -2,9 +2,10 @@ package com.interndra.services
 
 import android.content.Context
 import android.util.Log
+import android.content.Intent
+import android.net.Uri
 import androidx.work.Worker
 import androidx.work.WorkerParameters
-import com.interndra.ai.SafetyEngine
 import com.interndra.service.ShellExecutor
 
 /**
@@ -23,18 +24,23 @@ class AutomationWorker(context: Context, params: WorkerParameters) : Worker(cont
         private const val TAG = "AutomationWorker"
     }
 
-    private val safety = SafetyEngine()
-
     override fun doWork(): Result {
         val type    = inputData.getString("TYPE")    ?: return Result.failure()
         val command = inputData.getString("COMMAND") ?: return Result.failure()
 
-        Log.d(TAG, "Scheduled task running: type=$type cmd=${command.take(60)}")
+        Log.d(TAG, "Scheduled task running: type=$type cmd=${com.interndra.security.SensitiveDataRedactor.redact(command).take(60)}")
 
-        // Re-run safety check before executing stored command
-        val report = safety.validate(command)
-        if (report.result == SafetyEngine.ValidationResult.BLOCKED) {
-            Log.w(TAG, "Scheduled command blocked by safety engine: ${report.reason}")
+        // WorkManager has no interactive confirmation UI. Use the same pure
+        // preflight as immediate execution before any side effect.
+        val rule = com.interndra.data.model.AutomationRule(
+            id = inputData.getLong("RULE_ID", 0L),
+            description = inputData.getString("DESCRIPTION").orEmpty(),
+            commandType = type,
+            command = command
+        )
+        val preflight = AutomationPreflight.validate(rule)
+        if (!preflight.success) {
+            Log.w(TAG, "Scheduled command refused: ${preflight.refusalSource}: ${preflight.error}")
             return Result.failure()
         }
 
@@ -45,15 +51,21 @@ class AutomationWorker(context: Context, params: WorkerParameters) : Worker(cont
                     if (r.isSuccess) r.stdout.ifEmpty { "(completed)" } else r.stderr
                 }
                 "ANDROID_INTENT" -> {
-                    val r = ShellExecutor.run("am start -a android.intent.action.VIEW -d \"$command\"")
-                    if (r.isSuccess) r.stdout.ifEmpty { "(completed)" } else r.stderr
+                    // Do not route persisted intent data through a shell: a URL
+                    // containing quotes or separators could become command
+                    // injection. Dispatch the Android intent directly instead.
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(command)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    applicationContext.startActivity(intent)
+                    "Intent dispatched"
                 }
                 else -> {
                     Log.w(TAG, "Unknown command type: $type")
                     return Result.failure()
                 }
             }
-            Log.d(TAG, "Scheduled task result: ${output.take(100)}")
+            Log.d(TAG, "Scheduled task completed: success=${output.isNotBlank()}")
             Result.success()
         } catch (e: Exception) {
             Log.e(TAG, "Scheduled task failed", e)

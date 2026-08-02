@@ -205,7 +205,9 @@ class GeminiAiEngine(
      * Strip the "gemini/" prefix if present (from model display names)
      */
     private fun stripModelPrefix(modelStr: String): String {
-        return modelStr.trim().removePrefix("gemini/")
+        return modelStr.trim()
+            .removePrefix("gemini/")
+            .removePrefix("models/")
     }
 
     /**

@@ -432,14 +432,17 @@ class SafetyEngineTest {
     }
 
     @Test
-    fun `validateAll short-circuits after blocked command`() {
+    fun `validateAll marks commands after a block as skipped`() {
         val commands = listOf(
             ShellCommand(CommandType.ADB_SHELL, "rm -rf /", "DANGEROUS"),
             ShellCommand(CommandType.ADB_SHELL, "ls", "should be skipped")
         )
         val reports = safety.validateAll(commands)
         assertThat(reports[0].result).isEqualTo(SafetyEngine.ValidationResult.BLOCKED)
-        assertThat(reports[1].result).isEqualTo(SafetyEngine.ValidationResult.SAFE)
+        // A skipped command is itself non-executable so consumers cannot
+        // accidentally treat it as safe when inspecting reports individually.
+        assertThat(reports[1].result).isEqualTo(SafetyEngine.ValidationResult.BLOCKED)
+        assertThat(reports[1].reason).contains("earlier command was blocked")
     }
 
     @Test
@@ -476,6 +479,25 @@ class SafetyEngineTest {
     fun `safeVerdict returns safe for simple commands`() {
         val verdict = safety.safeVerdict("echo hello")
         assertThat(verdict.safe).isTrue()
+    }
+
+    @Test
+    fun `autonomous validation refuses confirmation-required commands`() {
+        val report = safety.validateForAutonomousExecution("reboot")
+        assertThat(report.result).isEqualTo(SafetyEngine.ValidationResult.BLOCKED)
+        assertThat(report.reason).contains("Background execution refused")
+    }
+
+    @Test
+    fun `autonomous validation allows explicitly safe commands`() {
+        val report = safety.validateForAutonomousExecution("echo hello")
+        assertThat(report.result).isEqualTo(SafetyEngine.ValidationResult.SAFE)
+    }
+
+    @Test
+    fun `autonomous validation preserves hard blocks`() {
+        val report = safety.validateForAutonomousExecution("rm -rf /")
+        assertThat(report.result).isEqualTo(SafetyEngine.ValidationResult.BLOCKED)
     }
 
     // ── Edge Cases ─────────────────────────────────────────────────────────

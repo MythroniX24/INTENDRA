@@ -2,6 +2,8 @@ package com.interndra.ai.tools
 
 import com.interndra.data.model.ShellCommand
 import com.interndra.plugin.IPlugin
+import com.interndra.plugin.PluginExecutionGuard
+import com.interndra.security.ShellArgumentPolicy
 
 /**
  * OpenClaw-inspired ToolCategory — categorizes every tool in the unified registry.
@@ -134,7 +136,14 @@ class ShellToolDescriptor(
             commands.map { cmd ->
                 var resolved = cmd.command
                 for ((key, value) in params) {
-                    resolved = resolved.replace("{$key}", value)
+                    // Command templates are executed by a shell later. Quote
+                    // substituted values so paths, URLs, and free-form text
+                    // cannot become new shell syntax.
+                    resolved = ShellArgumentPolicy.replaceTemplateValue(
+                        template = resolved,
+                        key = key,
+                        value = value
+                    )
                 }
                 cmd.copy(command = resolved)
             }
@@ -156,7 +165,6 @@ class PluginToolDescriptor(
     private val plugin: IPlugin,
     val commandName: String
 ) : ToolDescriptor {
-
     override val name: String = commandName
     override val description: String = plugin.description
     override val keywords: List<String>
@@ -183,6 +191,10 @@ class PluginToolDescriptor(
     override fun isAvailable(): Boolean = true
 
     override suspend fun execute(params: Map<String, String>): ToolResult {
+        // Use the same guard as PluginManager and direct built-in plugin calls.
+        PluginExecutionGuard.rejection(commandName, params)?.let { refusal ->
+            return ToolResult(success = false, error = refusal.error)
+        }
         val result = plugin.execute(commandName, params)
         return ToolResult(
             success = result.success,

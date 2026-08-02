@@ -57,7 +57,7 @@ class ShizukuShell(
         timeoutMs: Long = TerminalConfig.DEFAULT_TIMEOUT_MS,
         onOutput: ((String) -> Unit)? = null
     ): ShellExecutionResult = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Executing: ${command.take(100)}")
+        Log.d(TAG, "Executing: ${com.interndra.security.SensitiveDataRedactor.redact(command).take(100)}")
 
         if (managerInstance.isAuthorized()) {
             Log.d(TAG, "Using Shizuku backend (UID ${managerInstance.shizukuUid})")
@@ -90,7 +90,7 @@ class ShizukuShell(
         command: String,
         timeoutMs: Long = TerminalConfig.DEFAULT_TIMEOUT_MS
     ): ShellExecutionResult {
-        Log.d(TAG, "Executing blocking: ${command.take(100)}")
+        Log.d(TAG, "Executing blocking: ${com.interndra.security.SensitiveDataRedactor.redact(command).take(100)}")
         if (managerInstance.isAuthorized()) {
             val result = managerInstance.executeShell(command, timeoutMs)
             if (result.backend == ExecutionBackend.SHIZUKU_ROOT ||

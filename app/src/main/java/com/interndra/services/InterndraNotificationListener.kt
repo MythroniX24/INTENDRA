@@ -19,8 +19,9 @@ import java.util.concurrent.ConcurrentHashMap
  *   validation would run unchecked when a notification fired. Now every trigger
  *   fires only after a fresh safety check.
  *
- * COMPILE FIX: SafetyEngine.validate() returns a Report (which has no .safe
- *   field). Switched to safety.verdict() which returns a Verdict(safe, reason).
+ * Background triggers require an explicitly SAFE verdict because this service
+ * has no interactive confirmation UI. BLOCKED and REQUIRES_CONFIRMATION are
+ * both refused.
  *
  * BUG FIX 1: original used mutableMapOf() in companion — not thread-safe.
  *   Replaced with ConcurrentHashMap.
@@ -75,9 +76,11 @@ class InterndraNotificationListener : NotificationListenerService() {
                 Log.d(TAG, "Trigger matched for key: $triggerKey — validating before execution")
                 serviceScope.launch {
                     try {
-                        val verdict = safety.verdict(matchedCommand)
-                        if (!verdict.safe) {
-                            Log.w(TAG, "Trigger blocked by SafetyEngine: ${verdict.reason}")
+                        val report = safety.validate(matchedCommand)
+                        // Notification callbacks have no confirmation UI. A
+                        // trigger is executable only when it is explicitly SAFE.
+                        if (report.result != SafetyEngine.ValidationResult.SAFE) {
+                            Log.w(TAG, "Trigger refused by SafetyEngine: ${report.reason}")
                             triggers.remove(triggerKey)
                             return@launch
                         }

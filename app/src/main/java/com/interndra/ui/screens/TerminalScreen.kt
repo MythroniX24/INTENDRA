@@ -12,7 +12,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -149,15 +148,6 @@ fun TerminalScreen(
             .fillMaxSize()
             .background(TerminalBg)
     ) {
-        // ── Status bar ───────────────────────────────────────────
-        TerminalStatusBar(
-            isPtyActive = isPtyActive.value,
-            mode = vm.terminalAgent.currentMode,
-            sessionName = activeSessionName,
-            onOpenDrawer = onOpenDrawer,
-            onClear = { outputLines.clear() }
-        )
-
         // ── Terminal output area ────────────────────────────────
         Box(
             modifier = Modifier
@@ -177,13 +167,10 @@ fun TerminalScreen(
                 // Previously both were shown simultaneously causing duplicate content.
                 if (isPtyActive.value && screenChars.value.isNotEmpty()) {
                     // ── PTY Screen buffer rendering ────────────────
-                    // Use derivedStateOf so styles re-compute when emulator state changes
-                    // (not just when screenChars identity changes — fixes stale color bug).
-                    val screenStyles by remember {
-                        derivedStateOf {
-                            vm.terminalAgent.getPtySession()?.emulator?.getScreenStyles() ?: emptyList()
-                        }
-                    }
+                    // `screenChars` is the observable 50ms PTY snapshot. Read
+                    // styles from the same session on every recomposition so
+                    // ANSI color/style changes cannot remain stale.
+                    val screenStyles = vm.terminalAgent.getPtySession()?.emulator?.getScreenStyles() ?: emptyList()
                     val cursorRow = vm.terminalAgent.getPtySession()?.emulator?.cursorRow ?: 0
                     val cursorCol = vm.terminalAgent.getPtySession()?.emulator?.cursorCol ?: 0
 
@@ -234,25 +221,15 @@ fun TerminalScreen(
                         )
                     }
 
-                    // ── Empty state ────────────────────────────
-                    if (outputLines.isEmpty()) {
-                        TerminalWelcomeMessage(
-                            mode = vm.terminalAgent.currentMode,
-                            onInstallTermux = { vm.installEmbeddedTermux(
-                                onProgress = { progress ->
-                                    outputLines.add("📦 $progress")
-                                },
-                                onComplete = { success, msg ->
-                                    outputLines.add(if (success) "\u001b[32m$msg\u001b[0m" else "\u001b[31m$msg\u001b[0m")
-                                }
-                            )}
-                        )
-                    }
                 }
             }
         }
 
         // ── Extra Keys Row ────────────────────────────────────
+        fun showPtyUnavailable() {
+            outputLines.add("\u001b[31mPTY unavailable — terminal session is not ready. Try reopening the Terminal tab.\u001b[0m")
+        }
+
         ExtraKeysRow(
             onKey = { key ->
                 scope.launch {
@@ -260,26 +237,26 @@ fun TerminalScreen(
                     val usePty = pty?.isRunning == true
                     when (key) {
                         // ── Navigation keys ──
-                        "Tab" -> if (usePty) pty?.writeInput("\t") else vm.terminalAgent.execute(activeSessionName, "\t")
-                        "Esc" -> if (usePty) pty?.writeInput("\u001B") else vm.terminalAgent.execute(activeSessionName, "\u001B")
-                        "Up", "↑" -> if (usePty) pty?.writeInput("\u001B[A") else vm.terminalAgent.execute(activeSessionName, "\u001B[A")
-                        "Down", "↓" -> if (usePty) pty?.writeInput("\u001B[B") else vm.terminalAgent.execute(activeSessionName, "\u001B[B")
-                        "Left", "←" -> if (usePty) pty?.writeInput("\u001B[D") else vm.terminalAgent.execute(activeSessionName, "\u001B[D")
-                        "Right", "→" -> if (usePty) pty?.writeInput("\u001B[C") else vm.terminalAgent.execute(activeSessionName, "\u001B[C")
+                        "Tab" -> if (usePty) pty?.writeInput("\t") else showPtyUnavailable()
+                        "Esc" -> if (usePty) pty?.writeInput("\u001B") else showPtyUnavailable()
+                        "Up", "↑" -> if (usePty) pty?.writeInput("\u001B[A") else showPtyUnavailable()
+                        "Down", "↓" -> if (usePty) pty?.writeInput("\u001B[B") else showPtyUnavailable()
+                        "Left", "←" -> if (usePty) pty?.writeInput("\u001B[D") else showPtyUnavailable()
+                        "Right", "→" -> if (usePty) pty?.writeInput("\u001B[C") else showPtyUnavailable()
                         // ── Ctrl combos ──
-                        "Ctrl+A" -> if (usePty) pty?.writeInput("\u0001") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0001')
-                        "Ctrl+E" -> if (usePty) pty?.writeInput("\u0005") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0005')
-                        "Ctrl+W" -> if (usePty) pty?.writeInput("\u0017") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0017')
-                        "Ctrl+U" -> if (usePty) pty?.writeInput("\u0015") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0015')
-                        "Ctrl+R" -> if (usePty) pty?.writeInput("\u0012") else vm.terminalAgent.sendControlChar(activeSessionName, '\u0012')
+                        "Ctrl+A" -> if (usePty) pty?.writeInput("\u0001") else showPtyUnavailable()
+                        "Ctrl+E" -> if (usePty) pty?.writeInput("\u0005") else showPtyUnavailable()
+                        "Ctrl+W" -> if (usePty) pty?.writeInput("\u0017") else showPtyUnavailable()
+                        "Ctrl+U" -> if (usePty) pty?.writeInput("\u0015") else showPtyUnavailable()
+                        "Ctrl+R" -> if (usePty) pty?.writeInput("\u0012") else showPtyUnavailable()
                         // ── Alt+arrows ──
-                        "Alt+←" -> if (usePty) pty?.writeInput("\u001B\u0062") else vm.terminalAgent.execute(activeSessionName, "\u001Bb")
-                        "Alt+→" -> if (usePty) pty?.writeInput("\u001B\u0066") else vm.terminalAgent.execute(activeSessionName, "\u001Bf")
-                        "Alt+↑" -> if (usePty) pty?.writeInput("\u001B\u001B[A") else vm.terminalAgent.execute(activeSessionName, "\u001B\u001B[A")
-                        "Alt+↓" -> if (usePty) pty?.writeInput("\u001B\u001B[B") else vm.terminalAgent.execute(activeSessionName, "\u001B\u001B[B")
+                        "Alt+←" -> if (usePty) pty?.writeInput("\u001B\u0062") else showPtyUnavailable()
+                        "Alt+→" -> if (usePty) pty?.writeInput("\u001B\u0066") else showPtyUnavailable()
+                        "Alt+↑" -> if (usePty) pty?.writeInput("\u001B\u001B[A") else showPtyUnavailable()
+                        "Alt+↓" -> if (usePty) pty?.writeInput("\u001B\u001B[B") else showPtyUnavailable()
                         // ── Literal characters ──
-                        "/" -> if (usePty) pty?.writeInput("/") else vm.terminalAgent.execute(activeSessionName, "/")
-                        "-" -> if (usePty) pty?.writeInput("-") else vm.terminalAgent.execute(activeSessionName, "-")
+                        "/" -> if (usePty) pty?.writeInput("/") else showPtyUnavailable()
+                        "-" -> if (usePty) pty?.writeInput("-") else showPtyUnavailable()
                     }
                 }
             }
@@ -293,98 +270,56 @@ fun TerminalScreen(
                 if (cmd.isNotBlank()) {
                     outputLines.add("\u001b[32m$\u001b[0m $cmd")
                     scope.launch {
-                        vm.terminalAgent.execute(activeSessionName, cmd)
+                        val pty = vm.terminalAgent.getPtySession()
+                        if (pty?.isRunning == true) {
+                            // Real terminal input: send the line to the active
+                            // PTY, rather than spawning a separate one-shot
+                            // command. This preserves interactive programs,
+                            // shell state, history, cwd, and job control.
+                            pty.writeInput("$cmd\n")
+                        } else {
+                            // The terminal tab is PTY-only. Do not pretend that a
+                            // one-shot ShellExecutor command is a real terminal:
+                            // it would lose cwd, history, signals, and interactive
+                            // program state. TerminalAgent/AI execution remains
+                            // separate and is shown through its own chat events.
+                            outputLines.add("\u001b[31mPTY unavailable — terminal session is not ready. Try reopening the Terminal tab.\u001b[0m")
+                        }
                     }
                     commandInput = ""
                 }
             },
             onCtrlC = {
                 scope.launch {
-                    vm.terminalAgent.sendControlChar(activeSessionName, '\u0003')
+                    val pty = vm.terminalAgent.getPtySession()
+                    if (pty?.isRunning == true) pty.sendCtrlC()
+                    else showPtyUnavailable()
                 }
             },
             onCtrlD = {
                 scope.launch {
-                    vm.terminalAgent.sendControlChar(activeSessionName, '\u0004')
+                    val pty = vm.terminalAgent.getPtySession()
+                    if (pty?.isRunning == true) pty.sendCtrlD()
+                    else showPtyUnavailable()
                 }
             },
             onCtrlL = {
-                outputLines.clear()
+                scope.launch {
+                    val pty = vm.terminalAgent.getPtySession()
+                    if (pty?.isRunning == true) {
+                        // Ctrl+L must be delivered to the shell/interactive
+                        // program, just like a real terminal. Clear the local
+                        // fallback buffer only when no PTY is available.
+                        pty.writeInput("\u000C")
+                    } else {
+                        showPtyUnavailable()
+                    }
+                }
             },
             focusRequester = focusRequester,
             isPtyActive = isPtyActive.value
         )
 
-        // ── Bottom execution mode indicator ────────────────────
-        ExecutionModeBar(vm = vm)
-    }
-}
-
-// ── Terminal Status Bar ──────────────────────────────────────────────────
-@Composable
-private fun TerminalStatusBar(
-    isPtyActive: Boolean,
-    mode: TermuxEnvironment.ExecMode,
-    sessionName: String,
-    onOpenDrawer: () -> Unit,
-    onClear: () -> Unit
-) {
-    Surface(
-        color = Color(0xFF0A0A0A),
-        tonalElevation = 0.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onOpenDrawer, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.Menu, "Menu", tint = TerminalWhite.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
-            }
-
-            // Indicator dot
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(
-                        if (isPtyActive) TerminalGreen else TerminalYellow,
-                        shape = RoundedCornerShape(4.dp)
-                    )
-            )
-            Spacer(Modifier.width(6.dp))
-
-            Text(
-                if (isPtyActive) "PTY" else "SH",
-                color = if (isPtyActive) TerminalGreen else TerminalYellow,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "${mode.emoji} ${mode.label}",
-                color = TerminalWhite.copy(alpha = 0.5f),
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace
-            )
-
-            Spacer(Modifier.weight(1f))
-
-            Text(
-                "session: $sessionName",
-                color = TerminalWhite.copy(alpha = 0.3f),
-                fontSize = 9.sp,
-                fontFamily = FontFamily.Monospace
-            )
-
-            Spacer(Modifier.width(8.dp))
-
-            // Clear button
-            IconButton(onClick = onClear, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.DeleteSweep, "Clear", tint = TerminalWhite.copy(alpha = 0.4f), modifier = Modifier.size(16.dp))
-            }
-        }
     }
 }
 
@@ -520,217 +455,6 @@ private fun SmallIconButton(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(icon, label, tint = tint, modifier = Modifier.size(14.dp))
         }
-    }
-}
-
-// ── Execution Mode Bar ──────────────────────────────────────────────────
-@Composable
-private fun ExecutionModeBar(vm: HybridAgentViewModel) {
-    val agent = vm.terminalAgent
-    val mode = agent.currentMode
-    val backend = agent.executionBackendDescription
-
-    // Poll PTY session periodically instead of stale `remember`
-    var pid by remember { mutableIntStateOf(-1) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            pid = agent.getPtySession()?.childPid ?: -1
-            kotlinx.coroutines.delay(2000)
-        }
-    }
-
-    Surface(
-        color = Color(0xFF080808),
-        tonalElevation = 0.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = when (mode) {
-                    TermuxEnvironment.ExecMode.TERMUX -> "🐧 Termux"
-                    TermuxEnvironment.ExecMode.SHIZUKU -> "🔑 Shizuku ADB"
-                    TermuxEnvironment.ExecMode.ROOT -> "🛡️ Root Shell"
-                    TermuxEnvironment.ExecMode.FALLBACK -> "⚙️ Fallback"
-                },
-                color = TerminalGreen,
-                fontSize = 9.sp,
-                fontFamily = FontFamily.Monospace
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = backend,
-                color = TerminalWhite.copy(alpha = 0.3f),
-                fontSize = 9.sp,
-                fontFamily = FontFamily.Monospace
-            )
-
-            Spacer(Modifier.weight(1f))
-
-            if (pid > 0) {
-                Text(
-                    text = "PID $pid",
-                    color = TerminalWhite.copy(alpha = 0.25f),
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-        }
-    }
-}
-
-// ── Terminal Welcome Message ────────────────────────────────────────────
-@Composable
-private fun TerminalWelcomeMessage(
-    mode: TermuxEnvironment.ExecMode,
-    onInstallTermux: () -> Unit = {}
-) {
-    Column(
-        modifier = Modifier.padding(8.dp)
-    ) {
-        // ── ASCII Art Header ────────────────────────────────────
-        Text(
-            text = """
-╔══════════════════════════════════════╗
-║       INTENDRA TERMINAL v2.1         ║
-║   Real PTY terminal — Type a command ║
-╚══════════════════════════════════════╝
-            """.trimIndent(),
-            color = TerminalGreen.copy(alpha = 0.6f),
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace,
-            lineHeight = 16.sp
-        )
-        Spacer(Modifier.height(4.dp))
-
-        // ── Mode-specific message ──────────────────────────────
-        when (mode) {
-            TermuxEnvironment.ExecMode.FALLBACK -> {
-                Text(
-                    text = "⚠️ Fallback Mode — No Termux environment detected",
-                    color = TerminalYellow,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "Install Embedded Termux to unlock:",
-                    color = TerminalWhite.copy(alpha = 0.5f),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-                Text(
-                    text = "  • Full Linux bash environment",
-                    color = TerminalWhite.copy(alpha = 0.4f),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-                Text(
-                    text = "  • apt, pkg package manager",
-                    color = TerminalWhite.copy(alpha = 0.4f),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-                Text(
-                    text = "  • python3, git, node, npm, pip",
-                    color = TerminalWhite.copy(alpha = 0.4f),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-                Spacer(Modifier.height(8.dp))
-
-                // Install button
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = TerminalGreen.copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, TerminalGreen.copy(alpha = 0.4f)),
-                    modifier = Modifier
-                        .clickable { onInstallTermux() }
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(4.dp)
-                    ) {
-                        Text(
-                            text = "📥",
-                            fontSize = 14.sp
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = "Install Embedded Termux (~25MB)",
-                            color = TerminalGreen,
-                            fontSize = 12.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "Or ask AI: \"install embedded termux bootstrap\"",
-                    color = TerminalWhite.copy(alpha = 0.3f),
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-            TermuxEnvironment.ExecMode.TERMUX -> {
-                Text(
-                    text = "🐧 Termux mode active — bash ready",
-                    color = TerminalGreen,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "  • PRoot-distro: install Ubuntu/Debian/Arch via \"proot-distro install ubuntu\"",
-                    color = TerminalWhite.copy(alpha = 0.5f),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-                Text(
-                    text = "  • Full Linux distro with apt, pacman, dnf package managers",
-                    color = TerminalWhite.copy(alpha = 0.4f),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-            TermuxEnvironment.ExecMode.SHIZUKU -> {
-                Text(
-                    text = "🔑 Shizuku ADB — elevated shell ready",
-                    color = TerminalBlue,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-            TermuxEnvironment.ExecMode.ROOT -> {
-                Text(
-                    text = "🛡️ Root shell — full system access",
-                    color = TerminalRed.copy(alpha = 0.8f),
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = "Commands: Ctrl+C=Interrupt  Ctrl+D=EOF  Ctrl+L=Clear  Type 'help'",
-            color = TerminalWhite.copy(alpha = 0.25f),
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace
-        )
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = "❯ Waiting for shell...",
-            color = TerminalYellow,
-            fontSize = 13.sp,
-            fontFamily = FontFamily.Monospace
-        )
     }
 }
 

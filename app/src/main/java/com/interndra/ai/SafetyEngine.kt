@@ -162,18 +162,36 @@ class SafetyEngine {
         return result
     }
 
+    /** Strict predicate for code that is about to execute immediately. */
     fun isSafe(command: String): Boolean =
-        validate(command).result != ValidationResult.BLOCKED
+        validate(command).result == ValidationResult.SAFE
 
     fun safeVerdict(command: String): Verdict {
         val report = validate(command)
         return Verdict(
-            safe = report.result != ValidationResult.BLOCKED,
+            safe = report.result == ValidationResult.SAFE,
             reason = report.reason
         )
     }
 
     fun verdict(command: String): Verdict = safeVerdict(command)
+
+    /**
+     * Validation for autonomous/background execution paths.
+     * Those paths have no interactive confirmation UI, so only an explicitly
+     * SAFE command may run. BLOCKED and REQUIRES_CONFIRMATION are both refused.
+     */
+    fun validateForAutonomousExecution(command: String): Report {
+        val report = validate(command)
+        return if (report.result == ValidationResult.REQUIRES_CONFIRMATION) {
+            report.copy(
+                result = ValidationResult.BLOCKED,
+                reason = "Background execution refused: ${report.reason}"
+            )
+        } else {
+            report
+        }
+    }
 
     fun validate(command: String): Report {
         val normalized = normalize(command)
@@ -215,7 +233,11 @@ class SafetyEngine {
         var blocked = false
         for (cmd in commands) {
             if (blocked) {
-                reports.add(Report(ValidationResult.SAFE, "Skipped — earlier command was blocked"))
+                // A skipped command is not safe: keeping SAFE here can mislead
+                // future callers that inspect reports individually. Mark it as
+                // blocked so every consumer must treat the complete chain as
+                // refused after the first hard block.
+                reports.add(Report(ValidationResult.BLOCKED, "Skipped — earlier command was blocked"))
                 continue
             }
             val r = validate(cmd.command)

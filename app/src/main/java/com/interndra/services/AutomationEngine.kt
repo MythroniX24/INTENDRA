@@ -74,30 +74,62 @@ class AutomationEngine(private val context: Context) {
     }
 
     // ── Execute immediately ────────────────────────────────────────────────
-    suspend fun executeNow(rule: AutomationRule): String = withContext(Dispatchers.IO) {
-        try {
-            val result = when (rule.commandType) {
-                "ADB_SHELL"      -> {
-                    val r = ShellExecutor.runAsync(rule.command)
-                    if (r.isSuccess) r.stdout.ifEmpty { "(completed)" }
-                    else "Error: ${r.stderr}"
-                }
-                "ANDROID_INTENT" -> {
-                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
-                        .setData(android.net.Uri.parse(rule.command))
-                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(intent)
-                    "Intent dispatched"
-                }
-                else -> "Unknown command type: ${rule.commandType}"
+    /**
+     * Structured execution API. Callers that need to distinguish refusal,
+     * failure, and success should use this instead of parsing display text.
+     */
+    suspend fun executeRule(rule: AutomationRule): AutomationExecutionResult =
+        withContext(Dispatchers.IO) {
+            // This method may be called from a background/automation context,
+            // so there is no confirmation UI. Use the same pure preflight as
+            // WorkManager to keep both execution paths consistent.
+            val preflight = AutomationPreflight.validate(rule)
+            if (!preflight.success) {
+                Log.w(TAG, "Rule ${rule.id} refused: ${preflight.refusalSource}: ${preflight.error}")
+                return@withContext preflight
             }
-            Log.d(TAG, "Rule ${rule.id} executed: ${result.take(100)}")
-            result
-        } catch (e: Exception) {
-            Log.e(TAG, "Rule ${rule.id} failed: ${e.message}")
-            "Error: ${e.message}"
+            try {
+                when (rule.commandType) {
+                    "ADB_SHELL" -> {
+                        val r = ShellExecutor.runAsync(rule.command)
+                        if (r.isSuccess) {
+                            AutomationExecutionResult(
+                                success = true,
+                                output = r.stdout.ifEmpty { "(completed)" }
+                            )
+                        } else {
+                            AutomationExecutionResult(
+                                success = false,
+                                output = r.stdout,
+                                error = r.stderr.ifEmpty { "exit code ${r.exitCode}" }
+                            )
+                        }
+                    }
+                    "ANDROID_INTENT" -> {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+                            .setData(android.net.Uri.parse(rule.command))
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(intent)
+                        AutomationExecutionResult(success = true, output = "Intent dispatched")
+                    }
+                    else -> AutomationExecutionResult(
+                        success = false,
+                        error = "Unknown command type: ${rule.commandType}"
+                    )
+                }.also { result ->
+                    if (result.success) {
+                        Log.d(TAG, "Rule ${rule.id} executed: ${result.output.take(100)}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Rule ${rule.id} failed: ${e.message}")
+                AutomationExecutionResult(success = false, error = e.message ?: "automation failed")
+            }
         }
-    }
+
+    /** Backward-compatible display-text API used by existing callers. */
+    suspend fun executeNow(rule: AutomationRule): String =
+        executeRule(rule).legacyMessage()
 
     // ── Cancel scheduled rules ────────────────────────────────────────────
     fun cancelRule(ruleId: Long) {

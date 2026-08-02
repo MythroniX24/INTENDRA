@@ -1,6 +1,7 @@
 package com.interndra.plugin
 
 import android.content.Context
+import com.interndra.security.ShellArgumentPolicy
 import com.interndra.service.ShellExecutor
 
 class PackageManagerPlugin(context: Context) : IPlugin {
@@ -12,7 +13,8 @@ class PackageManagerPlugin(context: Context) : IPlugin {
     override suspend fun initialize(context: Context) = true
     override fun getSupportedCommands() = listOf("${CMD_PREFIX}install","${CMD_PREFIX}update","${CMD_PREFIX}upgrade","${CMD_PREFIX}list","${CMD_PREFIX}search","${CMD_PREFIX}uninstall","${CMD_PREFIX}info","${CMD_PREFIX}detect")
 
-    override suspend fun execute(command: String, args: Map<String, String>) = try {
+    override suspend fun execute(command: String, args: Map<String, String>) =
+        PluginExecutionGuard.rejection(command, args) ?: try {
         when (command.removePrefix(CMD_PREFIX)) {
             "install" -> install(args); "update" -> update(); "upgrade" -> upgrade(args)
             "list" -> list(args); "search" -> search(args); "uninstall" -> uninstall(args)
@@ -38,10 +40,10 @@ class PackageManagerPlugin(context: Context) : IPlugin {
     }
     private suspend fun install(args: Map<String, String>): PluginResult {
         val name = args["name"] ?: return PluginResult(false, "", error = "Missing 'name'")
-        return shell(when (args["type"] ?: "pkg") { "pip" -> "pip install $name 2>&1 || pip3 install $name 2>&1"; "npm" -> "npm install $name 2>&1"; else -> "pkg install -y $name 2>&1" }, 120_000L)
+        return shell(when (args["type"] ?: "pkg") { "pip" -> "pip install ${ShellArgumentPolicy.shellQuote(name)} 2>&1 || pip3 install ${ShellArgumentPolicy.shellQuote(name)} 2>&1"; "npm" -> "npm install ${ShellArgumentPolicy.shellQuote(name)} 2>&1"; else -> "pkg install -y ${ShellArgumentPolicy.shellQuote(name)} 2>&1" }, 120_000L)
     }
     private suspend fun update() = shell("pkg update -y 2>&1", 120_000L)
-    private suspend fun upgrade(args: Map<String, String>) = shell(if (args["name"] == "all") "pkg upgrade -y 2>&1" else "pkg install -y ${args["name"] ?: "all"} 2>&1", 180_000L)
+    private suspend fun upgrade(args: Map<String, String>) = shell(if (args["name"] == "all") "pkg upgrade -y 2>&1" else "pkg install -y ${ShellArgumentPolicy.shellQuote(args["name"] ?: "all")} 2>&1", 180_000L)
     private suspend fun list(args: Map<String, String>): PluginResult {
         val sb = StringBuilder()
         if ((args["type"] ?: "all") in listOf("all","pkg")) { val r = shell("pkg list-installed 2>&1 | head -40"); if (r.success) sb.appendLine("📦 pkg:\n${r.output.take(500)}\n") }
@@ -50,16 +52,16 @@ class PackageManagerPlugin(context: Context) : IPlugin {
     }
     private suspend fun search(args: Map<String, String>): PluginResult {
         val query = args["query"] ?: return PluginResult(false, "", error = "Missing 'query'")
-        return shell("pkg search $query 2>&1 | head -30")
+        return shell("pkg search ${ShellArgumentPolicy.shellQuote(query)} 2>&1 | head -30")
     }
     private suspend fun uninstall(args: Map<String, String>): PluginResult {
         val name = args["name"] ?: return PluginResult(false, "", error = "Missing 'name'")
-        return shell(when (args["type"] ?: "pkg") { "pip" -> "pip uninstall -y $name 2>&1 || pip3 uninstall -y $name 2>&1"; "npm" -> "npm uninstall $name 2>&1"; else -> "pkg uninstall $name 2>&1" })
+        return shell(when (args["type"] ?: "pkg") { "pip" -> "pip uninstall -y ${ShellArgumentPolicy.shellQuote(name)} 2>&1 || pip3 uninstall -y ${ShellArgumentPolicy.shellQuote(name)} 2>&1"; "npm" -> "npm uninstall ${ShellArgumentPolicy.shellQuote(name)} 2>&1"; else -> "pkg uninstall ${ShellArgumentPolicy.shellQuote(name)} 2>&1" })
     }
     private suspend fun info(args: Map<String, String>): PluginResult {
         val name = args["name"] ?: return PluginResult(false, "", error = "Missing 'name'")
-        val r = shell("pkg show $name 2>&1 | head -30")
-        return if (r.success && !r.error.contains("not found")) r else shell("pip show $name 2>&1 || pip3 show $name 2>&1")
+        val r = shell("pkg show ${ShellArgumentPolicy.shellQuote(name)} 2>&1 | head -30")
+        return if (r.success && !r.error.contains("not found")) r else shell("pip show ${ShellArgumentPolicy.shellQuote(name)} 2>&1 || pip3 show ${ShellArgumentPolicy.shellQuote(name)} 2>&1")
     }
     override fun teardown() {}
 }

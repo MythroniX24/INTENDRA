@@ -186,7 +186,7 @@ class ShizukuManager(private val context: Context) {
 
         val startMs = System.currentTimeMillis()
         try {
-            Log.d(TAG, "Executing via Shizuku (UID $shizukuUid): ${command.take(100)}")
+            Log.d(TAG, "Executing via Shizuku (UID $shizukuUid): ${com.interndra.security.SensitiveDataRedactor.redact(command).take(100)}")
 
             val process = newShizukuProcess(arrayOf("sh", "-c", command)) ?: return ShellExecutionResult(
                 "", "Shizuku: unable to create process.", -1, false,
@@ -288,7 +288,7 @@ class ShizukuManager(private val context: Context) {
 
         val startMs = System.currentTimeMillis()
         try {
-            Log.d(TAG, "Streaming via Shizuku: ${command.take(80)}")
+            Log.d(TAG, "Streaming via Shizuku: ${com.interndra.security.SensitiveDataRedactor.redact(command).take(80)}")
             val process = newShizukuProcess(arrayOf("sh", "-c", command)) ?: return ShellExecutionResult(
                 "", "Shizuku: unable to create process.", -1, false,
                 backend = executionBackend,

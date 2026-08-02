@@ -63,23 +63,43 @@ class HybridExecutionEngine(
         session: String,
         userInput: String,
         intent: AiIntent,
+        /** True only after the interactive confirmation dialog was accepted. */
+        approvedByUser: Boolean = false,
         onStepResult: (ExecutionResult) -> Unit
     ) {
         // Re-validate all commands together — catches cross-command context the old
-        // single-check isSafe() could miss.
+        // single-check isSafe() could miss. Refuse the whole chain before any
+        // side effect if one step is blocked or needs unapproved confirmation.
         val safetyReports = safety.validateAll(intent.commands)
+        val firstRefused = safetyReports.indexOfFirst {
+            it.result == SafetyEngine.ValidationResult.BLOCKED ||
+                (it.result == SafetyEngine.ValidationResult.REQUIRES_CONFIRMATION && !approvedByUser)
+        }
+        if (firstRefused >= 0) {
+            safetyReports.forEachIndexed { index, report ->
+                if (report.result != SafetyEngine.ValidationResult.SAFE || index == firstRefused) {
+                    onStepResult(ExecutionResult(
+                        stepIndex = index,
+                        success = false,
+                        error = "Refused by SafetyEngine: ${report.reason}"
+                    ))
+                }
+            }
+            return
+        }
 
         intent.commands.forEachIndexed { index, cmd ->
             val report = safetyReports.getOrNull(index)
 
-            // Hard block
-            if (report?.result == SafetyEngine.ValidationResult.BLOCKED) {
-                Log.w(TAG, "Step $index blocked: ${report.reason}")
+            if (report?.result == SafetyEngine.ValidationResult.BLOCKED ||
+                (report?.result == SafetyEngine.ValidationResult.REQUIRES_CONFIRMATION && !approvedByUser)) {
+                val reason = report?.reason ?: "Command was not approved"
+                Log.w(TAG, "Step $index refused by SafetyEngine: $reason")
                 onStepResult(ExecutionResult(
                     stepIndex = index,
                     success   = false,
                     output    = "",
-                    error     = "Blocked by SafetyEngine: ${report.reason}"
+                    error     = "Refused by SafetyEngine: ${reason}"
                 ))
                 return@forEachIndexed
             }

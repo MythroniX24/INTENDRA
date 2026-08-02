@@ -63,17 +63,25 @@ class WorkflowEngine(
         // ── 1. Pre-flight safety validation on ALL steps ──────────────────
         val commands = workflow.steps.map { it.command }
         val reports = safety.validateAll(commands)
-        val blockedStep = reports.indexOfFirst { it.result == SafetyEngine.ValidationResult.BLOCKED }
-        if (blockedStep >= 0) {
-            val reason = reports[blockedStep].reason
-            narration(NarrationLevel.BLOCKED, "Step ${blockedStep + 1} blocked: $reason")
+        // Workflows run without an interactive confirmation dialog. Do not
+        // start any step unless every step is explicitly SAFE; otherwise a
+        // later confirmation-required step could be reached after earlier
+        // steps had already changed the device.
+        val refusedStep = reports.indexOfFirst { it.result != SafetyEngine.ValidationResult.SAFE }
+        if (refusedStep >= 0) {
+            val report = reports[refusedStep]
+            narration(
+                if (report.result == SafetyEngine.ValidationResult.BLOCKED) NarrationLevel.BLOCKED
+                else NarrationLevel.NEEDS_PERMISSION,
+                "Step ${refusedStep + 1} refused: ${report.reason}"
+            )
             return WorkflowRunResult(
                 workflowName = workflow.name,
                 stepResults = reports.mapIndexed { i, r ->
                     ExecutionResult(
                         stepIndex = i,
                         success = false,
-                        error = if (i == blockedStep) reason else "Skipped — earlier step blocked"
+                        error = if (i == refusedStep) r.reason else "Skipped — workflow was refused before execution"
                     )
                 },
                 overallSuccess = false,
