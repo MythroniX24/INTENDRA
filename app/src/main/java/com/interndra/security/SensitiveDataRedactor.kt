@@ -7,7 +7,10 @@ package com.interndra.security
  */
 object SensitiveDataRedactor {
     private val labeledSecret = Regex(
-        "(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|bearer|password|secret|otp|pin)(\\s*[:=]\\s*)([^\\s,;]+)"
+        // "authorization"/"bearer" labels are deliberately excluded here: a single-word
+        // value pattern could only ever consume "Bearer" from "Authorization: Bearer <token>",
+        // leaving the real token exposed. The dedicated bearer regex below handles that form.
+        "(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|otp|pin)(\\s*[:=]\\s*)([^\\s,;]+)"
     )
     private val bearer = Regex("(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]{8,}")
     private val openAiLike = Regex("\\b(?:sk|sess)[-_][A-Za-z0-9_-]{12,}\\b")
@@ -18,10 +21,12 @@ object SensitiveDataRedactor {
     fun redact(value: String): String {
         if (value.isEmpty()) return value
         return value
+            // Bearer first: "Authorization: Bearer <token>" needs the dedicated
+            // two-word pattern, otherwise only "Bearer" would be consumed.
+            .replace(bearer, "Bearer ***REDACTED***")
             .replace(labeledSecret) { match ->
                 "${match.groupValues[1]}${match.groupValues[2]}***REDACTED***"
             }
-            .replace(bearer, "Bearer ***REDACTED***")
             .replace(openAiLike, "***REDACTED_TOKEN***")
             .replace(googleLike, "***REDACTED_TOKEN***")
             .replace(githubLike, "***REDACTED_TOKEN***")
