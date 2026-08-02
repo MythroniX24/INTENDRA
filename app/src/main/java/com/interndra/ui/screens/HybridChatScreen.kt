@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import com.interndra.ai.JailbreakLevel
 import com.interndra.ai.tasks.TaskPlan
 import com.interndra.data.model.*
+import com.interndra.search.SourceMarker
 import com.interndra.ui.components.*
 import com.interndra.ui.theme.LocalInterndraColors
 import com.interndra.ui.theme.*
@@ -498,9 +499,15 @@ private fun MessageGroup(
                         if (msg.isLoading) {
                             ThinkingIndicator()
                         } else {
+                            // Web-search sources live in a hidden marker; the visible
+                            // text stays clean (no links dumped in the chat). They are
+                            // rendered below as a collapsible Sources box.
+                            val sources = remember(msg.id, msg.content) {
+                                SourceMarker.decode(msg.content)
+                            }
                             val displayText = if (isStreaming) streamedText else msg.content
                             RichMarkdownText(
-                                markdown = displayText,
+                                markdown = SourceMarker.strip(displayText),
                                 modifier = Modifier.fillMaxWidth(),
                                 onLinkClick = { url ->
                                     val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
@@ -508,14 +515,145 @@ private fun MessageGroup(
                                     runCatching { context.startActivity(intent) }
                                 }
                             )
+                            if (sources.isNotEmpty()) {
+                                Spacer(Modifier.height(10.dp))
+                                SourcesBox(
+                                    sources = sources,
+                                    colors = colors,
+                                    messageId = msg.id
+                                )
+                            }
                         }
 
                         // Message actions bar
                         if (isLast && !msg.isLoading) {
                             MessageActionsBar(
-                                onCopy = { onCopy(msg.content) },
+                                onCopy = { onCopy(SourceMarker.strip(msg.content)) },
                                 onRegenerate = onRegenerate,
                                 isUserMessage = false
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Collapsible Sources Box (web search) ──────────────────────────────────
+// Shown below an AI message that used web search. The chat text stays clean;
+// tapping the header reveals the links (like Claude's source pills).
+@Composable
+private fun SourcesBox(
+    sources: List<SourceMarker.SourceLink>,
+    colors: InterndraColors,
+    messageId: Long
+) {
+    // Key the expansion state by message id so deletion/reordering of older
+    // messages never leaks an expanded flag onto a different message.
+    var expanded by remember(messageId) { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = colors.inputFieldBg.copy(alpha = 0.6f),
+        border = BorderStroke(1.dp, colors.inputFieldBorder.copy(alpha = 0.6f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column {
+            // Header row — tap to expand/collapse
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Language,
+                    contentDescription = null,
+                    tint = colors.accent,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Sources",
+                    color = colors.inputTextColor,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(colors.accent.copy(alpha = 0.15f))
+                        .padding(horizontal = 7.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        "${sources.size}",
+                        color = colors.accent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Icon(
+                    if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (expanded) "Collapse sources" else "Show sources",
+                    tint = TerminalWhite.copy(alpha = 0.5f),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            // Expanded link list
+            AnimatedVisibility(visible = expanded) {
+                Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
+                    sources.forEachIndexed { i, s ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(Intent.ACTION_VIEW, Uri.parse(s.url))
+                                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        )
+                                    }
+                                }
+                                .padding(horizontal = 8.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "${i + 1}.",
+                                color = colors.accent,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    s.title.ifBlank { s.url },
+                                    color = colors.inputTextColor,
+                                    fontSize = 13.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(1.dp))
+                                Text(
+                                    SourceMarker.hostname(s.url),
+                                    color = TerminalWhite.copy(alpha = 0.4f),
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Icon(
+                                Icons.Default.OpenInNew,
+                                contentDescription = null,
+                                tint = TerminalWhite.copy(alpha = 0.4f),
+                                modifier = Modifier.size(14.dp)
                             )
                         }
                     }

@@ -2,6 +2,7 @@ package com.interndra.data.local
 
 import com.interndra.ai.SmartMemoryEngine
 import com.interndra.data.model.*
+import com.interndra.search.SourceMarker
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -51,8 +52,11 @@ class AgentRepository(private val db: AgentDatabase) {
             when (msg.role) {
                 MessageRole.USER -> Pair("user", msg.content)
                 MessageRole.AI   -> {
-                    // Strip our metadata footer (*Cloud AI · Xms*) before sending to AI
-                    val clean = msg.content
+                    // Strip the hidden web-source marker block FIRST (it sits at
+                    // the very end), then our metadata footer (*Cloud AI · Xms*).
+                    // Order matters: with the marker present the footer regex
+                    // anchored at $ would otherwise never match.
+                    val clean = SourceMarker.strip(msg.content)
                         .replace(Regex("""\n\n\*[^*]+\*\s*$"""), "")
                         .trim()
                     if (clean.isNotBlank() && clean != "...") Pair("assistant", clean)

@@ -1764,8 +1764,10 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             if (chatMessageId != null && chatOutputLines.isNotEmpty()) {
                 val allOutput = chatOutputLines.joinToString("\n\n")
                 val existing  = repo.getMessageText(chatMessageId) ?: ""
+                // Insert output BEFORE the hidden sources marker so appended
+                // command results stay visible (strip() hides the marker only).
                 val updated   = if (existing.isBlank()) allOutput
-                                else "$existing\n\n$allOutput"
+                                else SourceMarker.insertBeforeMarker(existing, allOutput)
                 repo.updateAiMessage(chatMessageId, updated)
             }
             // Brief delay so user sees the final status before clearing
@@ -1816,10 +1818,14 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             val detail = if (output.isNotBlank()) output.take(200) else "(no output)"
             stepOutputs.add("$icon **${step.label}**\n```\n$detail\n```")
 
-            // Rebuild message cleanly each step (no duplication)
+            // Rebuild message cleanly each step (no duplication). Keep the
+            // hidden sources marker at the end; insert the task block before it.
             val taskBlock = stepOutputs.joinToString("\n")
             repo.updateAiMessage(chatMessageId,
-                "$originalReply\n\n### ${intent.action.replace('_', ' ')}\n$taskBlock")
+                SourceMarker.insertBeforeMarker(
+                    originalReply,
+                    "### ${intent.action.replace('_', ' ')}\n$taskBlock"
+                ))
         }
 
         // Log to timeline
@@ -2334,7 +2340,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             sb.appendLine("Chat messages: ${messages.size} | Logs: ${logs.size} | Knowledge: ${vault.size}")
             sb.appendLine("\n=== Chat Messages ===")
             messages.forEach { msg ->
-                sb.appendLine("[${msg.role}] ${SensitiveDataRedactor.redact(msg.content)}")
+                sb.appendLine("[${msg.role}] ${SensitiveDataRedactor.redact(SourceMarker.strip(msg.content))}")
             }
             sb.appendLine("\n=== Terminal Logs ===")
             logs.forEach { log ->
@@ -2372,20 +2378,14 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     }
 
     /**
-     * Builds a compact "Sources" block using markdown link syntax.
-     * The app renders AI messages through the native Compose RichMarkdownText
-     * component, which turns `[title](url)` into a tappable link — so the user
-     * sees a clean clickable title, not a long raw URL cluttering the chat.
+     * Embeds web-search sources as a hidden marker block at the end of the AI
+     * reply. The reply text itself stays clean — no links dumped into the
+     * chat. The UI (HybridChatScreen) parses the marker and renders a
+     * collapsible "Sources" box below the message; tapping it reveals the
+     * links. See [com.interndra.search.SourceMarker].
      */
-    private fun buildSourcesBlock(sources: List<SearchResult>): String {
-        if (sources.isEmpty()) return ""
-        val sb = StringBuilder("\n\n**🔗 Sources:**\n")
-        sources.take(5).forEachIndexed { i, r ->
-            val title = r.title.ifBlank { "Source ${i + 1}" }.take(80)
-            sb.append("${i + 1}. [$title](${r.url})\n")
-        }
-        return sb.toString().trimEnd()
-    }
+    private fun buildSourcesBlock(sources: List<SearchResult>): String =
+        SourceMarker.encode(sources)
 
     private fun buildAiReply(
         intent: AiIntent,
