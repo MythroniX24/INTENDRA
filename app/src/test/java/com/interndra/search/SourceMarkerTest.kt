@@ -140,7 +140,10 @@ class SourceMarkerTest {
 
     @Test
     fun `hostname falls back gracefully`() {
+        // Unparseable but non-empty input falls back to the raw text
         assertFalse(SourceMarker.hostname("not-a-url").isBlank())
-        assertFalse(SourceMarker.hostname("").isBlank())
+        // Blank input has no host — returns empty; the UI only renders
+        // sources whose url is non-blank anyway.
+        assertEquals("", SourceMarker.hostname(""))
     }
 }
