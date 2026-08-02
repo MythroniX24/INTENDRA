@@ -1755,6 +1755,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 )
             }
         }
+        )
 
         // Phase 11 FIX: removed the artificial `delay(200)` — engine.execute
         // runs its callback synchronously inside its forEachIndexed loop, so
