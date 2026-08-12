@@ -631,7 +631,28 @@ private val KEYWORDS = setOf(
     "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP",
     "ALTER", "TABLE", "INTO", "VALUES", "SET", "JOIN", "LEFT", "RIGHT", "INNER",
     "GROUP", "BY", "ORDER", "HAVING", "LIMIT", "OFFSET", "AS", "ON", "AND", "OR",
-    "NOT", "NULL", "IS", "LIKE", "IN", "BETWEEN", "COUNT", "SUM", "AVG", "MAX", "MIN"
+    "NOT", "NULL", "IS", "LIKE", "IN", "BETWEEN", "COUNT", "SUM", "AVG", "MAX", "MIN",
+    // C#
+    "using", "namespace", "foreach", "get", "set", "partial", "record", "readonly",
+    "ref", "out", "params", "virtual", "struct", "string", "bool", "delegate", "event",
+    "lock", "base", "sealed",
+    // Dart
+    "final", "dynamic", "typedef", "mixin", "with", "assert", "factory", "late",
+    "required", "void",
+    // PHP
+    "namespace", "echo", "require", "include", "require_once", "include_once",
+    // Swift
+    "func", "let", "guard", "defer", "nil",
+    // Rust
+    "fn", "mut", "impl", "trait", "pub", "crate", "mod", "match",
+    // Go
+    "map", "chan", "go", "select", "range"
+)
+
+/** Languages where a PascalCase identifier is typically a type/class name. */
+private val TYPE_LIKE_LANGS = setOf(
+    "kotlin", "kt", "java", "cs", "csharp", "dart", "cpp", "c++", "c",
+    "ts", "typescript", "swift", "go", "rust", "rs"
 )
 
 /** Basic syntax highlighting for common languages */
@@ -694,12 +715,26 @@ private fun highlightSyntax(line: String, language: String): AnnotatedString {
                 }
             }
             if (!matched) {
-                // Numbers
-                if (line[i].isDigit()) {
+                // Numbers (incl. negative, decimals and hex)
+                if (line[i].isDigit() || (line[i] == '-' && i + 1 < line.length && line[i + 1].isDigit())) {
                     val start = i
-                    while (i < line.length && (line[i].isDigit() || line[i] == '.')) i++
+                    while (i < line.length &&
+                        (line[i].isDigit() || line[i] == '.' || line[i] == 'x' || line[i] == 'X' ||
+                         line[i] in 'a'..'f' || line[i] in 'A'..'F')) i++
                     withStyle(SpanStyle(color = VaultCyan)) {
                         append(line.substring(start, i))
+                    }
+                } else if (line[i].isLetter() && lang in TYPE_LIKE_LANGS) {
+                    // PascalCase identifiers are usually type/class names
+                    val start = i
+                    while (i < line.length && (line[i].isLetterOrDigit() || line[i] == '_')) i++
+                    val word = line.substring(start, i)
+                    if (word.length > 1 && word[0].isUpperCase()) {
+                        withStyle(SpanStyle(color = Color(0xFF82AAFF), fontWeight = FontWeight.Medium)) {
+                            append(word)
+                        }
+                    } else {
+                        append(word)
                     }
                 } else {
                     append(line[i])

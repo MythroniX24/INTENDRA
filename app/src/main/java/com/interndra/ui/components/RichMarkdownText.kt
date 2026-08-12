@@ -7,7 +7,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,9 +28,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -41,7 +47,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -58,6 +67,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.size.Size
@@ -710,6 +721,8 @@ private fun encodeMermaidBase64(code: String): String {
                 .crossfade(true)
                 .build()
         }
+        var failed by remember(urlText) { mutableStateOf(false) }
+        var showViewer by remember(urlText) { mutableStateOf(false) }
 
         Column(Modifier.fillMaxWidth()) {
             Box(
@@ -718,32 +731,91 @@ private fun encodeMermaidBase64(code: String): String {
                     .background(SurfaceLight.copy(0.08f))
                     .border(1.dp, SurfaceLight.copy(0.3f), RoundedCornerShape(10.dp))
             ) {
-                // Loading indicator (behind image, shown until crossfade completes)
-                Box(
-                    Modifier.fillMaxWidth().heightIn(min=120.dp).padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        Modifier.size(24.dp),
-                        color = Accent,
-                        strokeWidth = 2.dp
+                if (failed) {
+                    // ── Error state ────────────────────────────────────────
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(min = 120.dp).padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text("🖼️", fontSize = 24.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Text("Image failed to load", color = Danger, fontSize = 12.sp)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            urlText.takeLast(40),
+                            color = TerminalWhite.copy(0.4f), fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Accent.copy(0.12f),
+                            border = BorderStroke(1.dp, Accent.copy(0.3f)),
+                            modifier = Modifier.clickable {
+                                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(urlText))
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                runCatching { context.startActivity(intent) }
+                            }
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text("🌐", fontSize = 11.sp)
+                                Text("Open in browser", color = Accent, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                } else {
+                    // Loading indicator (behind image, shown until crossfade completes)
+                    Box(
+                        Modifier.fillMaxWidth().heightIn(min = 120.dp).padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            Modifier.size(24.dp),
+                            color = Accent,
+                            strokeWidth = 2.dp
+                        )
+                    }
+
+                    // Actual image loaded via Coil (with disk cache). Tap to open
+                    // the full-screen zoomable viewer.
+                    AsyncImage(
+                        model = request,
+                        contentDescription = altText,
+                        imageLoader = imageLoader,
+                        onError = { failed = true },
+                        onSuccess = { failed = false },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showViewer = true },
+                        contentScale = ContentScale.Fit
                     )
                 }
 
-                // Actual image loaded via Coil (with disk cache)
-                AsyncImage(
-                    model = request,
-                    contentDescription = altText,
-                    imageLoader = imageLoader,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(urlText))
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            runCatching { context.startActivity(intent) }
-                        },
-                    contentScale = ContentScale.Fit
-                )
+                // Full-screen hint badge (overlaid on the image)
+                if (!failed) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color.Black.copy(alpha = 0.55f),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(8.dp)
+                            .clickable { showViewer = true }
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(Icons.Default.ZoomIn, null, tint = Color.White, modifier = Modifier.size(12.dp))
+                            Text("Full screen", color = Color.White, fontSize = 10.sp)
+                        }
+                    }
+                }
             }
 
             // Caption / URL
@@ -758,6 +830,10 @@ private fun encodeMermaidBase64(code: String): String {
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+        }
+
+        if (showViewer) {
+            FullScreenImageViewer(url = urlText, onDismiss = { showViewer = false })
         }
     } else {
         // ── No URL — show placeholder only ──────────────────────────────
@@ -776,6 +852,190 @@ private fun encodeMermaidBase64(code: String): String {
 }
 
 @Composable private fun HorizontalRuleBlock() { Box(Modifier.fillMaxWidth().padding(vertical=8.dp).height(1.dp).background(TerminalWhite.copy(0.15f))) }
+
+// ── Full-screen zoomable image viewer ────────────────────────────────────
+// Tap an inline markdown image to open it full screen on a black backdrop.
+// Pinch to zoom (1x–8x), use the +/- buttons, and tap anywhere to close.
+@Composable
+private fun FullScreenImageViewer(
+    url: String,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val imageLoader = remember { ImageCacheUtil.getImageLoader(context) }
+    val request = remember(url) {
+        ImageRequest.Builder(context)
+            .data(url)
+            .memoryCacheKey(url)
+            .diskCacheKey(url)
+            .crossfade(true)
+            .build()
+    }
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            // Zoomable image area
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            scale = (scale * zoom).coerceIn(1f, 8f)
+                            val maxOffset = (scale - 1f) * 600f
+                            offset = Offset(
+                                (offset.x + pan.x).coerceIn(-maxOffset, maxOffset),
+                                (offset.y + pan.y).coerceIn(-maxOffset, maxOffset)
+                            )
+                        }
+                    }
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            translationX = offset.x
+                            translationY = offset.y
+                        }
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onDismiss
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AsyncImage(
+                        model = request,
+                        contentDescription = "Full screen image",
+                        imageLoader = imageLoader,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+
+            // Top-right controls: zoom %, open in browser, close
+            Row(
+                Modifier.align(Alignment.TopEnd).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(shape = RoundedCornerShape(8.dp), color = Color.White.copy(alpha = 0.12f)) {
+                    Text(
+                        "${(scale * 100).toInt()}%",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+                Surface(
+                    shape = CircleShape,
+                    color = Color.White.copy(alpha = 0.12f),
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clickable {
+                            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            runCatching { context.startActivity(intent) }
+                        }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.OpenInNew, "Open in browser", tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                }
+                Surface(
+                    shape = CircleShape,
+                    color = Color.White.copy(alpha = 0.12f),
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clickable(onClick = onDismiss)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Close, "Close", tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+
+            // Bottom zoom controls
+            Row(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                ZoomCircleButton(Icons.Default.ZoomOut, "Zoom out") {
+                    // Re-clamp the pan offset with the new scale so the image can
+                    // never get stranded off-screen after button zooming.
+                    val newScale = (scale / 1.5f).coerceIn(1f, 8f)
+                    scale = newScale
+                    val maxOffset = (newScale - 1f) * 600f
+                    offset = Offset(
+                        offset.x.coerceIn(-maxOffset, maxOffset),
+                        offset.y.coerceIn(-maxOffset, maxOffset)
+                    )
+                }
+                Text(
+                    "Pinch to zoom",
+                    color = Color.White.copy(alpha = 0.5f),
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                ZoomCircleButton(Icons.Default.ZoomIn, "Zoom in") {
+                    val newScale = (scale * 1.5f).coerceIn(1f, 8f)
+                    scale = newScale
+                    val maxOffset = (newScale - 1f) * 600f
+                    offset = Offset(
+                        offset.x.coerceIn(-maxOffset, maxOffset),
+                        offset.y.coerceIn(-maxOffset, maxOffset)
+                    )
+                }
+            }
+
+            // Reset button
+            if (scale > 1.01f || offset != Offset.Zero) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color.White.copy(alpha = 0.12f),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(16.dp)
+                        .clickable {
+                            scale = 1f
+                            offset = Offset.Zero
+                        }
+                ) {
+                    Text(
+                        "Reset",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ZoomCircleButton(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, onClick: () -> Unit) {
+    Surface(
+        shape = CircleShape,
+        color = Color.White.copy(alpha = 0.12f),
+        modifier = Modifier
+            .size(42.dp)
+            .clickable(onClick = onClick)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, desc, tint = Color.White, modifier = Modifier.size(20.dp))
+        }
+    }
+}
 
 // ── Math (LaTeX → Unicode, zero dependencies) ─────────────────────────────
 // Best-effort renderer for the common constructs AI replies use: Greek
