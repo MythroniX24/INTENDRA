@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -105,7 +106,10 @@ fun RichMarkdownText(
     Column(modifier = modifier.fillMaxWidth()) {
         // Copy entire response button (shown on hover/long press area)
         Box(Modifier.fillMaxWidth()) {
-            Column {
+            // SelectionContainer lets users long-press to select/copy AI text
+            // (links still open on tap via ClickableText).
+            SelectionContainer {
+                Column {
                 blocks.forEach { block ->
                     when (block) {
                         is EnhancedBlock.Heading -> HeadingBlock(block)
@@ -168,6 +172,7 @@ fun RichMarkdownText(
                         }
                     }
                 }
+                }
             }
         }
     }
@@ -208,6 +213,33 @@ enum class CalloutType { INFO, SUCCESS, WARNING, DANGER, TIP, QUESTION, FIRE }
 
 // ── Parser (ChatGPT-level) ────────────────────────────────────────────────
 
+/** Compiled once at class-load: the parser evaluates several of these against
+ *  every line, so constructing them per line would dominate the cost of long
+ *  (10k+ char) responses. Hoisting keeps a full re-parse on each streaming
+ *  commit cheap. */
+private val P_HR_RE = Regex("""^\s*([-*_])\1{2,}\s*$""")
+private val P_DETAILS_RE = Regex("""^<details>\s*(open)?\s*$""", RegexOption.IGNORE_CASE)
+private val P_SUMMARY_RE = Regex("""^\s*<summary>\s*(.+?)\s*</summary>\s*$""", RegexOption.IGNORE_CASE)
+private val P_HEADING_RE = Regex("""^(#{1,6})\s+(.+?)(?:\s*\{#\w+\})?\s*$""")
+private val P_DEFLIST_RE = Regex("""^\s*.+\s*::\s*.+$""")
+private val P_CHECK_ITEM_RE = Regex("""^\s*[-*]\s+\[[ xX]\]\s+.+""")
+private val P_CHECK_PARSE_RE = Regex("""^\s*[-*]\s+\[([ xX])\]\s+(.+)$""")
+private val P_TAG_RE = Regex("""^:(\w[\w-]*):\s*(.+)$""")
+private val P_TAG_START_RE = Regex("""^:\w[\w-]*:\s+""")
+private val P_BULLET_RE = Regex("""^\s*[-*+]\s+.+""")
+private val P_BULLET_NO_CHECK_RE = Regex("""^\s*[-*+]\s+\[[ xX]\]""")
+private val P_BULLET_PARSE_RE = Regex("""^(\s*)[-*+]\s+(.+)$""")
+private val P_BULLET_BREAK_RE = Regex("""^\s*[-*+]\s+""")
+private val P_NUMBERED_RE = Regex("""^\s*\d+[.)]\s+.+""")
+private val P_NUMBERED_PARSE_RE = Regex("""^\s*(\d+)[.)]\s+(.+)$""")
+private val P_NUMBERED_BREAK_RE = Regex("""^\s*\d+[.)]\s+""")
+private val P_FOOTNOTE_RE = Regex("""^\s*\[\^[\w-]+\]:\s+.+""")
+private val P_FOOTNOTE_PARSE_RE = Regex("""^\s*\[\^([\w-]+)\]:\s+(.+)$""")
+private val P_FOOTNOTE_BREAK_RE = Regex("""^\s*\[\^[\w-]+\]:\s+""")
+private val P_TABLE_SEP_RE = Regex("""^\s*\|?[\s:|-]+\|?\s*$""")
+private val P_TABLE_ROW_RE = Regex("""^\|.+?\|.*\|""")
+private val P_SPOILER_RE = Regex("""^.*\|\|.+\|\|.*$""")
+
 object EnhancedMarkdownParser {
     /**
      * Parse markdown into renderable blocks.
@@ -226,7 +258,7 @@ object EnhancedMarkdownParser {
             val line = lines[i]
             if (line.isBlank()) { i++; continue }
             // HR
-            if (line.matches(Regex("""^\s*([-*_])\1{2,}\s*$"""))) {
+            if (line.matches(P_HR_RE)) {
                 blocks.add(EnhancedBlock.HorizontalRule); i++; continue
             }
             // Math display
@@ -269,18 +301,18 @@ object EnhancedMarkdownParser {
                 }; continue
             }
             // Collapsible
-            val dm = Regex("""^<details>\s*(open)?\s*$""", RegexOption.IGNORE_CASE).find(line.trim())
+            val dm = P_DETAILS_RE.find(line.trim())
             if (dm != null) {
                 val open = dm.groupValues[1].lowercase() == "open"
                 var summary = ""; i++
-                val sm = if (i < lines.size) Regex("""^\s*<summary>\s*(.+?)\s*</summary>\s*$""", RegexOption.IGNORE_CASE).find(lines[i]) else null
+                val sm = if (i < lines.size) P_SUMMARY_RE.find(lines[i]) else null
                 if (sm != null) { summary = sm.groupValues[1]; i++ }
                 val cl = mutableListOf<String>()
                 while (i < lines.size && !lines[i].trim().startsWith("</details>")) { cl.add(lines[i]); i++ }
                 i++; blocks.add(EnhancedBlock.Collapsible(summary, cl.joinToString("\n"), open)); continue
             }
             // Heading
-            val hm = Regex("""^(#{1,6})\s+(.+?)(?:\s*\{#\w+\})?\s*$""").find(line)
+            val hm = P_HEADING_RE.find(line)
             if (hm != null) {
                 val lvl = hm.groupValues[1].length; var t = hm.groupValues[2].trim()
                 val s = when { t.startsWith("==") && t.endsWith("==") -> { t = t.drop(1).dropLast(1).trim(); HeadingStyle.CENTERED }
@@ -289,9 +321,9 @@ object EnhancedMarkdownParser {
                 blocks.add(EnhancedBlock.Heading(lvl, t, s)); i++; continue
             }
             // Definition list
-            if (Regex("""^\s*.+\s*::\s*.+$""").matches(line)) {
+            if (P_DEFLIST_RE.matches(line)) {
                 val terms = mutableListOf<Pair<String, String>>()
-                while (i < lines.size && Regex("""^\s*.+\s*::\s*.+$""").matches(lines[i])) {
+                while (i < lines.size && P_DEFLIST_RE.matches(lines[i])) {
                     val p = lines[i].split("::", limit = 2); terms.add(p[0].trim() to p[1].trim()); i++ }
                 blocks.add(EnhancedBlock.DefinitionList(terms)); continue
             }
@@ -327,39 +359,39 @@ object EnhancedMarkdownParser {
                 }; continue
             }
             // Checklist
-            if (Regex("""^\s*[-*]\s+\[[ xX]\]\s+.+""").matches(line)) {
+            if (P_CHECK_ITEM_RE.matches(line)) {
                 val items = mutableListOf<Pair<Boolean, String>>()
-                while (i < lines.size && Regex("""^\s*[-*]\s+\[[ xX]\]\s+.+""").matches(lines[i])) {
-                    val m = Regex("""^\s*[-*]\s+\[([ xX])\]\s+(.+)$""").find(lines[i])
+                while (i < lines.size && P_CHECK_ITEM_RE.matches(lines[i])) {
+                    val m = P_CHECK_PARSE_RE.find(lines[i])
                     if (m != null) { items.add((m.groupValues[1].lowercase() == "x") to m.groupValues[2]); i++ } else { break } }
                 blocks.add(EnhancedBlock.Checklist(items)); continue
             }
             // Tag chip
-            val tm = Regex("""^:(\w[\w-]*):\s*(.+)$""").find(line.trim())
+            val tm = P_TAG_RE.find(line.trim())
             if (tm != null) { blocks.add(EnhancedBlock.TagList(listOf(tm.groupValues[1] to tm.groupValues[2].trim()))); i++; continue }
             // Bullet
-            if (Regex("""^\s*[-*+]\s+.+""").matches(line) && !Regex("""^\s*[-*+]\s+\[[ xX]\]""").matches(line)) {
+            if (P_BULLET_RE.matches(line) && !P_BULLET_NO_CHECK_RE.matches(line)) {
                 val items = mutableListOf<String>(); val indents = mutableListOf<Int>()
-                while (i < lines.size && Regex("""^\s*[-*+]\s+.+""").matches(lines[i]) && !Regex("""^\s*[-*+]\s+\[[ xX]\]""").matches(lines[i])) {
-                    val m = Regex("""^(\s*)[-*+]\s+(.+)$""").find(lines[i]); if (m != null) { indents.add(m.groupValues[1].length / 2); items.add(m.groupValues[2]); i++ } else { break } }
+                while (i < lines.size && P_BULLET_RE.matches(lines[i]) && !P_BULLET_NO_CHECK_RE.matches(lines[i])) {
+                    val m = P_BULLET_PARSE_RE.find(lines[i]); if (m != null) { indents.add(m.groupValues[1].length / 2); items.add(m.groupValues[2]); i++ } else { break } }
                 blocks.add(EnhancedBlock.BulletList(items, indents)); continue
             }
             // Numbered
-            if (Regex("""^\s*\d+[.)]\s+.+""").matches(line)) {
+            if (P_NUMBERED_RE.matches(line)) {
                 val items = mutableListOf<String>(); val nums = mutableListOf<Int>()
-                while (i < lines.size && Regex("""^\s*\d+[.)]\s+.+""").matches(lines[i])) {
-                    val m = Regex("""^\s*(\d+)[.)]\s+(.+)$""").find(lines[i]); if (m != null) { nums.add(m.groupValues[1].toIntOrNull() ?: (items.size + 1)); items.add(m.groupValues[2]); i++ } else { break } }
+                while (i < lines.size && P_NUMBERED_RE.matches(lines[i])) {
+                    val m = P_NUMBERED_PARSE_RE.find(lines[i]); if (m != null) { nums.add(m.groupValues[1].toIntOrNull() ?: (items.size + 1)); items.add(m.groupValues[2]); i++ } else { break } }
                 blocks.add(EnhancedBlock.NumberedList(items, nums)); continue
             }
             // Footnotes
             if (line.trim().startsWith("[^") && line.trim().contains("]:")) {
                 val fns = mutableListOf<Pair<String, String>>()
-                while (i < lines.size && Regex("""^\s*\[\^[\w-]+\]:\s+.+""").matches(lines[i])) {
-                    val m = Regex("""^\s*\[\^([\w-]+)\]:\s+(.+)$""").find(lines[i]); if (m != null) { fns.add(m.groupValues[1] to m.groupValues[2]); i++ } else { break } }
+                while (i < lines.size && P_FOOTNOTE_RE.matches(lines[i])) {
+                    val m = P_FOOTNOTE_PARSE_RE.find(lines[i]); if (m != null) { fns.add(m.groupValues[1] to m.groupValues[2]); i++ } else { break } }
                 if (fns.isNotEmpty()) blocks.add(EnhancedBlock.FootnoteSection(fns)); continue
             }
             // Table
-            if (line.contains("|") && i + 1 < lines.size && Regex("""^\s*\|?[\s:|-]+\|?\s*$""").matches(lines[i+1])) {
+            if (line.contains("|") && i + 1 < lines.size && P_TABLE_SEP_RE.matches(lines[i+1])) {
                 val hdrs = line.trim().trim('|').split("|").map { it.trim() }; i += 2
                 val align = if (i-1>=0 && lines[i-1].contains("|")) lines[i-1].trim().trim('|').split("|").map { c ->
                     when { c.startsWith(":") && c.endsWith(":") -> TextAlign.Center; c.endsWith(":") -> TextAlign.End; else -> TextAlign.Start }
@@ -369,7 +401,7 @@ object EnhancedMarkdownParser {
                 blocks.add(EnhancedBlock.Table(hdrs, rows, align)); continue
             }
             // Spoiler
-            if (Regex("""^.*\|\|.+\|\|.*$""").matches(line.trim()) && !line.contains("|  |")) {
+            if (P_SPOILER_RE.matches(line.trim()) && !line.contains("|  |")) {
                 blocks.add(EnhancedBlock.Spoiler(line)); i++; continue
             }
             // Paragraph (catch-all) — ALWAYS makes forward progress. Lines that
@@ -380,12 +412,12 @@ object EnhancedMarkdownParser {
             while (i < lines.size && lines[i].isNotBlank() &&
                 !lines[i].trimStart().startsWith("#") && !lines[i].trimStart().startsWith(">") &&
                 !lines[i].trim().startsWith("```") && !lines[i].trim().startsWith("$$") &&
-                !Regex("""^\s*[-*+]\s+""").matches(lines[i]) && !Regex("""^\s*\d+[.)]\s+""").matches(lines[i]) &&
-                !lines[i].matches(Regex("""^\s*([-*_])\1{2,}\s*$""")) &&
+                !P_BULLET_BREAK_RE.matches(lines[i]) && !P_NUMBERED_BREAK_RE.matches(lines[i]) &&
+                !lines[i].matches(P_HR_RE) &&
                 !lines[i].trim().startsWith("<details") && !lines[i].trim().startsWith("</details") &&
-                !Regex("""^\s*\[\^[\w-]+\]:\s+""").matches(lines[i]) &&
-                !lines[i].trim().startsWith(":::") && !Regex("""^:\w[\w-]*:\s+""").matches(lines[i]) &&
-                !Regex("""^\|.+?\|.*\|""").matches(lines[i])) {
+                !P_FOOTNOTE_BREAK_RE.matches(lines[i]) &&
+                !lines[i].trim().startsWith(":::") && !P_TAG_START_RE.matches(lines[i]) &&
+                !P_TABLE_ROW_RE.matches(lines[i])) {
                 pl.add(lines[i]); i++ }
             // Fallback: if every exclusion matched, consume the line verbatim.
             if (pl.isEmpty()) { pl.add(line); i++ }
@@ -398,9 +430,14 @@ object EnhancedMarkdownParser {
 // ── Inline formatting (ChatGPT-level) ──────────────────────────────────────
 
 private data class InlineResult(val annotated: AnnotatedString)
+/** Max diff rows rendered before collapsing behind "Show all". */
+private const val MAX_DIFF_VISIBLE_LINES = 20
+/** Max table data rows rendered before collapsing behind "Show all". */
+private const val MAX_TABLE_VISIBLE_ROWS = 40
+/** Compiled once: used on every inline parse (every paragraph/list item). */
+private val INLINE_AUTOLINK_RE = Regex("""(https?://[^\s<>]+|www\.[^\s<>]+)""")
+
 private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color = SurfaceLight, codeColor: Color = Accent): InlineResult {
-    // Precompiled outside the loop so long paragraphs stay fast.
-    val autolinkRe = Regex("""(https?://[^\s<>]+|www\.[^\s<>]+)""")
     val a = buildAnnotatedString {
         var i = 0
         while (i < text.length) {
@@ -412,7 +449,7 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
             // Cheap guard keeps this O(n): find() only runs at chars that can
             // actually start a URL.
             val autolinkMatch = if ((text[i] == 'h' && text.startsWith("http", i)) ||
-                (text[i] == 'w' && text.startsWith("www", i))) autolinkRe.find(text, i) else null
+                (text[i] == 'w' && text.startsWith("www", i))) INLINE_AUTOLINK_RE.find(text, i) else null
             if (autolinkMatch != null && autolinkMatch.range.first == i) {
                 var url = autolinkMatch.value
                 // Strip trailing punctuation that is not part of the URL.
@@ -504,12 +541,27 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
 
 @Composable private fun DiffBlockBlock(b: EnhancedBlock.DiffBlock) {
     val clip=LocalClipboardManager.current; var copied by remember{mutableStateOf(false)}
+    // Cap huge diffs so a giant patch doesn't render thousands of rows at once.
+    val isLong = b.lines.size > MAX_DIFF_VISIBLE_LINES
+    var expanded by remember { mutableStateOf(!isLong) }
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0xFF1A1B1E)).border(1.dp,SurfaceLight,RoundedCornerShape(10.dp))) {
         Row(Modifier.fillMaxWidth().background(Color(0xFF2A2B30)).padding(horizontal=12.dp,vertical=6.dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically){ Text("diff ${b.language}",color=VaultPurple,fontSize=12.sp,fontFamily=FontFamily.Monospace)
+            Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            if (isLong) {
+                Text(
+                    if (expanded) "Collapse" else "Expand",
+                    color = TerminalWhite.copy(0.4f), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.clickable { expanded = !expanded }
+                )
+            }
             val copyIconColor = if (copied) Success else TerminalWhite.copy(0.6f)
             val copyLabel = if (copied) "Copied" else "Copy"
-            Row(Modifier.clickable{clip.setText(AnnotatedString(b.lines.joinToString("\n"){it.text}));copied=true},verticalAlignment=Alignment.CenterVertically){ Icon(Icons.Default.ContentCopy,null,tint=copyIconColor,modifier=Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)); Text(copyLabel,color=copyIconColor,fontSize=11.sp) } }
-        Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical=4.dp)) { b.lines.forEach{l-> val(bg,tc,pre)=when(l.type){DiffType.ADDED-> Triple(Success.copy(0.12f),Success,"+");DiffType.REMOVED-> Triple(Danger.copy(0.12f),Danger,"-");DiffType.HEADER-> Triple(VaultPurple.copy(0.1f),VaultPurple,"@@");DiffType.CONTEXT-> Triple(Color.Transparent,TerminalWhite.copy(0.7f)," ") }; Text("$pre ${l.text}",color=tc,fontSize=13.sp,fontFamily=FontFamily.Monospace,lineHeight=18.sp,modifier=Modifier.fillMaxWidth().background(bg).padding(horizontal=12.dp,vertical=0.dp)) } } }
+            Row(Modifier.clickable{clip.setText(AnnotatedString(b.lines.joinToString("\n"){it.text}));copied=true},verticalAlignment=Alignment.CenterVertically){ Icon(Icons.Default.ContentCopy,null,tint=copyIconColor,modifier=Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)); Text(copyLabel,color=copyIconColor,fontSize=11.sp) } } }
+        Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical=4.dp)) { val shown = if (expanded || !isLong) b.lines else b.lines.take(MAX_DIFF_VISIBLE_LINES); shown.forEach{l-> val(bg,tc,pre)=when(l.type){DiffType.ADDED-> Triple(Success.copy(0.12f),Success,"+");DiffType.REMOVED-> Triple(Danger.copy(0.12f),Danger,"-");DiffType.HEADER-> Triple(VaultPurple.copy(0.1f),VaultPurple,"@@");DiffType.CONTEXT-> Triple(Color.Transparent,TerminalWhite.copy(0.7f)," ") }; Text("$pre ${l.text}",color=tc,fontSize=13.sp,fontFamily=FontFamily.Monospace,lineHeight=18.sp,modifier=Modifier.fillMaxWidth().background(bg).padding(horizontal=12.dp,vertical=0.dp)) } }
+        if (!expanded && isLong) {
+            Row(Modifier.fillMaxWidth().clickable { expanded = true }.padding(horizontal=12.dp,vertical=8.dp),horizontalArrangement=Arrangement.Center){
+                Text("▼ Show all ${b.lines.size} lines",color=Accent.copy(0.6f),fontSize=11.sp,fontFamily=FontFamily.Monospace) } }
+    }
 }
 
 @Composable private fun QuoteBlock(b: EnhancedBlock.Quote, onLinkClick: ((String)->Unit)?) {
@@ -520,6 +572,10 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
 @Composable private fun TableBlock(b: EnhancedBlock.Table) {
     val colCount = b.headers.size.coerceAtLeast(b.rows.firstOrNull()?.size ?: 0)
     if (colCount == 0) return
+    // Cap very wide/long tables so 200+ row responses don't compose thousands
+    // of Text nodes at once; the rest is one tap away.
+    val isLong = b.rows.size > MAX_TABLE_VISIBLE_ROWS
+    var expanded by remember { mutableStateOf(!isLong) }
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).border(1.dp,SurfaceLight,RoundedCornerShape(8.dp)).background(Color(0xFF1A1B1E)).horizontalScroll(rememberScrollState())) {
         // Header row — evenly weighted columns for proper alignment
         Row(Modifier.background(Accent.copy(0.2f)).padding(vertical=10.dp, horizontal=4.dp)) {
@@ -530,8 +586,9 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
                     modifier=Modifier.weight(1f).padding(horizontal=8.dp))
             }
         }
-        // Data rows — same weighted columns
-        b.rows.forEachIndexed { ri, r ->
+        // Data rows — same weighted columns (capped for huge tables)
+        val shownRows = if (expanded || !isLong) b.rows else b.rows.take(MAX_TABLE_VISIBLE_ROWS)
+        shownRows.forEachIndexed { ri, r ->
             Row(Modifier.background(if(ri%2==1)SurfaceLight.copy(0.08f)else Color.Transparent).padding(vertical=8.dp, horizontal=4.dp)) {
                 repeat(colCount) { ci ->
                     val c = r.getOrNull(ci) ?: ""
@@ -542,6 +599,9 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
                 }
             }
         }
+        if (!expanded && isLong) {
+            Row(Modifier.fillMaxWidth().clickable { expanded = true }.padding(horizontal=12.dp,vertical=8.dp),horizontalArrangement=Arrangement.Center){
+                Text("▼ Show all ${b.rows.size} rows",color=Accent.copy(0.6f),fontSize=11.sp,fontFamily=FontFamily.Monospace) } }
         if (b.rows.isNotEmpty()) Box(Modifier.fillMaxWidth().background(Accent.copy(0.05f)).padding(horizontal=12.dp,vertical=4.dp)){Text("${b.rows.size} rows",color=TerminalWhite.copy(0.3f),fontSize=10.sp)} }
 }
 

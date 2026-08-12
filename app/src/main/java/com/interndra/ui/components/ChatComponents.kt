@@ -660,6 +660,12 @@ private val KEYWORDS = setOf(
     "map", "chan", "go", "select", "range"
 )
 
+/** Keywords sorted longest-first; the first (longest) match wins. */
+private val KEYWORDS_BY_LENGTH: List<String> = KEYWORDS.sortedByDescending { it.length }
+
+/** First chars of every keyword — cheap pre-filter before scanning. */
+private val KW_START_CHARS: Set<Char> = KEYWORDS.map { it[0].lowercaseChar() }.toSet()
+
 /** Languages where a PascalCase identifier is typically a type/class name. */
 private val TYPE_LIKE_LANGS = setOf(
     "kotlin", "kt", "java", "cs", "csharp", "dart", "cpp", "c++", "c",
@@ -707,21 +713,26 @@ private fun highlightSyntax(line: String, language: String): AnnotatedString {
                 return@buildAnnotatedString
             }
 
-            // Check for keywords at word boundaries
+            // Check for keywords at word boundaries. Only scan when the current
+            // char could actually start a keyword — without this guard every
+            // position of every line scans all ~200 keywords (O(n·k)), a real
+            // cost on large code blocks.
             var matched = false
-            for (kw in KEYWORDS) {
-                if (line.regionMatches(i, kw, 0, kw.length, ignoreCase = true)) {
-                    val afterIdx = i + kw.length
-                    val beforeIdx = i - 1
-                    val isWordStart = beforeIdx < 0 || !line[beforeIdx].isLetterOrDigit() && line[beforeIdx] != '_'
-                    val isWordEnd = afterIdx >= line.length || !line[afterIdx].isLetterOrDigit() && line[afterIdx] != '_'
-                    if (isWordStart && isWordEnd) {
-                        withStyle(SpanStyle(color = VaultPurple, fontWeight = FontWeight.SemiBold)) {
-                            append(kw)
+            if (line[i].isLetter() && KW_START_CHARS.contains(line[i].lowercaseChar())) {
+                for (kw in KEYWORDS_BY_LENGTH) {
+                    if (line.regionMatches(i, kw, 0, kw.length, ignoreCase = true)) {
+                        val afterIdx = i + kw.length
+                        val beforeIdx = i - 1
+                        val isWordStart = beforeIdx < 0 || !line[beforeIdx].isLetterOrDigit() && line[beforeIdx] != '_'
+                        val isWordEnd = afterIdx >= line.length || !line[afterIdx].isLetterOrDigit() && line[afterIdx] != '_'
+                        if (isWordStart && isWordEnd) {
+                            withStyle(SpanStyle(color = VaultPurple, fontWeight = FontWeight.SemiBold)) {
+                                append(kw)
+                            }
+                            i += kw.length
+                            matched = true
+                            break
                         }
-                        i += kw.length
-                        matched = true
-                        break
                     }
                 }
             }

@@ -344,7 +344,7 @@ private fun MessageList(
     // Follow-scroll: animate for brand-new user messages, bottom-pin cheaply
     // while an AI reply streams in, and never fight the user's own scrolling.
     var lastAnchoredId by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(messages.size, streamState.value) {
+    LaunchedEffect(messages.size) {
         if (messages.isEmpty()) return@LaunchedEffect
         val last = messages.lastOrNull() ?: return@LaunchedEffect
         val isFreshUser = StreamScrollPolicy.isFreshUserMessage(lastAnchoredId, last.id, last.role == MessageRole.USER)
@@ -354,12 +354,17 @@ private fun MessageList(
             listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1)
             return@LaunchedEffect
         }
-        if (userScrolledUp) return@LaunchedEffect
-        val info = listState.layoutInfo
-        val vis = info.visibleItemsInfo.lastOrNull()
-        val itemBottom = vis?.let { it.offset + it.size } ?: Int.MAX_VALUE
-        if (StreamScrollPolicy.shouldFollowViewport(itemBottom, info.viewportSize.height)) {
-            pinToBottom(listState)
+        // While an AI reply streams in, keep the viewport pinned to the bottom.
+        // Collecting stream commits (instead of re-keying this effect on every
+        // commit) keeps a single coroutine alive — no restart cost per frame.
+        snapshotFlow { streamState.value }.collect {
+            if (userScrolledUp) return@collect
+            val info = listState.layoutInfo
+            val vis = info.visibleItemsInfo.lastOrNull()
+            val itemBottom = vis?.let { it.offset + it.size } ?: Int.MAX_VALUE
+            if (StreamScrollPolicy.shouldFollowViewport(itemBottom, info.viewportSize.height)) {
+                pinToBottom(listState)
+            }
         }
     }
 
@@ -440,8 +445,10 @@ private fun MessageList(
             if (messages.isEmpty()) {
                 item { PremiumWelcomeScreen(onTextChange = onSuggestionClick) }
             } else {
-                itemsIndexed(groupedMessages, key = { _, group ->
-                    "group_${group.second.firstOrNull()?.id ?: group.hashCode()}"
+                itemsIndexed(groupedMessages, key = { groupIdx, group ->
+                    // Groups are never empty, but a hash fallback would be
+                    // unstable across recompositions → use a stable index.
+                    "group_${group.second.firstOrNull()?.id ?: "idx_$groupIdx"}"
                 }) { groupIdx, (role, msgs) ->
                     val isLastGroup = groupIdx == groupedMessages.lastIndex
                     MessageGroup(
