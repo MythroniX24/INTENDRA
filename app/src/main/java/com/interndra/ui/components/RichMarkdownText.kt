@@ -367,9 +367,32 @@ object EnhancedMarkdownParser {
 
 private data class InlineResult(val annotated: AnnotatedString)
 private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color = SurfaceLight, codeColor: Color = Accent): InlineResult {
+    // Precompiled outside the loop so long paragraphs stay fast.
+    val autolinkRe = Regex("""(https?://[^\s<>]+|www\.[^\s<>]+)""")
     val a = buildAnnotatedString {
         var i = 0
         while (i < text.length) {
+            // Escaped markdown characters: \* \_ \# \[ \] \` \~ \| \\ \< \> etc.
+            if (text[i] == '\\' && i+1 < text.length && text[i+1] in "*_#[]`~|\\<>$^") {
+                append(text[i + 1]); i += 2; continue
+            }
+            // Autolinks: bare https://… and www.… URLs become tappable links.
+            // Cheap guard keeps this O(n): find() only runs at chars that can
+            // actually start a URL.
+            val autolinkMatch = if ((text[i] == 'h' && text.startsWith("http", i)) ||
+                (text[i] == 'w' && text.startsWith("www", i))) autolinkRe.find(text, i) else null
+            if (autolinkMatch != null && autolinkMatch.range.first == i) {
+                var url = autolinkMatch.value
+                // Strip trailing punctuation that is not part of the URL.
+                while (url.isNotEmpty() && url.last() in ",.;:!?)]>\"'") url = url.dropLast(1)
+                if (url.isNotEmpty()) {
+                    pushStringAnnotation("URL", url)
+                    withStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)) { append("$url ↗") }
+                    pop()
+                    i = autolinkMatch.range.last + 1
+                    continue
+                }
+            }
             // Math inline $...$ (rendered to Unicode)
             if (text[i] == '$' && i+1 < text.length && text[i+1] != '$') {
                 val e = text.indexOf('$', i+1); if (e > 0) { withStyle(SpanStyle(fontFamily=FontFamily.Serif,color=VaultPurple,fontWeight=FontWeight.Medium,fontStyle=FontStyle.Italic)) { append(latexToUnicode(text.substring(i+1,e))) }; i=e+1; continue }
