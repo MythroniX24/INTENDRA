@@ -56,6 +56,15 @@ object LatexRenderer {
         "\\ddots" to "⋱"
     )
 
+    // Longest commands first, plus a guard so short keys (\le, \in, \ge) can
+    // never match as prefixes of longer commands (\leftarrow, \int, \infty…).
+    private val symbolRe: Regex = Regex(
+        "\\\\(" +
+            symbols.keys.sortedByDescending { it.length }
+                .joinToString("|") { Regex.escape(it.substring(1)) } +
+            ")(?![a-zA-Z])"
+    )
+
     private val funcNames = listOf(
         "lim", "log", "ln", "lg", "exp", "sin", "cos", "tan", "cot", "sec", "csc",
         "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh", "det", "dim", "ker",
@@ -76,7 +85,11 @@ object LatexRenderer {
             .replace("\\left\\langle", "⟨").replace("\\right\\rangle", "⟩")
             .replace("\\left.", "").replace("\\right.", "")
             .replace("\\,", " ").replace("\\;", " ").replace("\\:", " ").replace("\\!", "")
-            .replace("\\ ", " ")
+            // \\  (backslash-space) is LaTeX for an interword space. Guard it
+            // with a lookbehind so the row separator \\  (two backslashes +
+            // space) is NEVER damaged — that broke matrix/cases/aligned envs
+            // into a single row (CI: pmatrix/bmatrix/aligned tests).
+            .replace(Regex("""(?<!\\)\\ """), " ")
             // Longest match first: \qquad must be replaced before \quad,
             // otherwise \qquad degrades to "  q".
             .replace("\\qquad", "    ").replace("\\quad", "  ").replace("\\enspace", "  ")
@@ -131,7 +144,7 @@ object LatexRenderer {
         // Square root
         s = s.replace(Regex("""\\sqrt\{([^{}]*)\}""")) { m -> "√(${m.groupValues[1]})" }
 
-        for ((k, v) in symbols) s = s.replace(k, v)
+        s = s.replace(symbolRe) { m -> symbols["\\" + m.groupValues[1]] ?: m.value }
 
         s = s.replace("\\{", "{").replace("\\}", "}")
 
