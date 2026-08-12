@@ -70,7 +70,8 @@ class ThinkingMarkerTest {
     fun `insertBeforeMarker inserts before existing marker`() {
         val content = "answer\n" + ThinkingMarker.encode(sampleEpisodes)
         val updated = ThinkingMarker.insertBeforeMarker(content, "### command output\nok")
-        assertTrue(updated.startsWith("answer\n### command output\nok"))
+        // encode() emits a leading newline, so the marker is preceded by "\n\n".
+        assertTrue(updated.startsWith("answer\n\n### command output\nok"))
         assertTrue("marker must come after inserted text", updated.indexOf("command output") < updated.indexOf("INTENDRA_THINKING_START"))
     }
 
