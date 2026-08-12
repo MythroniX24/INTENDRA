@@ -780,7 +780,7 @@ private fun AgentComposer(
     isLoading: Boolean,
     providerName: String,
     modelName: String,
-    defaultProviderId: String,
+    defaultProviderId: String?,
     providers: List<ProviderConfig>,
     onSend: () -> Unit,
     onStop: () -> Unit,
@@ -959,7 +959,7 @@ private fun AgentComposer(
 @Composable
 private fun ModelPickerSheet(
     providers: List<ProviderConfig>,
-    defaultProviderId: String,
+    defaultProviderId: String?,
     onDismiss: () -> Unit,
     onSelectProvider: (String) -> Unit,
     onSelectProviderModel: (String, String) -> Unit,
