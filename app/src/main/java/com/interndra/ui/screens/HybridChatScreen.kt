@@ -17,6 +17,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -77,6 +78,10 @@ import java.util.Locale
 // ── ENHANCED: streaming animation key used for typewriter effect ────────────
 private var streamIdCounter = 0L
 private fun nextStreamId() = ++streamIdCounter
+
+/** Text currently being revealed for a streaming AI message. Kept behind a
+ *  plain State object so only the active message group subscribes to it. */
+private data class StreamState(val id: Long? = null, val text: String = "")
 
 @Composable
 fun HybridChatScreen(
@@ -226,6 +231,13 @@ fun HybridChatScreen(
             },
             onDelete = { msg -> vm.deleteMessage(msg) },
             onRegenerate = { vm.sendCommand("regenerate last response") },
+            onShare = { text ->
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, text)
+                }
+                runCatching { context.startActivity(Intent.createChooser(send, "Share with INTENDRA")) }
+            },
             onTaskPause = { vm.taskManager.pause() },
             onTaskResume = { vm.taskManager.resume() },
             onTaskRetry = { vm.taskManager.retryAll() },
@@ -287,6 +299,7 @@ private fun MessageList(
     onCopy: (String) -> Unit,
     onDelete: (ChatMessage) -> Unit,
     onRegenerate: () -> Unit,
+    onShare: (String) -> Unit,
     onTaskPause: () -> Unit,
     onTaskResume: () -> Unit,
     onTaskRetry: () -> Unit,
@@ -299,85 +312,120 @@ private fun MessageList(
     val context = LocalContext.current
 
     // ── Streaming state (local to this scope = no recomposition of parent) ─
+    // streamState is a plain State object: only the LAST message group reads
+    // its value, so older groups never recompose while text streams in.
     val initialMessageCount = remember { messages.size }
-    var streamingMsgId by remember { mutableStateOf<Long?>(null) }
-    var streamedText by remember { mutableStateOf("") }
+    val revealedIds = remember { mutableSetOf<Long>() }
+    var streamingId by remember { mutableStateOf<Long?>(null) }
+    val streamState = remember { mutableStateOf(StreamState()) }
     var userScrolledUp by remember { mutableStateOf(false) }
 
-    fun isNearBottom(): Boolean {
-        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        val totalItems = listState.layoutInfo.totalItemsCount
-        return lastVisible >= totalItems - 3
-    }
-
-    // Track scroll gestures to detect when user scrolls up (stop auto-scroll)
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress && !isNearBottom()) {
-            userScrolledUp = true
-            keyboard?.hide()
-        }
-    }
-
-    // Auto-scroll on new messages (only if user hasn't scrolled up)
-    LaunchedEffect(messages.size, streamedText) {
-        if (messages.isNotEmpty() && !userScrolledUp) {
-            listState.animateScrollToItem(messages.size - 1)
-        }
-    }
-
-    // Reset userScrolledUp when a new user message arrives
+    // Live view of the newest message — kept fresh for the reveal coroutine so
+    // it can detect Stop/regeneration immediately (reads inside a
+    // LaunchedEffect would otherwise see a stale snapshot of the list).
+    val currentMessages by rememberUpdatedState(messages)
     val lastMsg = messages.lastOrNull()
-    LaunchedEffect(lastMsg?.id) {
-        if (lastMsg?.role == MessageRole.USER) {
-            userScrolledUp = false
+    val lastAiCompleted = messages.lastOrNull { it.role == MessageRole.AI && !it.isLoading }
+
+    // Track scroll gestures: user dragging away from the bottom disables
+    // follow-scrolling until they jump back or send a new message.
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            val itemBottom = last?.let { it.offset + it.size } ?: Int.MAX_VALUE
+            if (!StreamScrollPolicy.shouldFollowViewport(itemBottom, info.viewportSize.height)) {
+                userScrolledUp = true
+                keyboard?.hide()
+            }
         }
     }
 
-    // ── Streaming effect: smooth character reveal with variable speed ──
-    val animatedMessageIds = remember { mutableSetOf<Long>() }
-    LaunchedEffect(messages.size) {
-        val msg = messages.lastOrNull()
-        if (msg != null && messages.size > initialMessageCount &&
-            msg.role == MessageRole.AI && !msg.isLoading &&
-            msg.content.length > 30 && msg.id !in animatedMessageIds) {
-            animatedMessageIds.add(msg.id)
-            streamingMsgId = msg.id
-            streamedText = ""
-            val text = msg.content
-            var revealed = 0
-            val len = text.length
+    // Follow-scroll: animate for brand-new user messages, bottom-pin cheaply
+    // while an AI reply streams in, and never fight the user's own scrolling.
+    var lastAnchoredId by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(messages.size, streamState.value) {
+        if (messages.isEmpty()) return@LaunchedEffect
+        val last = messages.lastOrNull() ?: return@LaunchedEffect
+        val isFreshUser = StreamScrollPolicy.isFreshUserMessage(lastAnchoredId, last.id, last.role == MessageRole.USER)
+        lastAnchoredId = last.id
+        if (isFreshUser) {
+            userScrolledUp = false
+            listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1)
+            return@LaunchedEffect
+        }
+        if (userScrolledUp) return@LaunchedEffect
+        val info = listState.layoutInfo
+        val vis = info.visibleItemsInfo.lastOrNull()
+        val itemBottom = vis?.let { it.offset + it.size } ?: Int.MAX_VALUE
+        if (StreamScrollPolicy.shouldFollowViewport(itemBottom, info.viewportSize.height)) {
+            pinToBottom(listState)
+        }
+    }
 
-            // Calculate per-character delays
-            val charDelays = IntArray(len) { idx ->
-                val c = text[idx]
-                when {
-                    c.isWhitespace() -> 8
-                    c in listOf('.', ',', '!', '?', ';', ':') -> 12
-                    c == '\n' -> 20
-                    idx > 0 && text[idx-1] == '`' -> 4
-                    c.isLetterOrDigit() -> 6
-                    c == ' ' && idx > 0 && idx < len-1 &&
-                        text[idx-1] in listOf('.','!','?') -> 40
-                    else -> 4
-                }
+    // ── Streaming reveal: smooth character reveal, throttled to ~18–24 fps ──
+    // Commits are batched so the markdown parser isn't re-run on every 14 ms
+    // frame, and the reveal aborts the instant the message content changes
+    // underneath it (Stop, regeneration or a brand-new message).
+    LaunchedEffect(lastAiCompleted?.id) {
+        val msg = lastAiCompleted ?: return@LaunchedEffect
+        val idx = messages.indexOfFirst { it.id == msg.id }
+        if (idx < initialMessageCount || msg.id in revealedIds || streamingId != null) return@LaunchedEffect
+        val text = msg.content
+        if (text.length <= 30) return@LaunchedEffect
+        revealedIds.add(msg.id)
+        streamingId = msg.id
+        val len = text.length
+
+        // Calculate per-character delays
+        val charDelays = IntArray(len) { idx ->
+            val c = text[idx]
+            when {
+                c.isWhitespace() -> 8
+                c in listOf('.', ',', '!', '?', ';', ':') -> 12
+                c == '\n' -> 20
+                idx > 0 && text[idx-1] == '`' -> 4
+                c.isLetterOrDigit() -> 6
+                c == ' ' && idx > 0 && idx < len-1 &&
+                    text[idx-1] in listOf('.','!','?') -> 40
+                else -> 4
             }
+        }
 
-            val frameDuration = 14L
-
-            while (revealed < len && streamingMsgId == msg.id) {
+        val frameDuration = 14L
+        // Long responses commit less often so the parser stays cheap.
+        val commitEvery = if (len > 3000) 4 else 3
+        var revealed = 0
+        var frame = 0
+        try {
+            while (revealed < len && streamingId == msg.id) {
                 var accumulated = 0
                 var charsThisFrame = 0
-                while (revealed < len && accumulated < frameDuration && streamingMsgId == msg.id && charsThisFrame < 8) {
+                while (revealed < len && accumulated < frameDuration && streamingId == msg.id && charsThisFrame < 8) {
                     accumulated += charDelays[revealed]
                     revealed++
                     charsThisFrame++
                 }
-                streamedText = text.substring(0, revealed)
+                frame++
+                // Abort if the message changed underneath us (e.g. Stop replaced
+                // its content with "⏹ Generation stopped.").
+                val now = currentMessages.lastOrNull()
+                if (now == null || now.id != msg.id || now.content != text) break
+                if (frame % commitEvery == 0) {
+                    streamState.value = StreamState(msg.id, text.substring(0, revealed))
+                }
                 delay(frameDuration)
             }
-            streamedText = text
-            streamingMsgId = null
-            userScrolledUp = false
+            if (streamingId == msg.id) {
+                streamState.value = StreamState(msg.id, text)
+                userScrolledUp = false
+            } else {
+                streamState.value = StreamState(null, "")
+            }
+        } finally {
+            // Always release the reveal lock — even when this effect is
+            // cancelled mid-reveal because a newer AI message completed.
+            streamingId = null
         }
     }
 
@@ -395,15 +443,18 @@ private fun MessageList(
                 itemsIndexed(groupedMessages, key = { _, group ->
                     "group_${group.second.firstOrNull()?.id ?: group.hashCode()}"
                 }) { groupIdx, (role, msgs) ->
+                    val isLastGroup = groupIdx == groupedMessages.lastIndex
                     MessageGroup(
                         role = role,
                         messages = msgs,
-                        streamingMsgId = streamingMsgId,
-                        streamedText = streamedText,
+                        // Only the last group reads the live stream state, so
+                        // older groups never recompose while text streams in.
+                        streamState = if (isLastGroup) streamState else null,
                         groupIndex = groupIdx,
                         onCopy = onCopy,
                         onDelete = onDelete,
-                        onRegenerate = onRegenerate
+                        onRegenerate = onRegenerate,
+                        onShare = onShare
                     )
                 }
 
@@ -440,9 +491,7 @@ private fun MessageList(
                     .clickable {
                         userScrolledUp = false
                         keyboard?.hide()
-                        scope.launch {
-                            listState.animateScrollToItem(messages.size - 1)
-                        }
+                        scope.launch { pinToBottom(listState) }
                     }
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -461,16 +510,27 @@ private fun MessageList(
 // ── Message Group ───────────────────────────────────────────────────────────
 // User messages → right-aligned bubbles (like ChatGPT)
 // AI messages → full-width, no bubble, direct rendering (like Claude)
+
+/** Bottom-pin the last list item without restarting an animation. */
+private suspend fun pinToBottom(listState: LazyListState) {
+    val info = listState.layoutInfo
+    val lastIndex = info.totalItemsCount - 1
+    if (lastIndex < 0) return
+    val item = info.visibleItemsInfo.firstOrNull { it.index == lastIndex }
+    val offset = StreamScrollPolicy.pinOffset(item?.size ?: 0, info.viewportSize.height)
+    listState.scrollToItem(lastIndex, offset)
+}
+
 @Composable
 private fun MessageGroup(
     role: MessageRole,
     messages: List<ChatMessage>,
-    streamingMsgId: Long?,
-    streamedText: String,
+    streamState: State<StreamState>?,
     groupIndex: Int = 0,
     onCopy: (String) -> Unit,
     onDelete: (ChatMessage) -> Unit,
-    onRegenerate: () -> Unit
+    onRegenerate: () -> Unit,
+    onShare: (String) -> Unit
 ) {
     val colors = LocalInterndraColors.current
     val isUser = role == MessageRole.USER
@@ -501,7 +561,8 @@ private fun MessageGroup(
 
         messages.forEachIndexed { idx, msg ->
             val isLast = idx == messages.size - 1
-            val isStreaming = msg.id == streamingMsgId && streamedText.isNotEmpty()
+            val s = streamState?.value
+            val isStreaming = s != null && s.id == msg.id && s.text.isNotEmpty()
 
             AnimatedMessage(index = idx + groupIndex * 2, visible = true) {
                 if (isUser) {
@@ -530,6 +591,14 @@ private fun MessageGroup(
                             )
                         }
                     }
+                    // Copy / Delete actions for the newest user message
+                    if (isLast) {
+                        MessageActionsBar(
+                            onCopy = { onCopy(msg.content) },
+                            onDelete = { onDelete(msg) },
+                            isUserMessage = true
+                        )
+                    }
                 } else {
                     // ── AI: Full-width, no bubble (like Claude) ───────────
                     Column(
@@ -551,7 +620,7 @@ private fun MessageGroup(
                             val thinking = remember(msg.id, msg.content) {
                                 ThinkingMarker.decode(msg.content)
                             }
-                            val displayText = if (isStreaming) streamedText else msg.content
+                            val displayText = if (s != null && s.id == msg.id && s.text.isNotEmpty()) s.text else msg.content
                             if (thinking.isNotEmpty()) {
                                 ThinkingBlock(
                                     episodes = thinking,
@@ -567,7 +636,8 @@ private fun MessageGroup(
                                     val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
                                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                     runCatching { context.startActivity(intent) }
-                                }
+                                },
+                                isStreaming = isStreaming
                             )
                             if (sources.isNotEmpty()) {
                                 Spacer(Modifier.height(10.dp))
@@ -584,6 +654,8 @@ private fun MessageGroup(
                             MessageActionsBar(
                                 onCopy = { onCopy(ThinkingMarker.strip(SourceMarker.strip(msg.content))) },
                                 onRegenerate = onRegenerate,
+                                onShare = { onShare(ThinkingMarker.strip(SourceMarker.strip(msg.content))) },
+                                onDelete = { onDelete(msg) },
                                 isUserMessage = false
                             )
                         }

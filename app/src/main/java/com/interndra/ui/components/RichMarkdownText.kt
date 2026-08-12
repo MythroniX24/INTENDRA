@@ -95,9 +95,10 @@ import com.interndra.util.ImageCacheUtil
 fun RichMarkdownText(
     markdown: String,
     modifier: Modifier = Modifier,
-    onLinkClick: ((String) -> Unit)? = null
+    onLinkClick: ((String) -> Unit)? = null,
+    isStreaming: Boolean = false
 ) {
-    val blocks = remember(markdown) { EnhancedMarkdownParser.parse(markdown) }
+    val blocks = remember(markdown, isStreaming) { EnhancedMarkdownParser.parse(markdown, isStreaming) }
     val clipboardManager = LocalClipboardManager.current
     var copyClicked by remember { mutableStateOf(false) }
 
@@ -208,7 +209,15 @@ enum class CalloutType { INFO, SUCCESS, WARNING, DANGER, TIP, QUESTION, FIRE }
 // ── Parser (ChatGPT-level) ────────────────────────────────────────────────
 
 object EnhancedMarkdownParser {
-    fun parse(md: String): List<EnhancedBlock> {
+    /**
+     * Parse markdown into renderable blocks.
+     *
+     * @param isStreaming when true the text is a growing AI stream: the parser
+     *   must be forgiving of incomplete constructs (an unclosed code fence,
+     *   a just-opened fence line, half-typed tables) so they render
+     *   progressively instead of deadlocking or flashing empty boxes.
+     */
+    fun parse(md: String, isStreaming: Boolean = false): List<EnhancedBlock> {
         val blocks = mutableListOf<EnhancedBlock>()
         val lines = md.replace("\r\n", "\n").split("\n")
         var i = 0
@@ -239,6 +248,12 @@ object EnhancedMarkdownParser {
                 val cl = mutableListOf<String>(); i++
                 while (i < lines.size && !lines[i].trim().startsWith("```")) { cl.add(lines[i]); i++ }
                 i++
+                // While streaming, a fence that was just opened (no language, no
+                // content yet) renders as plain text so a thin empty code box
+                // doesn't flash before the model types the language + code.
+                if (isStreaming && cl.isEmpty() && lang.isBlank()) {
+                    blocks.add(EnhancedBlock.Paragraph("```")); continue
+                }
                 when {
                     isMermaid -> blocks.add(EnhancedBlock.Mermaid(cl.joinToString("\n")))
                     isTree -> blocks.add(EnhancedBlock.FileTree(cl.joinToString("\n")))
@@ -357,7 +372,10 @@ object EnhancedMarkdownParser {
             if (Regex("""^.*\|\|.+\|\|.*$""").matches(line.trim()) && !line.contains("|  |")) {
                 blocks.add(EnhancedBlock.Spoiler(line)); i++; continue
             }
-            // Paragraph (catch-all)
+            // Paragraph (catch-all) — ALWAYS makes forward progress. Lines that
+            // look like block starts but don't fully match (a lone "| A | B |"
+            // table row, "###", "- ", "1. ") must still be consumed, otherwise
+            // streaming fragments would deadlock the parse loop and hang the UI.
             val pl = mutableListOf<String>()
             while (i < lines.size && lines[i].isNotBlank() &&
                 !lines[i].trimStart().startsWith("#") && !lines[i].trimStart().startsWith(">") &&
@@ -369,7 +387,9 @@ object EnhancedMarkdownParser {
                 !lines[i].trim().startsWith(":::") && !Regex("""^:\w[\w-]*:\s+""").matches(lines[i]) &&
                 !Regex("""^\|.+?\|.*\|""").matches(lines[i])) {
                 pl.add(lines[i]); i++ }
-            if (pl.isNotEmpty()) blocks.add(EnhancedBlock.Paragraph(pl.joinToString("\n")))
+            // Fallback: if every exclusion matched, consume the line verbatim.
+            if (pl.isEmpty()) { pl.add(line); i++ }
+            blocks.add(EnhancedBlock.Paragraph(pl.joinToString("\n")))
         }
         return blocks
     }

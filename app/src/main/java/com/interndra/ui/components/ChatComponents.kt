@@ -138,6 +138,7 @@ fun MessageActionsBar(
     onCopy: () -> Unit,
     onRegenerate: (() -> Unit)? = null,
     onShare: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
     isUserMessage: Boolean = false
 ) {
     var copied by remember { mutableStateOf(false) }
@@ -175,6 +176,16 @@ fun MessageActionsBar(
                 label = "Share",
                 tint = TerminalWhite.copy(alpha = 0.35f),
                 onClick = onShare
+            )
+        }
+
+        // Delete (both message roles)
+        if (onDelete != null) {
+            ActionButton(
+                icon = Icons.Default.Delete,
+                label = "Delete",
+                tint = Danger.copy(alpha = 0.55f),
+                onClick = onDelete
             )
         }
     }
