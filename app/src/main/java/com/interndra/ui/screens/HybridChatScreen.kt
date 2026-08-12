@@ -52,6 +52,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.interndra.ai.JailbreakLevel
+import com.interndra.ai.provider.ProviderConfig
+import com.interndra.ai.provider.ProviderRole
+import com.interndra.ai.provider.ProviderState
 import com.interndra.ai.tasks.TaskPlan
 import com.interndra.data.model.*
 import com.interndra.search.SourceMarker
@@ -76,7 +79,8 @@ private fun nextStreamId() = ++streamIdCounter
 @Composable
 fun HybridChatScreen(
     vm: HybridAgentViewModel,
-    onOpenDrawer: () -> Unit = {}
+    onOpenDrawer: () -> Unit = {},
+    onOpenModelSettings: () -> Unit = {}
 ) {
     // Note: The top bar (AppTopBar) is rendered by AppShell.kt, so we
     // don't include a ChatHeaderBar here — that would create a duplicate heading.
@@ -87,12 +91,38 @@ fun HybridChatScreen(
     val jailbreakEnabled by vm.jailbreakEnabled.collectAsState()
     val jailbreakLevel by vm.jailbreakLevel.collectAsState()
     val activeCommands by vm.activeCommands.collectAsState()
+    val selectedModel by vm.selectedModel.collectAsState()
+    val providerState by vm.providerState.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     val keyboard   = LocalSoftwareKeyboardController.current
     val context    = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val haptic      = LocalHapticFeedback.current
+
+    // ── Voice input (speech-to-text) ──────────────────────────────────
+    val voiceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spoken = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+            if (!spoken.isNullOrBlank()) inputText = spoken
+        }
+    }
+    val launchVoice = {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to INTENDRA")
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        }
+        try {
+            voiceLauncher.launch(intent)
+        } catch (e: Exception) {
+            Toast.makeText(context, "Voice input isn't available on this device", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // ── Theme-aware colors ────────────────────────────────────────────
     val colors = LocalInterndraColors.current
@@ -201,11 +231,15 @@ fun HybridChatScreen(
             onTaskRetryStep = { idx -> vm.taskManager.retryStep(idx) }
         )
 
-        // ── Simple Input Bar ──────────────────────────────────────────────
-        SimpleInputBar(
-            text         = inputText,
-            isLoading    = uiState.isLoading,
+        // ── Premium Agent Composer (Claude-style) ───────────────────────
+        AgentComposer(
+            text = inputText,
             onTextChange = { inputText = it },
+            isLoading = uiState.isLoading,
+            providerName = composerProviderName(providerState),
+            modelName = selectedModel,
+            defaultProviderId = providerState.defaults.chat,
+            providers = providerState.providers,
             onSend = {
                 if (inputText.isNotBlank()) {
                     // Haptic feedback on send
@@ -214,7 +248,12 @@ fun HybridChatScreen(
                     vm.sendCommand(inputText)
                     inputText = ""
                 }
-            }
+            },
+            onStop = { vm.stopGeneration() },
+            onVoice = launchVoice,
+            onSelectProvider = { providerId -> vm.setProviderDefault(ProviderRole.CHAT, providerId) },
+            onSelectProviderModel = { providerId, modelId -> vm.setActiveProviderModel(providerId, modelId) },
+            onOpenModelSettings = onOpenModelSettings
         )
     }
 }
@@ -733,41 +772,90 @@ private fun ConfirmationBanner(
     }
 }
 
-// ── Simplified Input Bar ────────────────────────────────────────────
+// ── Premium Agent Composer (Claude-style) ─────────────────────────────
 @Composable
-private fun SimpleInputBar(
+private fun AgentComposer(
     text: String,
-    isLoading: Boolean,
     onTextChange: (String) -> Unit,
-    onSend: () -> Unit
+    isLoading: Boolean,
+    providerName: String,
+    modelName: String,
+    defaultProviderId: String,
+    providers: List<ProviderConfig>,
+    onSend: () -> Unit,
+    onStop: () -> Unit,
+    onVoice: () -> Unit,
+    onSelectProvider: (String) -> Unit,
+    onSelectProviderModel: (String, String) -> Unit,
+    onOpenModelSettings: () -> Unit
 ) {
     val colors = LocalInterndraColors.current
+    var showModelSheet by remember { mutableStateOf(false) }
+
     Column(
         Modifier
             .fillMaxWidth()
             .background(colors.inputBarBg)
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
+        // ── Model selector chip row ──────────────────────────────────
+        Row(
+            Modifier.padding(start = 4.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = colors.accent.copy(alpha = 0.12f),
+                border = BorderStroke(1.dp, colors.accent.copy(alpha = 0.25f)),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { showModelSheet = true }
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Tune, null, tint = colors.accent, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (modelName.isNotBlank() && modelName != "openrouter/auto")
+                            modelName.substringAfterLast('/') else providerName,
+                        color = colors.inputTextColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Icon(Icons.Default.ArrowDropDown, null, tint = colors.accent, modifier = Modifier.size(16.dp))
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "INTENDRA AI",
+                color = TerminalWhite.copy(alpha = 0.25f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+        }
+
+        // ── Input field ─────────────────────────────────────────────
         Surface(
-            modifier  = Modifier.fillMaxWidth(),
-            shape     = RoundedCornerShape(24.dp),
-            color     = colors.inputFieldBg,
-            border    = BorderStroke(1.dp, colors.inputFieldBorder)
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            color = colors.inputFieldBg,
+            border = BorderStroke(1.dp, colors.inputFieldBorder)
         ) {
             Row(
                 Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Bottom
             ) {
-                // Text field
                 TextField(
-                    value         = text,
+                    value = text,
                     onValueChange = onTextChange,
-                    modifier      = Modifier.weight(1f),
-                    placeholder   = {
-                        Text(
-                            "Ask anything...",
-                            fontSize = 15.sp, color = colors.inputPlaceholder
-                        )
+                    modifier = Modifier.weight(1f),
+                    placeholder = {
+                        Text("Ask INTENDRA anything…", fontSize = 15.sp, color = colors.inputPlaceholder)
                     },
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor   = Color.Transparent,
@@ -780,35 +868,224 @@ private fun SimpleInputBar(
                     ),
                     maxLines = 5,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = {
-                        if (text.isNotBlank()) onSend()
-                    })
+                    keyboardActions = KeyboardActions(onSend = { if (text.isNotBlank()) onSend() })
                 )
 
-                // Send button
-                IconButton(
-                    onClick = onSend,
-                    enabled  = text.isNotBlank() && !isLoading,
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            Modifier.size(18.dp),
-                            color = Accent,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Send,
-                            "Send",
-                            tint = if (text.isNotBlank()) Accent else TerminalWhite.copy(0.3f)
-                        )
+                if (isLoading) {
+                    // ── Stop button while generating ─────────────────
+                    Surface(
+                        shape = CircleShape,
+                        color = TerminalRed.copy(alpha = 0.15f),
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .clickable(onClick = onStop)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.Stop,
+                                "Stop generation",
+                                tint = TerminalRed,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                } else if (text.isBlank()) {
+                    // ── Voice input ──────────────────────────────────
+                    Surface(
+                        shape = CircleShape,
+                        color = colors.accent.copy(alpha = 0.12f),
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .clickable(onClick = onVoice)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.Mic,
+                                "Voice input",
+                                tint = colors.accent,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                } else {
+                    // ── Send button (gradient) ───────────────────────
+                    Surface(
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .clickable(onClick = onSend)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.linearGradient(listOf(Accent, VaultPurple))
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send,
+                                "Send",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
         }
     }
+
+    // ── Model / provider picker ─────────────────────────────────────
+    if (showModelSheet) {
+        ModelPickerSheet(
+            providers = providers,
+            defaultProviderId = defaultProviderId,
+            onDismiss = { showModelSheet = false },
+            onSelectProvider = onSelectProvider,
+            onSelectProviderModel = onSelectProviderModel,
+            onOpenModelSettings = {
+                showModelSheet = false
+                onOpenModelSettings()
+            }
+        )
+    }
 }
+
+// ── Model & Provider Picker Sheet ─────────────────────────────────────
+@Composable
+private fun ModelPickerSheet(
+    providers: List<ProviderConfig>,
+    defaultProviderId: String,
+    onDismiss: () -> Unit,
+    onSelectProvider: (String) -> Unit,
+    onSelectProviderModel: (String, String) -> Unit,
+    onOpenModelSettings: () -> Unit
+) {
+    val colors = LocalInterndraColors.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val defaultProvider = providers.firstOrNull { it.id == defaultProviderId }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = colors.inputBarBg
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp)
+        ) {
+            Text("Model & Provider", color = colors.inputTextColor, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Text("Switch AI providers and models", color = TerminalWhite.copy(alpha = 0.4f), fontSize = 12.sp)
+            Spacer(Modifier.height(16.dp))
+
+            // ── Providers ──────────────────────────────────────────
+            Text(
+                "PROVIDERS",
+                color = TerminalWhite.copy(alpha = 0.35f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+            Spacer(Modifier.height(6.dp))
+            providers.filter { it.isReadyForChat }.forEach { p ->
+                val selected = p.id == defaultProviderId
+                Surface(
+                    color = if (selected) colors.accent.copy(alpha = 0.12f) else Color.Transparent,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onSelectProvider(p.id) }
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(if (p.isLocal) "📱" else "☁️", fontSize = 14.sp)
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            p.name,
+                            color = colors.inputTextColor,
+                            fontSize = 14.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (selected) {
+                            Icon(Icons.Default.CheckCircle, null, tint = colors.accent, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
+
+            // ── Models of the default provider ─────────────────────
+            if (defaultProvider != null && defaultProvider.models.isNotEmpty()) {
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    "MODELS — ${defaultProvider.name.uppercase(Locale.ROOT)}",
+                    color = TerminalWhite.copy(alpha = 0.35f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+                Spacer(Modifier.height(6.dp))
+                defaultProvider.models.forEach { m ->
+                    val active = m.id == defaultProvider.activeModelId
+                    Surface(
+                        color = if (active) colors.accent.copy(alpha = 0.1f) else Color.Transparent,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onSelectProviderModel(defaultProvider.id, m.id) }
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                m.displayName.ifBlank { m.id },
+                                color = colors.inputTextColor,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (active) {
+                                Icon(Icons.Default.Check, null, tint = colors.accent, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+            } else {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "No models configured yet — add an API key and fetch models in provider settings.",
+                    color = TerminalWhite.copy(alpha = 0.45f),
+                    fontSize = 12.sp
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+            TextButton(onClick = onOpenModelSettings, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Settings, null, tint = colors.accent, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Manage providers & API keys", color = colors.accent, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+// ── Current provider name for the composer chip ────────────────────────
+private fun composerProviderName(state: ProviderState): String =
+    state.providers.firstOrNull { it.id == state.defaults.chat && it.isReadyForChat }?.name
+        ?: state.providers.firstOrNull()?.name
+        ?: "No provider"
 
 // ── Premium Welcome Screen ───────────────────────────────────────────────
 @Composable

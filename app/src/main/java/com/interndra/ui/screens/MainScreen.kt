@@ -390,7 +390,8 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
                     when (tab) {
                         AppTab.CHAT -> HybridChatScreen(
                             vm = viewModel,
-                            onOpenDrawer = { scope.launch { drawerState.open() } }
+                            onOpenDrawer = { scope.launch { drawerState.open() } },
+                            onOpenModelSettings = { showProviderSettings = true }
                         )
                         AppTab.TERMINAL -> TerminalScreen(
                             vm = viewModel,

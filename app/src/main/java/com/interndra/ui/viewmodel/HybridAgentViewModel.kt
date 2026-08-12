@@ -224,6 +224,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     /** Prevents race condition: only one command executes at a time. */
     private val commandGate = AtomicBoolean(false)
 
+    /** The currently running AI generation job — cancelled by stopGeneration(). */
+    private var generationJob: kotlinx.coroutines.Job? = null
+
     /** Catches any unhandled coroutine exception — NEVER crashes silently. */
     private val crashHandler = CoroutineExceptionHandler { _, throwable ->
         Log.e(TAG, "💥 Unhandled coroutine crash: ${throwable.message}", throwable)
@@ -1172,7 +1175,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             }
         }
 
-        viewModelScope.launch(crashHandler + kotlinx.coroutines.Dispatchers.Main) {
+        generationJob = viewModelScope.launch(crashHandler + kotlinx.coroutines.Dispatchers.Main) {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
             // SAFETY NET: if the entire command takes > 2 minutes, force-reset
@@ -1199,6 +1202,28 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 watchdogJob.cancel()
                 _uiState.update { it.copy(isLoading = false) }
                 commandGate.set(false)
+            }
+        }
+    }
+
+    /**
+     * Stops the currently running AI generation: cancels the generation
+     * coroutine, releases the command gate, and marks a still-pending
+     * placeholder message as interrupted so the chat shows it stopped.
+     * The user can immediately send a new message afterwards.
+     */
+    fun stopGeneration() {
+        generationJob?.cancel()
+        generationJob = null
+        commandGate.set(false)
+        taskManager.cancel()
+        _uiState.update { it.copy(isLoading = false, error = null) }
+        // Capture the placeholder id synchronously so a brand-new message sent
+        // immediately after Stop is never mislabeled as "stopped".
+        val placeholderId = messages.value.lastOrNull()?.takeIf { it.isLoading }?.id
+        if (placeholderId != null) {
+            viewModelScope.launch {
+                runCatching { repo.updateAiMessage(placeholderId, "⏹ Generation stopped.") }
             }
         }
     }
@@ -1452,7 +1477,15 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                             is SearchStatus.Done -> "✅ Search complete"
                             is SearchStatus.Failed -> "⚠️ ${status.message}"
                         }
-                        viewModelScope.launch { repo.updateAiMessage(placeholderId, hint) }
+                        // Late hints must not overwrite the final message after
+                        // Stop (or a brand-new command started). Guard against
+                        // both by only writing while this exact job runs.
+                        val jobAtDispatch = generationJob
+                        viewModelScope.launch {
+                            if (jobAtDispatch?.isActive == true) {
+                                repo.updateAiMessage(placeholderId, hint)
+                            }
+                        }
                     }
                     webSources = digest.results
                     val fullCtx = buildString {
