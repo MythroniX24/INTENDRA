@@ -370,9 +370,9 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
     val a = buildAnnotatedString {
         var i = 0
         while (i < text.length) {
-            // Math inline $...$
+            // Math inline $...$ (rendered to Unicode)
             if (text[i] == '$' && i+1 < text.length && text[i+1] != '$') {
-                val e = text.indexOf('$', i+1); if (e > 0) { withStyle(SpanStyle(fontFamily=FontFamily.Monospace,color=VaultPurple,fontWeight=FontWeight.Medium,fontStyle=FontStyle.Italic)) { append(text.substring(i,e+1)) }; i=e+1; continue }
+                val e = text.indexOf('$', i+1); if (e > 0) { withStyle(SpanStyle(fontFamily=FontFamily.Serif,color=VaultPurple,fontWeight=FontWeight.Medium,fontStyle=FontStyle.Italic)) { append(latexToUnicode(text.substring(i+1,e))) }; i=e+1; continue }
             }
             // Citations [1]
             if (text[i]=='[' && i+1<text.length && text[i+1].isDigit()) {
@@ -509,8 +509,10 @@ private fun parseInline(text: String, linkColor: Color = Accent, codeBg: Color =
 }
 
 @Composable private fun MathBlock(b: EnhancedBlock.MathBlock) {
+    val rendered = remember(b.formula) { latexToUnicode(b.formula) }
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(VaultPurple.copy(0.08f)).border(1.dp,VaultPurple.copy(0.2f),RoundedCornerShape(8.dp)).padding(16.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-        Text(b.formula,color=VaultPurple,fontSize=if(b.display)18.sp else 14.sp,fontFamily=FontFamily.Monospace,fontWeight=FontWeight.Medium,lineHeight=if(b.display)26.sp else 20.sp,fontStyle=FontStyle.Italic,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())
+        Text(rendered,color=VaultPurple,fontSize=if(b.display)20.sp else 15.sp,fontWeight=FontWeight.Medium,lineHeight=if(b.display)28.sp else 22.sp,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())
+        if (rendered != b.formula) Text(b.formula,color=VaultPurple.copy(0.4f),fontSize=10.sp,fontFamily=FontFamily.Monospace,fontStyle=FontStyle.Italic,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth().padding(top=4.dp))
         Text(if(b.display)"📐 Formula" else "📐 Inline math",color=VaultPurple.copy(0.4f),fontSize=10.sp,fontFamily=FontFamily.Monospace,modifier=Modifier.padding(top=4.dp)) }
 }
 
@@ -751,6 +753,103 @@ private fun encodeMermaidBase64(code: String): String {
 }
 
 @Composable private fun HorizontalRuleBlock() { Box(Modifier.fillMaxWidth().padding(vertical=8.dp).height(1.dp).background(TerminalWhite.copy(0.15f))) }
+
+// ── Math (LaTeX → Unicode, zero dependencies) ─────────────────────────────
+// Best-effort renderer for the common constructs AI replies use: Greek
+// letters, fractions, roots, super/sub scripts, operators and symbols.
+// Anything unrecognized is left untouched, so nothing ever breaks.
+
+private fun latexToUnicode(latex: String): String {
+    if (latex.isBlank()) return latex
+    var s = latex
+        // Strip \left/\right delimiters ONLY in their paired forms so commands
+        // like \leftarrow / \leftrightarrow survive and map to their arrows.
+        .replace("\\left(", "(").replace("\\right)", ")")
+        .replace("\\left[", "[").replace("\\right]", "]")
+        .replace("\\left\\{", "{").replace("\\right\\}", "}")
+        .replace("\\left.", "").replace("\\right.", "")
+        .replace("\\,", " ").replace("\\;", " ").replace("\\!", "")
+        .replace("\\ ", " ")
+
+    // Fractions: \frac{a}{b}
+    s = s.replace(Regex("""\\frac\{([^{}]*)\}\\{([^{}]*)\}""")) { m ->
+        "(${m.groupValues[1]})/(${m.groupValues[2]})"
+    }
+    // Square root: \sqrt{x}
+    s = s.replace(Regex("""\\sqrt\{([^{}]*)\}""")) { m -> "√(${m.groupValues[1]})" }
+
+    val symbols = mapOf(
+        "\\times" to "×", "\\div" to "÷", "\\pm" to "±", "\\mp" to "∓",
+        "\\cdot" to "·", "\\le" to "≤", "\\ge" to "≥", "\\neq" to "≠",
+        "\\approx" to "≈", "\\equiv" to "≡", "\\infty" to "∞",
+        "\\rightarrow" to "→", "\\leftarrow" to "←", "\\leftrightarrow" to "↔",
+        "\\Rightarrow" to "⇒", "\\Leftarrow" to "⇐", "\\Leftrightarrow" to "⇔",
+        "\\mapsto" to "↦", "\\in" to "∈", "\\notin" to "∉",
+        "\\subset" to "⊂", "\\supset" to "⊃", "\\subseteq" to "⊆", "\\supseteq" to "⊇",
+        "\\cup" to "∪", "\\cap" to "∩", "\\forall" to "∀", "\\exists" to "∃",
+        "\\nabla" to "∇", "\\partial" to "∂", "\\propto" to "∝",
+        "\\sum" to "∑", "\\prod" to "∏", "\\int" to "∫", "\\oint" to "∮",
+        "\\alpha" to "α", "\\beta" to "β", "\\gamma" to "γ", "\\delta" to "δ",
+        "\\epsilon" to "ε", "\\varepsilon" to "ε", "\\zeta" to "ζ", "\\eta" to "η",
+        "\\theta" to "θ", "\\iota" to "ι", "\\kappa" to "κ", "\\lambda" to "λ",
+        "\\mu" to "μ", "\\nu" to "ν", "\\xi" to "ξ", "\\omicron" to "ο",
+        "\\pi" to "π", "\\rho" to "ρ", "\\sigma" to "σ", "\\tau" to "τ",
+        "\\upsilon" to "υ", "\\phi" to "φ", "\\varphi" to "φ", "\\chi" to "χ",
+        "\\psi" to "ψ", "\\omega" to "ω",
+        "\\Gamma" to "Γ", "\\Delta" to "Δ", "\\Theta" to "Θ", "\\Lambda" to "Λ",
+        "\\Pi" to "Π", "\\Sigma" to "Σ", "\\Phi" to "Φ", "\\Psi" to "Ψ",
+        "\\Omega" to "Ω",
+        "\\degree" to "°", "\\circ" to "°"
+    )
+    for ((k, v) in symbols) s = s.replace(k, v)
+
+    s = s.replace("\\{", "{").replace("\\}", "}")
+
+    // Superscripts: ^{...} groups first, then ^x single chars
+    s = s.replace(Regex("""\^\{([^{}]*)\}""")) { m -> superscript(m.groupValues[1]) }
+    s = s.replace(Regex("""\^([0-9a-zA-Z+\-()])""")) { m -> superscript(m.groupValues[1]) }
+
+    // Subscripts: _{...} groups first, then _x single chars
+    s = s.replace(Regex("""_\{([^{}]*)\}""")) { m -> subscript(m.groupValues[1]) }
+    s = s.replace(Regex("""_([0-9a-zA-Z+\-()])""")) { m -> subscript(m.groupValues[1]) }
+
+    return s.trim()
+}
+
+private fun superscript(chars: String): String = buildString {
+    for (c in chars) {
+        when (c) {
+            '0'->append('⁰'); '1'->append('¹'); '2'->append('²'); '3'->append('³')
+            '4'->append('⁴'); '5'->append('⁵'); '6'->append('⁶'); '7'->append('⁷')
+            '8'->append('⁸'); '9'->append('⁹'); '+'->append('⁺'); '-'->append('⁻')
+            '('->append('⁽'); ')'->append('⁾'); '='->append('⁼'); 'n'->append('ⁿ')
+            'a'->append('ᵃ'); 'b'->append('ᵇ'); 'c'->append('ᶜ'); 'd'->append('ᵈ')
+            'e'->append('ᵉ'); 'f'->append('ᶠ'); 'g'->append('ᵍ'); 'h'->append('ʰ')
+            'i'->append('ⁱ'); 'j'->append('ʲ'); 'k'->append('ᵏ'); 'l'->append('ˡ')
+            'm'->append('ᵐ'); 'o'->append('ᵒ'); 'p'->append('ᵖ'); 'r'->append('ʳ')
+            's'->append('ˢ'); 't'->append('ᵗ'); 'u'->append('ᵘ'); 'v'->append('ᵛ')
+            'w'->append('ʷ'); 'x'->append('ˣ'); 'y'->append('ʸ'); 'z'->append('ᶻ')
+            else -> append(c)
+        }
+    }
+}
+
+private fun subscript(chars: String): String = buildString {
+    for (c in chars) {
+        when (c) {
+            '0'->append('₀'); '1'->append('₁'); '2'->append('₂'); '3'->append('₃')
+            '4'->append('₄'); '5'->append('₅'); '6'->append('₆'); '7'->append('₇')
+            '8'->append('₈'); '9'->append('₉'); '+'->append('₊'); '-'->append('₋')
+            '('->append('₍'); ')'->append('₎'); '='->append('₌')
+            'a'->append('ₐ'); 'e'->append('ₑ'); 'h'->append('ₕ'); 'i'->append('ᵢ')
+            'j'->append('ⱼ'); 'k'->append('ₖ'); 'l'->append('ₗ'); 'm'->append('ₘ')
+            'n'->append('ₙ'); 'o'->append('ₒ'); 'p'->append('ₚ'); 'r'->append('ᵣ')
+            's'->append('ₛ'); 't'->append('ₜ'); 'u'->append('ᵤ'); 'v'->append('ᵥ')
+            'x'->append('ₓ')
+            else -> append(c)
+        }
+    }
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 

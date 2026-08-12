@@ -54,6 +54,8 @@ import androidx.compose.ui.unit.sp
 import com.interndra.ai.JailbreakLevel
 import com.interndra.ai.provider.ProviderConfig
 import com.interndra.ai.provider.ProviderRole
+import com.interndra.ai.ThinkingEpisode
+import com.interndra.ai.ThinkingMarker
 import com.interndra.ai.provider.ProviderState
 import com.interndra.ai.tasks.TaskPlan
 import com.interndra.data.model.*
@@ -540,13 +542,26 @@ private fun MessageGroup(
                         } else {
                             // Web-search sources live in a hidden marker; the visible
                             // text stays clean (no links dumped in the chat). They are
-                            // rendered below as a collapsible Sources box.
+                            // rendered below as a collapsible Sources box. The agent's
+                            // reasoning lives in a thinking marker rendered above as a
+                            // Claude-style collapsible "Thinking" block.
                             val sources = remember(msg.id, msg.content) {
                                 SourceMarker.decode(msg.content)
                             }
+                            val thinking = remember(msg.id, msg.content) {
+                                ThinkingMarker.decode(msg.content)
+                            }
                             val displayText = if (isStreaming) streamedText else msg.content
+                            if (thinking.isNotEmpty()) {
+                                ThinkingBlock(
+                                    episodes = thinking,
+                                    colors = colors,
+                                    messageId = msg.id
+                                )
+                                Spacer(Modifier.height(8.dp))
+                            }
                             RichMarkdownText(
-                                markdown = SourceMarker.strip(displayText),
+                                markdown = ThinkingMarker.strip(SourceMarker.strip(displayText)),
                                 modifier = Modifier.fillMaxWidth(),
                                 onLinkClick = { url ->
                                     val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
@@ -567,10 +582,140 @@ private fun MessageGroup(
                         // Message actions bar
                         if (isLast && !msg.isLoading) {
                             MessageActionsBar(
-                                onCopy = { onCopy(SourceMarker.strip(msg.content)) },
+                                onCopy = { onCopy(ThinkingMarker.strip(SourceMarker.strip(msg.content))) },
                                 onRegenerate = onRegenerate,
                                 isUserMessage = false
                             )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Collapsible Thinking Block (Claude-style) ────────────────────────────
+// Shows the AI's reasoning episodes (intent, plan, commands, search) in a
+// compact collapsed row. Tap to expand and read what the agent did — like
+// Claude's "Thinking" blocks. Every episode can be expanded independently.
+@Composable
+private fun ThinkingBlock(
+    episodes: List<ThinkingEpisode>,
+    colors: InterndraColors,
+    messageId: Long
+) {
+    var expanded by remember(messageId) { mutableStateOf(false) }
+    var openEpisode by remember(messageId) { mutableStateOf(-1) }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = colors.codeBlockBg.copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, colors.codeBlockBorder.copy(alpha = 0.4f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column {
+            // Header row — tap to expand/collapse all
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        expanded = !expanded
+                        if (!expanded) openEpisode = -1
+                    }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Psychology,
+                    contentDescription = null,
+                    tint = colors.accent,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Thinking",
+                    color = colors.inputTextColor,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                if (episodes.size > 1) {
+                    Spacer(Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(colors.accent.copy(alpha = 0.15f))
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            "${episodes.size}",
+                            color = colors.accent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (expanded) "Hide" else "View",
+                    color = colors.accent.copy(alpha = 0.7f),
+                    fontSize = 11.sp
+                )
+                Icon(
+                    if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (expanded) "Collapse thinking" else "Show thinking",
+                    tint = TerminalWhite.copy(alpha = 0.5f),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            // Expanded content — one episode per section, independently tappable
+            AnimatedVisibility(visible = expanded) {
+                Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
+                    episodes.forEachIndexed { ei, ep ->
+                        val isOpen = openEpisode == ei
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isOpen) colors.accent.copy(alpha = 0.06f) else Color.Transparent)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { openEpisode = if (isOpen) -1 else ei }
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    if (episodes.size > 1) "Thought ${ei + 1} — ${ep.title}" else ep.title.ifBlank { "Reasoning" },
+                                    color = colors.accent,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Icon(
+                                    if (isOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    null,
+                                    tint = TerminalWhite.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            if (isOpen) {
+                                Column(Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp)) {
+                                    ep.steps.forEach { step ->
+                                        Text(
+                                            step,
+                                            color = TerminalWhite.copy(alpha = 0.75f),
+                                            fontSize = 12.sp,
+                                            lineHeight = 18.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.padding(bottom = 3.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

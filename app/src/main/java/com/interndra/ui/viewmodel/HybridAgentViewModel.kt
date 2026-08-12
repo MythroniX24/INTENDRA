@@ -1309,9 +1309,6 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                         sb.appendLine()
                         sb.appendLine("> ${workflow.description}")
                         sb.appendLine()
-                        sb.appendLine("### Steps")
-                        narrationLines.forEachIndexed { i, line -> sb.appendLine("${i + 1}. $line") }
-                        sb.appendLine()
                         if (result.overallSuccess) {
                             sb.appendLine("> ✅ **Workflow completed successfully** in ${result.durationMs}ms " +
                                           "(${result.succeededSteps}/${result.stepResults.size} steps).")
@@ -1332,7 +1329,12 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                             }
                         }
 
-                        repo.updateAiMessage(placeholderId, sb.toString().trim())
+                        // Claude-style: the step narration lives in a collapsible
+                        // "Thinking" block instead of cluttering the reply.
+                        val workflowThinking = com.interndra.ai.ThinkingMarker.encode(
+                            listOf(com.interndra.ai.ThinkingEpisode("Workflow: ${workflow.name}", narrationLines))
+                        )
+                        repo.updateAiMessage(placeholderId, sb.toString().trim() + workflowThinking)
                         _uiState.update { it.copy(isLoading = false) }
 
                         // ── Track last workflow run for deduplication ──
@@ -1643,7 +1645,25 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 }
 
                 // ── Execute ───────────────────────────────────────────────
+                // Claude-style collapsible "Thinking" block: shows the agent's
+                // reasoning (intent, plan, commands, search) without dumping it
+                // into the visible reply text.
+                val thinkingSteps = mutableListOf<String>()
+                thinkingSteps.add("🤔 Intent: ${intent.action.replace('_', ' ')}")
+                if (!orchResult.explanation.isNullOrBlank()) {
+                    thinkingSteps.add(orchResult.explanation.trim().take(500))
+                }
+                if (commands.isNotEmpty()) {
+                    thinkingSteps.add("⚡ ${commands.size} command${if (commands.size > 1) "s" else ""} planned:")
+                    commands.take(8).forEach { thinkingSteps.add("   • ${it.description}") }
+                }
+                if (webSources.isNotEmpty()) {
+                    thinkingSteps.add("🔍 Web search: ${webSources.size} source${if (webSources.size > 1) "s" else ""} analyzed")
+                }
                 val replyText = buildAiReply(intent, orchResult.explanation, suppressSteps = usingFallbackCommands) +
+                    com.interndra.ai.ThinkingMarker.encode(
+                        listOf(com.interndra.ai.ThinkingEpisode("Reasoning", thinkingSteps))
+                    ) +
                     buildSourcesBlock(webSources)
                 repo.updateAiMessage(placeholderId, replyText)
 
@@ -2373,7 +2393,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             sb.appendLine("Chat messages: ${messages.size} | Logs: ${logs.size} | Knowledge: ${vault.size}")
             sb.appendLine("\n=== Chat Messages ===")
             messages.forEach { msg ->
-                sb.appendLine("[${msg.role}] ${SensitiveDataRedactor.redact(SourceMarker.strip(msg.content))}")
+                sb.appendLine("[${msg.role}] ${SensitiveDataRedactor.redact(com.interndra.ai.ThinkingMarker.strip(SourceMarker.strip(msg.content)))}")
             }
             sb.appendLine("\n=== Terminal Logs ===")
             logs.forEach { log ->
