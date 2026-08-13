@@ -1,9 +1,17 @@
 package com.interndra.ui.viewmodel
 
 import android.os.Looper
+import com.interndra.agent.AgentActivity
 import com.interndra.agent.AgentQuestion
 import com.interndra.agent.AgentState
 import com.interndra.agent.QuestionAnswer
+import com.interndra.agent.QuestionOption
+import com.interndra.data.local.AgentDatabase
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.getCompleted
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -11,6 +19,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -33,6 +42,20 @@ import java.util.concurrent.TimeUnit
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33], application = android.app.Application::class)
 class HybridAgentViewModelQuestionFlowTest {
+
+    /**
+     * AgentDatabase holds a static singleton over a file-backed Room DB. Under
+     * Robolectric each test gets a fresh Application, but the static instance
+     * survives across tests in the same class — so messages persisted by one
+     * test would leak into the next. Reset the singleton before every test so
+     * each one starts from a truly empty database.
+     */
+    @Before
+    fun resetDatabase() {
+        val field = AgentDatabase.Companion::class.java.getDeclaredField("instance")
+        field.isAccessible = true
+        field.set(null, null)
+    }
 
     /** Run all tasks currently queued on the Robolectric main looper. */
     private fun idleMain() {
@@ -104,5 +127,88 @@ class HybridAgentViewModelQuestionFlowTest {
             AgentState.WAITING_FOR_USER,
             vm.agentState.value
         )
+    }
+
+    @Test
+    fun `mid-task question pauses the agent and the answer resumes the same task`() {
+        val app = RuntimeEnvironment.getApplication()
+        val vm = HybridAgentViewModel(app)
+
+        // An in-flight task (as a tool/agent would mid-execution, spec §12)
+        // discovers an important ambiguity and calls askQuestion(), which
+        // suspends the task until the user answers.
+        val receivedAnswer = CompletableDeferred<QuestionAnswer>()
+        val taskScope = CoroutineScope(Dispatchers.Main)
+        taskScope.launch {
+            val answer = vm.askQuestion(
+                AgentQuestion.SingleChoice(
+                    id = "approach",
+                    question = "Which approach should I use?",
+                    options = listOf(
+                        QuestionOption(
+                            "upgrade", "Upgrade existing renderer",
+                            "Smaller change, lower risk", recommended = true
+                        ),
+                        QuestionOption(
+                            "replace", "Replace renderer",
+                            "More control, larger change"
+                        )
+                    )
+                )
+            )
+            receivedAnswer.complete(answer)
+            // The task continues after the answer and finishes normally.
+            vm.agentOrchestrator.complete()
+        }
+
+        // ── Phase 1: the running task pauses with the question ─────────────
+        await(what = "mid-task question pending") {
+            vm.pendingQuestion.value != null && vm.agentState.value == AgentState.WAITING_FOR_USER
+        }
+        val question = vm.pendingQuestion.value
+        assertTrue(
+            "Expected SingleChoice, got ${question!!::class.simpleName}",
+            question is AgentQuestion.SingleChoice
+        )
+        assertEquals("approach", (question as AgentQuestion.SingleChoice).id)
+        assertTrue(
+            "Waiting-for-choice activity should be shown",
+            vm.agentActivity.value.any {
+                it is AgentActivity.Thinking && it.message == "Waiting for your choice"
+            }
+        )
+        // The pause does not persist anything or re-enter a new task.
+        assertEquals("no messages persisted by the mid-task pause", 0, vm.messages.value.size)
+
+        // ── Phase 2: the user answers the mid-task question ────────────────
+        vm.answerQuestion(QuestionAnswer.SingleChoiceAnswer("approach", "upgrade"))
+
+        // ── Phase 3: the SAME task resumed with the exact structured answer ─
+        assertNull("question cleared after answer", vm.pendingQuestion.value)
+        await(what = "suspended task resumed with the structured answer") {
+            receivedAnswer.isCompleted
+        }
+        assertEquals(
+            QuestionAnswer.SingleChoiceAnswer("approach", "upgrade"),
+            receivedAnswer.getCompleted()
+        )
+
+        // The resumed task ran to completion; the agent is no longer waiting.
+        await(what = "task completed after the answer") {
+            vm.agentState.value == AgentState.COMPLETED
+        }
+        assertNotEquals(
+            "agent no longer waiting for the user",
+            AgentState.WAITING_FOR_USER,
+            vm.agentState.value
+        )
+        // A mid-task answer must NEVER re-trigger the pre-task resume path
+        // (no stored pre-task request → no sendCommand → no new messages).
+        assertEquals(
+            "mid-task answer must not re-send the request as a new message",
+            0, vm.messages.value.size
+        )
+
+        taskScope.cancel()
     }
 }
