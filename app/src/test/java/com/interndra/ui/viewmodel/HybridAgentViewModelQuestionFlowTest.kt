@@ -52,7 +52,13 @@ class HybridAgentViewModelQuestionFlowTest {
      */
     @Before
     fun resetDatabase() {
-        val field = AgentDatabase.Companion::class.java.getDeclaredField("instance")
+        // Kotlin compiles a private companion-object property's backing field
+        // as a STATIC field on the outer class (not on the Companion class).
+        val field = try {
+            AgentDatabase::class.java.getDeclaredField("instance")
+        } catch (_: NoSuchFieldException) {
+            AgentDatabase.Companion::class.java.getDeclaredField("instance")
+        }
         field.isAccessible = true
         field.set(null, null)
     }
