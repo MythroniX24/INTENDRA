@@ -438,7 +438,8 @@ fun MainScreen(viewModel: HybridAgentViewModel) {
                         AppTab.SETTINGS -> SettingsScreen(
                             vm = viewModel,
                             onOpenDrawer = { scope.launch { drawerState.open() } },
-                            onOpenProviders = { showProviderSettings = true }
+                            onOpenProviders = { showProviderSettings = true },
+                            onOpenTerminal = { selectedAppTab = AppTab.TERMINAL }
                         )
                     }
                 }

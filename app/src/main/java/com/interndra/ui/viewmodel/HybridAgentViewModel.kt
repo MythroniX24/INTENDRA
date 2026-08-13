@@ -57,6 +57,9 @@ import com.interndra.service.PersistentShell
 import com.interndra.service.ProotDistroManager
 import com.interndra.service.TermuxBootstrapInstaller
 import com.interndra.service.TermuxEnvironment
+import com.interndra.service.LinuxEnvironmentManager
+import com.interndra.service.TerminalBackend
+import com.interndra.service.EmbeddedLinuxBackend
 import com.interndra.terminal.TerminalSession
 import com.interndra.services.InterndraNotificationListener
 import com.interndra.util.Constants
@@ -376,6 +379,41 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         _prootDistroState.value = state
     }
 
+    // ── Linux environment lifecycle actions (Settings → Linux Environment) ──
+    fun checkLinuxEnvironment() = viewModelScope.launch(Dispatchers.IO) {
+        linuxEnvironmentManager.check()
+    }
+
+    fun repairLinuxEnvironment() = viewModelScope.launch(Dispatchers.IO) {
+        linuxEnvironmentManager.repair { progress ->
+            _uiState.update { it.copy(error = null) }
+            Log.i(TAG, "🔧 Linux repair: $progress")
+        }
+        linuxEnvironmentManager.check()
+    }
+
+    fun resetLinuxEnvironment() = viewModelScope.launch(Dispatchers.IO) {
+        linuxEnvironmentManager.reset { progress ->
+            Log.i(TAG, "🔄 Linux reset: $progress")
+        }
+        linuxEnvironmentManager.check()
+    }
+
+    fun removeLinuxEnvironment() = viewModelScope.launch(Dispatchers.IO) {
+        linuxEnvironmentManager.remove { progress ->
+            Log.i(TAG, "🧹 Linux remove: $progress")
+        }
+        terminalAgent.syncModeFromEnvironment()
+    }
+
+    fun reinstallLinuxEnvironment() = viewModelScope.launch(Dispatchers.IO) {
+        linuxEnvironmentManager.reinstall { progress ->
+            Log.i(TAG, "📦 Linux reinstall: $progress")
+        }
+        terminalAgent.syncModeFromEnvironment()
+        linuxEnvironmentManager.check()
+    }
+
     /** Install a full Linux distro via proot-distro (e.g., "ubuntu", "debian"). */
     fun installLinuxDistro(distroName: String, onProgress: ((String) -> Unit)? = null) = viewModelScope.launch(Dispatchers.IO) {
         onProgress?.invoke("📦 Installing proot-distro tool...")
@@ -393,6 +431,18 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
 
     // ── Terminal Agent — uses PersistentShell (no Termux needed) ─────
     val terminalAgent = TerminalAgent(app, shizukuShell, termuxEnvironment, scope = viewModelScope)
+
+    // ── TerminalBackend abstraction — the Agent/UI talk only to this ──
+    // The embedded Linux runtime is replaceable: swap the implementation and
+    // nothing in the Agent or Chat UI changes.
+    val terminalBackend: TerminalBackend = EmbeddedLinuxBackend(terminalAgent)
+
+    // ── Linux Environment Manager — status/check/repair/reset/remove ──
+    val linuxEnvironmentManager = LinuxEnvironmentManager(
+        app, termuxBootstrapInstaller, termuxEnvironment, prootDistroManager, shizukuShell
+    )
+    val linuxEnvState: StateFlow<LinuxEnvironmentManager.EnvironmentState> =
+        linuxEnvironmentManager.state
     private val _terminalSessions = MutableStateFlow(terminalAgent.getSessionNames())
     val terminalSessions: StateFlow<List<String>> = _terminalSessions.asStateFlow()
     private val _activeTerminalSession = MutableStateFlow("default")
@@ -1918,15 +1968,11 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 if (corrected.isBlank() || corrected == cmd.command) continue
                 agentOrchestrator.thinking("Diagnosing failure: ${friendlyError(failed.error).take(140)}")
                 agentOrchestrator.toolStart("terminal", "Retrying with corrected command", corrected)
-                // Run the corrected command through the same backend chain.
+                // Run the corrected command through the TerminalBackend abstraction
+                // (embedded Linux when available, Android shell fallback otherwise).
                 val retryOutcome = runCatching {
-                    if (terminalAgent != null) {
-                        val r = terminalAgent.execute("ai_persistent", corrected)
-                        Triple(r.isSuccess, r.stdout, r.stderr)
-                    } else {
-                        val r = ShellExecutor.runAsync(corrected)
-                        Triple(r.isSuccess, r.stdout, r.stderr)
-                    }
+                    val r = terminalBackend.execute("ai_persistent", corrected)
+                    Triple(r.success, r.stdout, r.stderr)
                 }.getOrNull()
                 val retryOk = retryOutcome?.first == true
                 val retryStdout = retryOutcome?.second.orEmpty()

@@ -18,7 +18,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -39,10 +41,15 @@ import com.interndra.util.Constants
 fun SettingsScreen(
     vm: HybridAgentViewModel,
     onOpenDrawer: () -> Unit = {},
-    onOpenProviders: () -> Unit = {}
+    onOpenProviders: () -> Unit = {},
+    onOpenTerminal: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val providerState by vm.providerState.collectAsState()
+    val linuxEnvState by vm.linuxEnvState.collectAsState()
+
+    // Auto-refresh the Linux environment status when Settings opens.
+    LaunchedEffect(Unit) { vm.checkLinuxEnvironment() }
 
     val privacyMode   by vm.privacyMode.collectAsState()
     val uiState       by vm.uiState.collectAsState()
@@ -620,6 +627,107 @@ fun SettingsScreen(
                 }
             }
 
+            // ── Linux Environment ─────────────────────────────────────────
+            DashboardCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionHeader("🐧 Linux Environment", modifier = Modifier.weight(1f))
+                    if (linuxEnvState.installed) {
+                        Text("✓ Installed", color = TerminalGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    } else if (linuxEnvState.archSupported) {
+                        Text("Not installed", color = TerminalYellow, fontSize = 12.sp)
+                    } else {
+                        Text("Unsupported", color = TerminalRed, fontSize = 12.sp)
+                    }
+                }
+                Text(
+                    "Embedded Linux (bash, python, git, apt) inside INTENDRA — no Termux app or root required.",
+                    color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp
+                )
+                Spacer(Modifier.height(10.dp))
+
+                // ── Status grid ──────────────────────────────────────────
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    InfoRow("Architecture", linuxEnvState.archLabel.ifBlank { "detecting…" })
+                    InfoRow("Storage used", linuxEnvState.storageLabel)
+                    InfoRow("Packages", "${linuxEnvState.packageCount}")
+                    InfoRow("Mode", linuxEnvState.modeLabel.ifBlank { "—" })
+                    if (linuxEnvState.prootDistros.isNotEmpty()) {
+                        InfoRow("Linux distros", linuxEnvState.prootDistros.joinToString(", "))
+                    }
+                    if (linuxEnvState.phase != com.interndra.service.LinuxEnvironmentManager.Phase.IDLE) {
+                        InfoRow("Status", linuxEnvState.phase.label)
+                    }
+                    if (linuxEnvState.error != null) {
+                        Text(
+                            linuxEnvState.error,
+                            color = TerminalRed, fontSize = 11.sp
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+
+                // ── Actions ──────────────────────────────────────────────
+                Button(
+                    onClick = onOpenTerminal,
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("▶ Open Terminal", color = Color.White, fontWeight = FontWeight.Bold) }
+
+                val busy = linuxEnvState.phase != com.interndra.service.LinuxEnvironmentManager.Phase.IDLE
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { vm.checkLinuxEnvironment() },
+                        enabled = !busy,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceLight),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Check", color = TerminalWhite, fontSize = 12.sp) }
+                    OutlinedButton(
+                        onClick = {
+                            vm.repairLinuxEnvironment()
+                            Toast.makeText(context, "Repairing Linux environment…", Toast.LENGTH_SHORT).show()
+                        },
+                        enabled = !busy,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceLight),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Repair", color = TerminalYellow, fontSize = 12.sp) }
+                    OutlinedButton(
+                        onClick = {
+                            vm.resetLinuxEnvironment()
+                            Toast.makeText(context, "Resetting Linux environment…", Toast.LENGTH_SHORT).show()
+                        },
+                        enabled = !busy,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceLight),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Reset", color = TerminalYellow, fontSize = 12.sp) }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            vm.reinstallLinuxEnvironment()
+                            Toast.makeText(context, "Reinstalling Linux environment…", Toast.LENGTH_SHORT).show()
+                        },
+                        enabled = !busy,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceLight),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Reinstall", color = Accent, fontSize = 12.sp) }
+                    OutlinedButton(
+                        onClick = {
+                            vm.removeLinuxEnvironment()
+                            Toast.makeText(context, "Removing Linux environment…", Toast.LENGTH_SHORT).show()
+                        },
+                        enabled = !busy,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, TerminalRed.copy(alpha = 0.6f)),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Remove", color = TerminalRed, fontSize = 12.sp) }
+                }
+                if (linuxEnvState.progress.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(linuxEnvState.progress, color = Accent, fontSize = 11.sp)
+                }
+            }
+
             // ── System & Actions ───────────────────────────────────────────
             DashboardCard {
                 SectionHeader("System", modifier = Modifier.padding(bottom = 8.dp))
@@ -687,6 +795,14 @@ fun SettingsScreen(
                     fontSize = 12.sp)
             }
         }
+    }
+}
+
+@Composable
+private fun InfoRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = TerminalWhite.copy(alpha = 0.5f), fontSize = 12.sp, modifier = Modifier.width(110.dp))
+        Text(value, color = TerminalWhite, fontSize = 12.sp, modifier = Modifier.weight(1f))
     }
 }
 
