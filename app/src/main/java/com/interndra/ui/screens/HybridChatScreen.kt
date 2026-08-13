@@ -52,6 +52,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.interndra.agent.AgentActivity
+import com.interndra.agent.AgentState
 import com.interndra.ai.JailbreakLevel
 import com.interndra.ai.provider.ProviderConfig
 import com.interndra.ai.provider.ProviderRole
@@ -100,6 +102,10 @@ fun HybridChatScreen(
     val activeCommands by vm.activeCommands.collectAsState()
     val selectedModel by vm.selectedModel.collectAsState()
     val providerState by vm.providerState.collectAsState()
+
+    // ── Agent state machine + live activity timeline ────────────────
+    val agentState by vm.agentState.collectAsState()
+    val agentActivities by vm.agentActivity.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     val keyboard   = LocalSoftwareKeyboardController.current
@@ -209,6 +215,17 @@ fun HybridChatScreen(
         }
 
     // ── Messages (isolated recomposition scope for streaming) ─────────
+        // ── Agent activity timeline (Claude-style "Working…" panel) ────
+        // Shown while the agent works; auto-collapses to a status line when
+        // done. Only rendered when the current run has produced activity.
+        if (agentActivities.isNotEmpty() || agentState != AgentState.IDLE) {
+            AgentActivityTimeline(
+                activities = agentActivities,
+                state = agentState,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+        }
+
         // ── Active commands indicator (like Claude: "Running command...") ──
         if (activeCommands.isNotEmpty()) {
             CommandExecutionDisplay(

@@ -14,6 +14,10 @@ import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.interndra.agent.TerminalAgent
+import com.interndra.agent.AgentActivity
+import com.interndra.agent.AgentOrchestrator
+import com.interndra.agent.AgentState
+import com.interndra.agent.ComplexityClassifier
 import com.interndra.ai.*
 import com.interndra.ai.model.*
 import com.interndra.ai.provider.ProviderCapability
@@ -257,6 +261,18 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     private var commandIdCounter = 0L
     private fun nextCommandId() = ++commandIdCounter
 
+    // ── Agent state machine + live activity timeline ──────────────────
+    // Drives the Claude-style "Working…" panel in the chat: the current
+    // state (Analyzing / Planning / Searching / Executing / Verifying…) and
+    // a live list of user-safe activity events for the current run.
+    val agentOrchestrator = AgentOrchestrator(maxRetriesPerTool = 2, maxToolCallsPerRun = 12)
+    val agentState: StateFlow<AgentState> = agentOrchestrator.state
+    val agentActivity: StateFlow<List<AgentActivity>> = agentOrchestrator.activities
+
+    /** Emit a live activity event + return its index (caller may want to update it). */
+    private fun emitAgent(activity: AgentActivity) = agentOrchestrator.emit(activity)
+    private fun setAgentState(state: AgentState) = agentOrchestrator.setState(state)
+
     // ── Workflow deduplication ───────────────────────────────────────
     // Prevents the same workflow from being executed repeatedly for similar
     // user inputs within a short time window.
@@ -266,6 +282,10 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         val timestampMs: Long
     )
     private var lastWorkflowRun: LastWorkflowRun? = null
+
+    // ── Self-correction state (Phase 8) ───────────────────────────────
+    // Whether the last command run succeeded after any automatic retries.
+    private var lastCommandRunSuccess: Boolean? = null
 
     // ── Persistent preferences ────────────────────────────────────────────
     // UPGRADE: All stateIn() flows use `lazy {}` so that if DataStore or
@@ -1217,6 +1237,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         generationJob = null
         commandGate.set(false)
         taskManager.cancel()
+        agentOrchestrator.reset()
         _uiState.update { it.copy(isLoading = false, error = null) }
         // Capture the placeholder id synchronously so a brand-new message sent
         // immediately after Stop is never mislabeled as "stopped".
@@ -1258,6 +1279,15 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 return
             }
 
+            // ── Agent lifecycle: start the state machine + live activity ────
+            agentOrchestrator.begin(trimmed)
+            val complexity = ComplexityClassifier.classify(trimmed)
+            if (complexity == ComplexityClassifier.Complexity.COMPLEX) {
+                agentOrchestrator.planning("Planning the steps to complete this task")
+            } else if (complexity == ComplexityClassifier.Complexity.MODERATE) {
+                agentOrchestrator.thinking("Working through this step by step")
+            }
+
             // ── Phase 5/6/7: try the workflow planner FIRST ─────────────────
             // If the user's request maps cleanly to a known workflow (WhatsApp
             // message, find PDFs, launch app, etc.), execute it directly with
@@ -1280,11 +1310,15 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                             try {
                                 repo.updateAiMessage(placeholderId, "⏭️ Already working on this — please wait a moment.")
                             } catch (_: Exception) {}
+                            agentOrchestrator.reset()
                             _uiState.update { it.copy(isLoading = false) }
                             return
                         }
                         repo.log(session, LogType.INFO, "⚙️ Workflow detected: ${workflow.name} (confidence ${(detected.confidence * 100).toInt()}%)")
                         val narrationLines = mutableListOf<String>()
+                        // Live agent activity: map narration levels to state-machine
+                        // events so the chat shows the workflow running in real time.
+                        agentOrchestrator.planning("Running workflow: ${workflow.name}")
                         val result = workflowEngine.run(workflow, session) { level, msg ->
                             val prefix = when (level) {
                                 WorkflowEngine.NarrationLevel.UNDERSTOOD       -> "🧠 Understood"
@@ -1298,6 +1332,24 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                                 WorkflowEngine.NarrationLevel.SKIPPED          -> "⏭️ Skipped"
                             }
                             narrationLines.add("$prefix: $msg")
+                            // Map narration to the agent state machine + live timeline.
+                            when (level) {
+                                WorkflowEngine.NarrationLevel.DOING ->
+                                    agentOrchestrator.toolStart("workflow", msg)
+                                WorkflowEngine.NarrationLevel.DONE ->
+                                    agentOrchestrator.toolResult("workflow", true, msg)
+                                WorkflowEngine.NarrationLevel.FAILED ->
+                                    agentOrchestrator.toolResult("workflow", false, msg)
+                                WorkflowEngine.NarrationLevel.BLOCKED ->
+                                    agentOrchestrator.fail(msg)
+                                WorkflowEngine.NarrationLevel.NEEDS_PERMISSION ->
+                                    agentOrchestrator.needsConfirmation(msg)
+                                WorkflowEngine.NarrationLevel.COMPLETE ->
+                                    agentOrchestrator.verifyStart(msg)
+                                WorkflowEngine.NarrationLevel.PARTIAL ->
+                                    agentOrchestrator.emit(AgentActivity.Verification(msg, success = false))
+                                else -> { /* UNDERSTOOD / SKIPPED — no state change */ }
+                            }
                             // COMPILE FIX: repo.log() is a suspend function —
                             // wrap in viewModelScope.launch so it can be called
                             // from this non-suspend narration lambda.
@@ -1348,6 +1400,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                             repo.rememberSuccess(trimmed, workflow.name,
                                 workflow.steps.map { it.command }, "WORKFLOW")
                             _uiState.update { it.copy(memoryCount = repo.memoryCount()) }
+                            agentOrchestrator.complete()
+                        } else {
+                            agentOrchestrator.fail("Workflow finished with ${result.failedSteps} failed step(s)")
                         }
                         timelineEngine.recordCommand(
                             command = workflow.name,
@@ -1469,6 +1524,8 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                         preferBrave = preferBrave.value
                     )
                     repo.log(session, LogType.INFO, "🔍 Autonomous web search planner running...")
+                    // Live agent activity for the research phase.
+                    agentOrchestrator.searching("\"${trimmed.take(80)}\"")
                     val digest = searchManager.runAutonomous(trimmed, settings) { status ->
                         // Subtle progress inside the chat — no user interaction.
                         val hint = when (status) {
@@ -1478,6 +1535,15 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                             is SearchStatus.Analyzing -> "🧠 Analyzing information..."
                             is SearchStatus.Done -> "✅ Search complete"
                             is SearchStatus.Failed -> "⚠️ ${status.message}"
+                        }
+                        // Map search phases to the live activity timeline.
+                        when (status) {
+                            is SearchStatus.Searching -> agentOrchestrator.emit(AgentActivity.Search(trimmed.take(80)))
+                            is SearchStatus.Found -> agentOrchestrator.toolResult("web", true, "Found ${status.count} trusted sources")
+                            is SearchStatus.Reading -> agentOrchestrator.reading("Reading ${status.count} webpages")
+                            is SearchStatus.Analyzing -> agentOrchestrator.thinking("Analyzing information")
+                            is SearchStatus.Done -> agentOrchestrator.verifyStart("Verified sources via ${status.providerUsed.label}")
+                            is SearchStatus.Failed -> agentOrchestrator.emit(AgentActivity.Error(status.message))
                         }
                         // Late hints must not overwrite the final message after
                         // Stop (or a brand-new command started). Guard against
@@ -1512,6 +1578,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 }
 
                 // ── Route + parse ─────────────────────────────────────────
+                agentOrchestrator.thinking("Routing to ${effectiveMode.label}")
                 repo.log(session, LogType.INFO, "🧠 Routing: ${effectiveMode.emoji} ${effectiveMode.label} (privacyMode: ${mode.name})")
 
                 val memoryPolicy = SmartMemoryPolicy(
@@ -1583,6 +1650,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 if (safety.hasBlocked(safetyReports)) {
                     val blocked = safetyReports.first { it.result == SafetyEngine.ValidationResult.BLOCKED }
                     repo.log(session, LogType.STATUS_FAIL, "🚫 BLOCKED: ${blocked.reason}")
+                    agentOrchestrator.fail("Command blocked by Safety Engine: ${blocked.reason}")
                     repo.updateAiMessage(placeholderId, "⛔ Command blocked by Safety Engine:\n${blocked.reason}")
                     _uiState.update { it.copy(isLoading = false) }
                     return
@@ -1591,6 +1659,8 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 if (safety.hasConfirmRequired(safetyReports)) {
                     val confirmReport = safetyReports.first { it.result == SafetyEngine.ValidationResult.REQUIRES_CONFIRMATION }
                     val summary = commands.joinToString("\n") { "• ${it.description}" }
+                    // Enter WAITING_FOR_CONFIRMATION state so the UI shows it needs approval.
+                    agentOrchestrator.needsConfirmation(confirmReport.reason)
                     repo.updateAiMessage(placeholderId, buildAiReply(intent, orchResult.explanation, suppressSteps = usingFallbackCommands))
                     _uiState.update { it.copy(
                         isLoading = false,
@@ -1610,6 +1680,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                     repo.updateAiMessage(placeholderId, statusMsg)
                     _uiState.update { it.copy(isLoading = true) }
                     viewModelScope.launch(Dispatchers.IO) {
+                        agentOrchestrator.toolStart("termux", "Installing Embedded Termux bootstrap", "install_bootstrap")
                         val result = termuxBootstrapInstaller.install(progressCallback = { progress ->
                             viewModelScope.launch {
                                 repo.updateAiMessage(placeholderId, "📦 $progress")
@@ -1635,9 +1706,13 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                             }
                             val msg = "✅ Embedded Termux installed! You can now use python3, git, node, npm, pip, apt."
                             repo.updateAiMessage(placeholderId, msg)
+                            agentOrchestrator.toolResult("termux", true, "Bootstrap installed")
+                            agentOrchestrator.complete()
                         } else {
                             val err = "❌ Installation failed: ${result.error?.take(200) ?: "Unknown error"}"
                             repo.updateAiMessage(placeholderId, err)
+                            agentOrchestrator.toolResult("termux", false, "Bootstrap install failed")
+                            agentOrchestrator.fail("Bootstrap installation failed")
                         }
                         _uiState.update { it.copy(isLoading = false) }
                     }
@@ -1688,6 +1763,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                             try { repo.log(session, LogType.STATUS_FAIL, "❌ Execution error: ${e.message}") } catch (_: Exception) {}
                         }
                     }
+                } else {
+                    // Pure chat answer — no tools needed. Mark the run complete.
+                    agentOrchestrator.complete()
                 }
 
                 // ── Record to timeline ────────────────────────────────────
@@ -1706,6 +1784,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 val err = "Error: $msg"
                 try { repo.updateAiMessage(placeholderId, err) } catch (_: Exception) {}
                 try { repo.log(session, LogType.STATUS_FAIL, err) } catch (_: Exception) {}
+                agentOrchestrator.fail(msg)
                 _uiState.update { it.copy(error = msg) }
             }
     }
@@ -1747,6 +1826,7 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         // Without this, ALL AI commands bypass Termux and run in the app sandbox.
         val engine = HybridExecutionEngine(app, repo, ShellExecutor, safety, terminalAgent)
         var allSuccess = true
+        val failedSteps = mutableListOf<com.interndra.data.model.ExecutionResult>()
 
         val chatOutputLines = mutableListOf<String>()
 
@@ -1764,13 +1844,22 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         val trackedCmds = cmdList.map { it.copy(id = nextCommandId()) }
         _activeCommands.value = trackedCmds
 
+        // Live agent activity: announce each command before the engine starts.
+        commands.forEach { cmd ->
+            agentOrchestrator.toolStart(
+                tool = "terminal",
+                description = cmd.description.ifBlank { cmd.command.take(60) },
+                command = cmd.command
+            )
+        }
+
         engine.execute(
             session = session,
             userInput = userInput,
             intent = intent.copy(commands = commands),
             approvedByUser = approvedByUser,
             onStepResult = { result ->
-            if (!result.success) allSuccess = false
+            if (!result.success) { allSuccess = false; failedSteps.add(result) }
             val cmd   = commands.getOrNull(result.stepIndex)
             val label = cmd?.description?.ifBlank { null } ?: cmd?.command?.take(40) ?: "Command"
 
@@ -1782,6 +1871,14 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 val friendly = friendlyError(rawError)
                 chatOutputLines.add("**$label** — $friendly")
             }
+
+            // Live agent activity: report each tool result as it lands.
+            agentOrchestrator.toolResult(
+                tool = "terminal",
+                success = result.success,
+                summary = if (result.success) (cmd?.command ?: label).take(120)
+                          else (result.error.ifBlank { "Command failed" }).take(120)
+            )
 
             // Update command tracking
             _activeCommands.update { current ->
@@ -1810,6 +1907,59 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
         }
         )
 
+        // ── Self-correction (Phase 8) ───────────────────────────────────
+        // A failed step is diagnosed and retried ONCE with a corrected
+        // invocation (drop sudo, add --yes / --no-input, capture stderr).
+        // Bounded by AgentOrchestrator.maxRetriesPerTool (2).
+        if (failedSteps.isNotEmpty()) {
+            for (failed in failedSteps) {
+                val cmd = commands.getOrNull(failed.stepIndex) ?: continue
+                val corrected = correctCommand(cmd.command)
+                if (corrected.isBlank() || corrected == cmd.command) continue
+                agentOrchestrator.thinking("Diagnosing failure: ${friendlyError(failed.error).take(140)}")
+                agentOrchestrator.toolStart("terminal", "Retrying with corrected command", corrected)
+                // Run the corrected command through the same backend chain.
+                val retryOutcome = runCatching {
+                    if (terminalAgent != null) {
+                        val r = terminalAgent.execute("ai_persistent", corrected)
+                        Triple(r.isSuccess, r.stdout, r.stderr)
+                    } else {
+                        val r = ShellExecutor.runAsync(corrected)
+                        Triple(r.isSuccess, r.stdout, r.stderr)
+                    }
+                }.getOrNull()
+                val retryOk = retryOutcome?.first == true
+                val retryStdout = retryOutcome?.second.orEmpty()
+                val retryStderr = retryOutcome?.third.orEmpty()
+                if (retryOk) allSuccess = true
+                agentOrchestrator.toolResult(
+                    tool = "terminal",
+                    success = retryOk,
+                    summary = if (retryOk) "Recovered: ${cmd.command.take(100)}"
+                              else "Retry failed: ${(retryStderr.ifBlank { failed.error }).take(120)}"
+                )
+                // Update the chat output + command tracker for the retried step.
+                val retryMsg = if (retryOk) {
+                    "**${cmd.description.ifBlank { cmd.command.take(40) }}** (retried)\n```\n" +
+                        SensitiveDataRedactor.redact(retryStdout.trim()).take(400).ifBlank { "Recovered" } + "\n```"
+                } else {
+                    "**${cmd.description.ifBlank { cmd.command.take(40) }}** — retry failed: " +
+                        friendlyError((retryStderr.ifBlank { failed.error }).take(160))
+                }
+                chatOutputLines.add(retryMsg)
+                _activeCommands.update { current ->
+                    current.map { ac ->
+                        if (ac.id == trackedCmds.getOrNull(failed.stepIndex)?.id) {
+                            ac.copy(
+                                status = if (retryOk) CommandStatus.SUCCESS else CommandStatus.FAILED,
+                                error = if (retryOk) "" else retryStderr.ifBlank { failed.error }.take(500)
+                            )
+                        } else ac
+                    }
+                }
+            }
+        }
+
         // Phase 11 FIX: removed the artificial `delay(200)` — engine.execute
         // runs its callback synchronously inside its forEachIndexed loop, so
         // all results are already collected by the time we reach this point.
@@ -1832,11 +1982,42 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             _activeCommands.value = emptyList()
         }
 
-        if (allSuccess && commands.isNotEmpty()) {
-            repo.rememberSuccess(userInput, intent.action, commands, _uiState.value.lastAiSource?.name ?: "UNKNOWN")
-            val count = repo.memoryCount()
-            _uiState.update { it.copy(memoryCount = count) }
+        // ── Verification (Phase 9) + run completion ────────────────────
+        // Never claim success without checking: if every command (including
+        // any self-corrected retries) succeeded, the run is verified.
+        lastCommandRunSuccess = allSuccess
+        if (commands.isNotEmpty()) {
+            if (allSuccess) {
+                repo.rememberSuccess(userInput, intent.action, commands, _uiState.value.lastAiSource?.name ?: "UNKNOWN")
+                val count = repo.memoryCount()
+                _uiState.update { it.copy(memoryCount = count) }
+                agentOrchestrator.verifyStart("Verifying command results")
+                emitAgent(AgentActivity.Verification(
+                    "All ${commands.size} command(s) completed", success = true))
+                agentOrchestrator.complete()
+            } else {
+                agentOrchestrator.fail("${failedSteps.size} command(s) failed after retries")
+            }
         }
+    }
+
+    /**
+     * Build a corrected invocation of a failed command — the self-correction
+     * primitive. Returns the original command when no correction applies.
+     */
+    private fun correctCommand(command: String): String {
+        var c = command.trim()
+        // Termux has no sudo — the sandboxed fallback has no root either.
+        if (c.startsWith("sudo ")) c = c.removePrefix("sudo ").trim()
+        // Package managers: add the non-interactive flag so they never hang.
+        if (c.startsWith("pkg ") && !c.contains("--yes") && !c.contains("-y ")) c += " --yes"
+        if (c.startsWith("apt ") && !c.contains("--yes") && !c.contains("-y ")) c += " -y"
+        if (c.startsWith("apt-get ") && !c.contains("--yes") && !c.contains("-y ")) c += " -y"
+        if ((c.startsWith("pip ") || c.startsWith("pip3 ") || c.startsWith("pip install")) && !c.contains("--no-input")) c += " --no-input"
+        if (c.startsWith("npm install") && !c.contains("--no-audit")) c += " --no-audit --no-fund"
+        // Capture stderr so a retry failure can be diagnosed properly.
+        if (!c.contains("2>&1") && !c.contains("|| ") && !c.contains("&& ")) c += " 2>&1"
+        return c
     }
 
     /**
@@ -1871,6 +2052,11 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
             val detail = if (output.isNotBlank()) output.take(200) else "(no output)"
             stepOutputs.add("$icon **${step.label}**\n```\n$detail\n```")
 
+            // Live agent activity per step.
+            val ok = step.status == com.interndra.ai.tasks.StepStatus.COMPLETED
+            agentOrchestrator.toolStart("task", step.label, step.command)
+            agentOrchestrator.toolResult("task", ok, if (ok) step.label else "Step failed", 0L)
+
             // Rebuild message cleanly each step (no duplication). Keep the
             // hidden sources marker at the end; insert the task block before it.
             val taskBlock = stepOutputs.joinToString("\n")
@@ -1894,6 +2080,13 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 repo.rememberSuccess(userInput, intent.action, commands,
                     _uiState.value.lastAiSource?.name ?: "UNKNOWN")
                 _uiState.update { it.copy(memoryCount = repo.memoryCount()) }
+                // Verification + completion for the multi-step task path.
+                agentOrchestrator.verifyStart("Verifying task results")
+                emitAgent(AgentActivity.Verification(
+                    "${finalTask.completedSteps}/${finalTask.steps.size} steps completed", success = true))
+                agentOrchestrator.complete()
+            } else {
+                agentOrchestrator.fail("Task ended with status ${finalTask.status}")
             }
         }
     }
@@ -1902,6 +2095,8 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     fun confirmAction() {
         val pending = _uiState.value.pendingConfirmation ?: return
         _uiState.update { it.copy(pendingConfirmation = null, isLoading = true) }
+        // User approved the destructive/sensitive operation — resume executing.
+        agentOrchestrator.setState(AgentState.EXECUTING)
         viewModelScope.launch {
             try { pending.onConfirm() }
             catch (e: Exception) { _uiState.update { it.copy(error = e.message) } }
