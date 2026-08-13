@@ -46,15 +46,24 @@ enum class AgentState(val label: String) {
     /** A destructive/sensitive operation needs user approval. */
     WAITING_FOR_CONFIRMATION("Needs confirmation"),
 
+    /** A clarifying question is waiting for the user (questioning engine). */
+    WAITING_FOR_USER("Waiting for your choice"),
+
+    /** The user answered — resuming the paused task. */
+    RESUMING("Resuming"),
+
     /** Task finished successfully. */
     COMPLETED("Completed"),
 
     /** Task failed or was aborted. */
-    FAILED("Failed");
+    FAILED("Failed"),
 
-    /** True while the agent is actively working (not idle/completed/failed). */
+    /** Task was cancelled by the user. */
+    CANCELLED("Cancelled");
+
+    /** True while the agent is actively working (not idle/completed/failed/cancelled). */
     fun isActive(): Boolean = when (this) {
-        IDLE, COMPLETED, FAILED -> false
+        IDLE, COMPLETED, FAILED, CANCELLED -> false
         else -> true
     }
 }

@@ -107,6 +107,9 @@ fun HybridChatScreen(
     val agentState by vm.agentState.collectAsState()
     val agentActivities by vm.agentActivity.collectAsState()
 
+    // ── Interactive questioning (Questioning Engine) ─────────────────
+    val pendingQuestion by vm.pendingQuestion.collectAsState()
+
     var inputText by remember { mutableStateOf("") }
     val keyboard   = LocalSoftwareKeyboardController.current
     val context    = LocalContext.current
@@ -206,6 +209,16 @@ fun HybridChatScreen(
         uiState.pendingCloudConsent?.let { req ->
             CloudConsentBanner(req.reason, req.destinationDomain,
                 onAllow = { vm.allowCloudConsent() }, onDeny = { vm.denyCloudConsent() })
+        }
+
+        // ── Agent question card (inline, Claude-style) ────────────────────
+        pendingQuestion?.let { question ->
+            QuestionCard(
+                question = question,
+                onAnswer = { answer -> vm.answerQuestion(answer) },
+                onCancel = { vm.cancelQuestion() },
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
         }
 
         // ── Safety confirmation dialog ─────────────────────────────────────

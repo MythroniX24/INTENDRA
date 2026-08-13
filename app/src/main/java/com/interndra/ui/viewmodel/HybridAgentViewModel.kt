@@ -17,8 +17,11 @@ import com.interndra.agent.TerminalAgent
 import com.interndra.agent.AgentActivity
 import com.interndra.agent.AgentOrchestrator
 import com.interndra.agent.AgentState
+import com.interndra.agent.AgentQuestion
 import com.interndra.agent.ComplexityClassifier
 import com.interndra.agent.CommandPlanner
+import com.interndra.agent.QuestionAnswer
+import com.interndra.agent.QuestioningEngine
 import com.interndra.agent.TerminalTool
 import com.interndra.ai.*
 import com.interndra.ai.model.*
@@ -277,6 +280,87 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     /** Emit a live activity event + return its index (caller may want to update it). */
     private fun emitAgent(activity: AgentActivity) = agentOrchestrator.emit(activity)
     private fun setAgentState(state: AgentState) = agentOrchestrator.setState(state)
+
+    // ── Interactive Questioning (Questioning Engine) ────────────────────
+    private val _pendingQuestion = MutableStateFlow<AgentQuestion?>(null)
+    val pendingQuestion: StateFlow<AgentQuestion?> = _pendingQuestion.asStateFlow()
+
+    /** Questions already answered in this session — never re-asked (spec §10, §21). */
+    private val questionHistory = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** Structured answers collected so far — injected into the task context. */
+    private val questionAnswers = java.util.concurrent.ConcurrentHashMap<String, QuestionAnswer>()
+
+    /** Input stored while a pre-task question waits; resumed by re-running it. */
+    @Volatile private var pendingResumeInput: String? = null
+
+    /** Deferred for the mid-task suspend-and-await question helper. */
+    private var pendingAnswer: kotlinx.coroutines.CompletableDeferred<QuestionAnswer>? = null
+
+    /** Suspend-until-answered helper for mid-task questions (spec §12). */
+    suspend fun askQuestion(question: AgentQuestion): QuestionAnswer {
+        _pendingQuestion.value = question
+        agentOrchestrator.setState(AgentState.WAITING_FOR_USER)
+        emitAgent(AgentActivity.Thinking("Waiting for your choice"))
+        val deferred = kotlinx.coroutines.CompletableDeferred<QuestionAnswer>()
+        pendingAnswer = deferred
+        return deferred.await()
+    }
+
+    /** UI callback: the user answered the pending question (structured answer). */
+    fun answerQuestion(answer: QuestionAnswer) {
+        questionHistory.add(answer.questionId)
+        questionAnswers[answer.questionId] = answer
+        _pendingQuestion.value = null
+        pendingAnswer?.complete(answer)
+        pendingAnswer = null
+        agentOrchestrator.setState(AgentState.RESUMING)
+        emitAgent(AgentActivity.Verification("Choice received", success = true))
+        // Pre-task flow: re-run the stored request now that the answer exists
+        // (the history guard prevents asking the same question again).
+        val resumeInput = pendingResumeInput
+        pendingResumeInput = null
+        if (!resumeInput.isNullOrBlank()) {
+            viewModelScope.launch {
+                delay(250)  // let the UI collapse the question card first
+                sendCommand(resumeInput)
+            }
+        } else if (_uiState.value.isLoading.not()) {
+            agentOrchestrator.complete()
+        }
+    }
+
+    /** UI callback: the user cancelled the waiting task (spec §31). */
+    fun cancelQuestion() {
+        _pendingQuestion.value?.let { q -> questionHistory.add(q.id) }
+        _pendingQuestion.value = null
+        pendingResumeInput = null
+        pendingAnswer?.complete(QuestionAnswer.Cancelled(""))
+        pendingAnswer = null
+        agentOrchestrator.reset()
+        _uiState.update { it.copy(isLoading = false, error = null) }
+        commandGate.set(false)
+    }
+
+    /** Format collected answers as context for the resumed task. */
+    private fun questionContext(): String {
+        if (questionAnswers.isEmpty()) return ""
+        return buildString {
+            append("\n\n── User preferences ──\n")
+            questionAnswers.values.forEach { a ->
+                when (a) {
+                    is QuestionAnswer.SingleChoiceAnswer -> appendLine("- ${a.questionId}: ${a.optionId}")
+                    is QuestionAnswer.MultiChoiceAnswer -> appendLine("- ${a.questionId}: ${a.optionIds.joinToString(", ")}")
+                    is QuestionAnswer.TextAnswer -> appendLine("- ${a.questionId}: ${a.value}")
+                    is QuestionAnswer.CustomAnswer -> appendLine("- ${a.questionId}: ${a.value}")
+                    is QuestionAnswer.YesNoAnswer -> appendLine("- ${a.questionId}: ${if (a.yes) "yes" else "no"}")
+                    is QuestionAnswer.NumberAnswer -> appendLine("- ${a.questionId}: ${a.value}")
+                    is QuestionAnswer.YouDecide -> appendLine("- ${a.questionId}: agent decides")
+                    else -> { /* confirmation / cancelled — no context */ }
+                }
+            }
+        }.trimEnd()
+    }
 
     // ── Workflow deduplication ───────────────────────────────────────
     // Prevents the same workflow from being executed repeatedly for similar
@@ -1350,6 +1434,26 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 agentOrchestrator.thinking("Working through this step by step")
             }
 
+            // ── Interactive questioning: ask only when genuinely needed ──────
+            // The Questioning Engine decides; most requests CONTINUE. When a
+            // question is required, the task pauses (WAITING_FOR_USER), the
+            // question card appears inline, and the SAME request resumes after
+            // the user answers (history guard prevents re-asking).
+            val questionPlan = QuestioningEngine.needsQuestion(
+                trimmed,
+                alreadyAsked = questionHistory,
+                answers = questionAnswers
+            )
+            if (questionPlan != null) {
+                pendingResumeInput = trimmed
+                _pendingQuestion.value = questionPlan.question
+                agentOrchestrator.setState(AgentState.WAITING_FOR_USER)
+                emitAgent(AgentActivity.Thinking("Waiting for your choice"))
+                try { repo.log(session, LogType.INFO, "❓ Question: ${questionPlan.question.question}") } catch (_: Exception) {}
+                _uiState.update { it.copy(isLoading = false) }
+                return
+            }
+
             // ── Phase 5/6/7: try the workflow planner FIRST ─────────────────
             // If the user's request maps cleanly to a known workflow (WhatsApp
             // message, find PDFs, launch app, etc.), execute it directly with
@@ -1561,7 +1665,9 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 JailbreakEngine.activeLevel = if (jailbreakEnabled.value) jailbreakLevel.value else JailbreakLevel.OFF
 
                 // ── RAG context augmentation ──────────────────────────────
-                var augmentedInput = trimmed
+                // Collected question answers (platform, language, preferences)
+                // are injected so the resumed task knows the user's choices.
+                var augmentedInput = trimmed + questionContext()
                 if (knowledgeEntries.value.isNotEmpty()) {
                     val ragCtx = ragEngine.buildAugmentedPrompt(trimmed)
                     if (ragCtx != trimmed) {
