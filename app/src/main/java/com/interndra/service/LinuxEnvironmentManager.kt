@@ -32,8 +32,21 @@ class LinuxEnvironmentManager(
     private val prootDistroManager: ProotDistroManager,
     private val shizukuShell: ShizukuShell
 ) {
-    companion object {
+    companion object Utils {
         private const val TAG = "LinuxEnvManager"
+
+        /** Human-readable byte formatting: 12345 -> "12.1 KB". */
+        fun formatBytes(bytes: Long): String {
+            if (bytes < 1024) return "$bytes B"
+            val units = arrayOf("KB", "MB", "GB", "TB")
+            var value = bytes.toDouble() / 1024.0
+            var unit = 0
+            while (value >= 1024 && unit < units.size - 1) {
+                value /= 1024.0
+                unit++
+            }
+            return String.format(java.util.Locale.US, "%.1f %s", value, units[unit])
+        }
     }
 
     /** What the manager is currently doing (drives the UI spinner/progress). */
@@ -62,7 +75,7 @@ class LinuxEnvironmentManager(
         val progress: String = "",
         val error: String? = null
     ) {
-        val storageLabel: String get() = formatBytes(storageUsedBytes)
+        val storageLabel: String get() = LinuxEnvironmentManager.Utils.formatBytes(storageUsedBytes)
         val packageCount: Int get() = installedPackages.size
     }
 
@@ -167,7 +180,7 @@ class LinuxEnvironmentManager(
             _state.value = _state.value.copy(phase = Phase.RESETTING, error = null)
             try {
                 onProgress?.invoke("🧹 Removing Linux filesystem…")
-                installer.uninstall(progressCallback = onProgress)
+                installer.uninstall(progress = onProgress)
                 onProgress?.invoke("📦 Installing fresh Linux filesystem…")
                 val result = installer.install(progressCallback = { msg ->
                     onProgress?.invoke(msg)
@@ -193,7 +206,7 @@ class LinuxEnvironmentManager(
             _state.value = _state.value.copy(phase = Phase.REMOVING, error = null)
             try {
                 onProgress?.invoke("🧹 Removing Linux environment…")
-                installer.uninstall(progressCallback = onProgress)
+                installer.uninstall(progress = onProgress)
                 runCatching { termuxEnvironment.refreshStatus() }
                 _state.value = EnvironmentState(
                     phase = Phase.IDLE,
@@ -215,7 +228,7 @@ class LinuxEnvironmentManager(
             _state.value = _state.value.copy(phase = Phase.REINSTALLING, error = null)
             try {
                 onProgress?.invoke("🧹 Removing old environment…")
-                installer.uninstall(progressCallback = onProgress)
+                installer.uninstall(progress = onProgress)
                 onProgress?.invoke("📦 Installing fresh Linux environment…")
                 val result = installer.install(progressCallback = { msg ->
                     onProgress?.invoke(msg)
@@ -268,20 +281,4 @@ class LinuxEnvironmentManager(
         }
     }
 
-    // ── Pure helpers (unit-testable) ─────────────────────────────────────
-
-    companion object Utils {
-        /** Human-readable byte formatting: 12345 -> "12.1 KB". */
-        fun formatBytes(bytes: Long): String {
-            if (bytes < 1024) return "$bytes B"
-            val units = arrayOf("KB", "MB", "GB", "TB")
-            var value = bytes.toDouble() / 1024.0
-            var unit = 0
-            while (value >= 1024 && unit < units.size - 1) {
-                value /= 1024.0
-                unit++
-            }
-            return String.format(java.util.Locale.US, "%.1f %s", value, units[unit])
-        }
-    }
 }

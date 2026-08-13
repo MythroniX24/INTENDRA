@@ -657,9 +657,9 @@ fun SettingsScreen(
                     if (linuxEnvState.phase != com.interndra.service.LinuxEnvironmentManager.Phase.IDLE) {
                         InfoRow("Status", linuxEnvState.phase.label)
                     }
-                    if (linuxEnvState.error != null) {
+                    linuxEnvState.error?.let { envError ->
                         Text(
-                            linuxEnvState.error,
+                            envError,
                             color = TerminalRed, fontSize = 11.sp
                         )
                     }
