@@ -1420,8 +1420,13 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 _pendingQuestion.value = question
                 agentOrchestrator.setState(AgentState.WAITING_FOR_USER)
                 emitAgent(AgentActivity.Thinking("Waiting for your choice"))
-                try { repo.log(session, LogType.INFO, "❓ Question: ${question.question}") } catch (_: Exception) {}
+                // Reset loading BEFORE the suspend repo.log() below — otherwise
+                // the pause becomes visible (question + WAITING_FOR_USER) while
+                // isLoading is still true until the coroutine resumes past the
+                // suspend point. The question card must appear with the loading
+                // indicator already off.
                 _uiState.update { it.copy(isLoading = false) }
+                try { repo.log(session, LogType.INFO, "❓ Question: ${question.question}") } catch (_: Exception) {}
                 return
             }
 

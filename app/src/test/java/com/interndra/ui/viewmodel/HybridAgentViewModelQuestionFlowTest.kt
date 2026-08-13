@@ -58,7 +58,11 @@ class HybridAgentViewModelQuestionFlowTest {
         // ── Phase 1: sendCommand() pauses with the platform question ──────
         vm.sendCommand("Build me a mobile app.")
 
-        await(what = "pending platform question") { vm.pendingQuestion.value != null }
+        // Wait for the FULL paused state: question visible AND loading already
+        // reset (the pause path clears isLoading synchronously with the card).
+        await(what = "pending platform question with loading reset") {
+            vm.pendingQuestion.value != null && !vm.uiState.value.isLoading
+        }
 
         val question = vm.pendingQuestion.value
         assertNotNull("question should be pending", question)
