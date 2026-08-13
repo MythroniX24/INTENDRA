@@ -1,10 +1,11 @@
 # INTENDRA — Third-Party Notices
 
 This file documents the third-party components that ship inside or are
-downloaded by INTENDRA's **Embedded Linux Environment**, together with their
-licenses. It is maintained for redistribution compliance — "open source" does
-not mean unrestricted commercial redistribution, so every component is listed
-with its exact license and project URL.
+downloaded by INTENDRA (the **Embedded Linux Environment**, the **offline AI
+backend**, and the app's core dependencies). It is maintained for
+redistribution compliance — "open source" does not mean unrestricted
+commercial redistribution, so every component is listed with its exact
+license and project URL.
 
 > ⚠️ **Do not copy binaries or root filesystems from Termux or any other
 > project without checking their redistribution terms.** INTENDRA downloads
@@ -12,6 +13,18 @@ with its exact license and project URL.
 > extracts on first launch) from the project's own GitHub Releases. Each
 > package inside the archive carries its own license; the list below covers
 > the ones INTENDRA relies on.
+
+---
+
+## 0. Offline AI backend
+
+### llama.cpp
+- **Project:** https://github.com/ggml-org/llama.cpp
+- **License:** MIT
+- **Used as:** Native offline AI inference backend (GGUF models). INTENDRA
+  builds against a pinned revision:
+  `000547513f1530346ecd163db8b3e13962949961`.
+- **Notice:** MIT License — Copyright (c) 2023-2026 The ggml authors.
 
 ---
 
