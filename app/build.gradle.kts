@@ -109,9 +109,14 @@ android {
     }
 
     // Unit tests: return default values for Android framework classes (Log, etc.)
-    // instead of throwing NoClassDefFoundError/ExceptionInInitializerError
+    // instead of throwing NoClassDefFoundError/ExceptionInInitializerError.
+    // isIncludeAndroidResources enables Robolectric tests (real Application,
+    // Room SQLite, DataStore) so ViewModels can be driven end-to-end on the JVM.
     testOptions {
-        unitTests.isReturnDefaultValues = true
+        unitTests {
+            isReturnDefaultValues = true
+            isIncludeAndroidResources = true
+        }
     }
 
     // Allow Room schema export for version-control and migration verification
@@ -199,6 +204,7 @@ dependencies {
 
     // Unit testing
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     testImplementation("io.mockk:mockk:1.13.12")
     testImplementation("com.google.truth:truth:1.4.4")
