@@ -18,6 +18,8 @@ import com.interndra.agent.AgentActivity
 import com.interndra.agent.AgentOrchestrator
 import com.interndra.agent.AgentState
 import com.interndra.agent.ComplexityClassifier
+import com.interndra.agent.CommandPlanner
+import com.interndra.agent.TerminalTool
 import com.interndra.ai.*
 import com.interndra.ai.model.*
 import com.interndra.ai.provider.ProviderCapability
@@ -436,6 +438,16 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
     // The embedded Linux runtime is replaceable: swap the implementation and
     // nothing in the Agent or Chat UI changes.
     val terminalBackend: TerminalBackend = EmbeddedLinuxBackend(terminalAgent)
+
+    // ── Structured Terminal Tool — first-class agent tool (spec §1-§2) ──
+    // Exposes terminal.execute / send_input / stop / background processes
+    // with tool-call IDs, input/output schemas and registry descriptors.
+    val terminalTool = TerminalTool(terminalBackend, terminalAgent)
+    val terminalToolRegistry: com.interndra.ai.tools.ToolRegistry by lazy {
+        com.interndra.ai.tools.ToolRegistry().apply {
+            registerAll(terminalTool.toToolDescriptors())
+        }
+    }
 
     // ── Linux Environment Manager — status/check/repair/reset/remove ──
     val linuxEnvironmentManager = LinuxEnvironmentManager(
@@ -1969,9 +1981,13 @@ class HybridAgentViewModel(private val app: Application) : AndroidViewModel(app)
                 agentOrchestrator.thinking("Diagnosing failure: ${friendlyError(failed.error).take(140)}")
                 agentOrchestrator.toolStart("terminal", "Retrying with corrected command", corrected)
                 // Run the corrected command through the TerminalBackend abstraction
-                // (embedded Linux when available, Android shell fallback otherwise).
+                // (embedded Linux when available, Android shell fallback otherwise),
+                // with an inferred timeout for the command class.
                 val retryOutcome = runCatching {
-                    val r = terminalBackend.execute("ai_persistent", corrected)
+                    val r = terminalBackend.execute(
+                        "ai_persistent", corrected,
+                        CommandPlanner.inferTimeout(corrected)
+                    )
                     Triple(r.success, r.stdout, r.stderr)
                 }.getOrNull()
                 val retryOk = retryOutcome?.first == true

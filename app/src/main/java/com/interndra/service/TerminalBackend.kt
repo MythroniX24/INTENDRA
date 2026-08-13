@@ -42,6 +42,9 @@ interface TerminalBackend {
         timeoutMs: Long = TerminalConfig.AGENT_TIMEOUT_MS
     ): TerminalResult
 
+    /** Change the working directory of a session; returns the resolved dir. */
+    suspend fun changeWorkdir(sessionId: String, target: String): String
+
     /** Write raw input (stdin) to an interactive process, where supported. */
     suspend fun writeInput(sessionId: String, input: String): Boolean
 
@@ -102,6 +105,11 @@ class EmbeddedLinuxBackend(
         )
     }
 
+    override suspend fun changeWorkdir(sessionId: String, target: String): String =
+        withContext(Dispatchers.IO) {
+            terminalAgent.changeWorkdir(sessionId, target)
+        }
+
     override suspend fun writeInput(sessionId: String, input: String): Boolean =
         withContext(Dispatchers.IO) {
             // Ctrl+C / Ctrl+D get dedicated handling; anything else is sent raw.
@@ -155,6 +163,8 @@ class AndroidShellBackend : TerminalBackend {
             success = result.isSuccess
         )
     }
+
+    override suspend fun changeWorkdir(sessionId: String, target: String): String = target
 
     override suspend fun writeInput(sessionId: String, input: String): Boolean = false
 
