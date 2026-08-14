@@ -12,8 +12,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -23,6 +27,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.ViewModelProvider
 import com.interndra.ui.screens.ChatScreen
+import com.interndra.ui.screens.TerminalScreen
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 import com.interndra.ui.viewmodel.HybridAgentViewModelFactory
@@ -147,7 +152,32 @@ class MainActivity : ComponentActivity() {
                     } else {
                         val vm = viewModel
                         if (vm != null) {
-                            ChatScreen(vm)
+                            var tab by rememberSaveable { mutableIntStateOf(0) }
+                            Column(Modifier.fillMaxSize()) {
+                                Box(Modifier.weight(1f)) {
+                                    when (tab) {
+                                        0 -> ChatScreen(vm)
+                                        1 -> TerminalScreen(vm)
+                                    }
+                                }
+                                NavigationBar(
+                                    containerColor = MaterialTheme.colorScheme.surface,
+                                    tonalElevation = 0.dp
+                                ) {
+                                    NavigationBarItem(
+                                        selected = tab == 0,
+                                        onClick = { tab = 0 },
+                                        icon = { Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Chat") },
+                                        label = { Text("Chat") }
+                                    )
+                                    NavigationBarItem(
+                                        selected = tab == 1,
+                                        onClick = { tab = 1 },
+                                        icon = { Icon(Icons.Filled.Terminal, contentDescription = "Terminal") },
+                                        label = { Text("Terminal") }
+                                    )
+                                }
+                            }
                         } else {
                             ErrorFallbackScreen(vmInitError ?: "Unknown initialization error")
                         }
