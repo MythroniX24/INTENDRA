@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.ViewModelProvider
+import com.interndra.ui.screens.ChatScreen
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 import com.interndra.ui.viewmodel.HybridAgentViewModelFactory
@@ -69,19 +70,19 @@ class MainActivity : ComponentActivity() {
                 Spacer(Modifier.height(16.dp))
                 Text(
                     "App crashed on previous launch",
-                    color = TerminalRed,
+                    color = MaterialTheme.colorScheme.error,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(Modifier.height(8.dp))
                 Surface(
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                    color = TerminalRed.copy(0.1f),
+                    color = MaterialTheme.colorScheme.error.copy(0.1f),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         crashInfo.take(500),
-                        color = TerminalRed.copy(0.8f),
+                        color = MaterialTheme.colorScheme.error.copy(0.8f),
                         fontSize = 11.sp,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                         modifier = Modifier.padding(12.dp),
@@ -92,7 +93,7 @@ class MainActivity : ComponentActivity() {
                 Spacer(Modifier.height(20.dp))
                 Text(
                     "To recover: Clear app data or reinstall.",
-                    color = TerminalWhite.copy(0.5f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 13.sp
                 )
                 Spacer(Modifier.height(12.dp))
@@ -102,7 +103,7 @@ class MainActivity : ComponentActivity() {
                         InterndraApplication.didCrashLastLaunch(application)
                         recreate()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Accent)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
                     Text("Try Again", fontWeight = FontWeight.Bold)
                 }
@@ -134,7 +135,7 @@ class MainActivity : ComponentActivity() {
         requestRequiredPermissions()
 
         setContent {
-            InterndraTheme(themeMode = ThemeMode.DARK, dynamicColor = false) {
+            InterndraTheme(themeMode = ThemeMode.LIGHT, dynamicColor = false) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color    = MaterialTheme.colorScheme.background
@@ -146,9 +147,7 @@ class MainActivity : ComponentActivity() {
                     } else {
                         val vm = viewModel
                         if (vm != null) {
-                            // Old UI removed — awaiting redesign. The ViewModel and
-                            // backend stay initialized so all domain/data logic runs.
-                            Box(Modifier.fillMaxSize())
+                            ChatScreen(vm)
                         } else {
                             ErrorFallbackScreen(vmInitError ?: "Unknown initialization error")
                         }
@@ -208,21 +207,21 @@ class MainActivity : ComponentActivity() {
                 Spacer(Modifier.height(16.dp))
                 Text(
                     "INTENDRA couldn't start",
-                    color = TerminalWhite,
+                    color = MaterialTheme.colorScheme.onBackground,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
                     error,
-                    color = TerminalRed,
+                    color = MaterialTheme.colorScheme.error,
                     fontSize = 14.sp
                 )
                 Spacer(Modifier.height(16.dp))
                 Text(
                     "Please check the crash log and report the issue.\n" +
                     "File: /data/data/com.interndra/files/crash_log.txt",
-                    color = TerminalWhite.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
             }
