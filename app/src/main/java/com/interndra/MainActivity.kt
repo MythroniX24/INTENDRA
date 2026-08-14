@@ -22,7 +22,6 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.ViewModelProvider
-import com.interndra.ui.screens.MainScreen
 import com.interndra.ui.theme.*
 import com.interndra.ui.viewmodel.HybridAgentViewModel
 import com.interndra.ui.viewmodel.HybridAgentViewModelFactory
@@ -147,7 +146,9 @@ class MainActivity : ComponentActivity() {
                     } else {
                         val vm = viewModel
                         if (vm != null) {
-                            MainScreen(vm)
+                            // Old UI removed — awaiting redesign. The ViewModel and
+                            // backend stay initialized so all domain/data logic runs.
+                            Box(Modifier.fillMaxSize())
                         } else {
                             ErrorFallbackScreen(vmInitError ?: "Unknown initialization error")
                         }
