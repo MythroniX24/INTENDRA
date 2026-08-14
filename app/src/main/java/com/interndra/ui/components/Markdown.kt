@@ -72,6 +72,7 @@ fun MarkdownText(
                 is MarkdownParser.Block.LatexBlock -> LatexBlockText(block)
                 is MarkdownParser.Block.Table -> TableBlock(block, style, colors)
                 is MarkdownParser.Block.ListBlock -> ListBlock(block, style, colors)
+                is MarkdownParser.Block.ListItem -> Unit // only emitted inside ListBlock
             }
         }
     }

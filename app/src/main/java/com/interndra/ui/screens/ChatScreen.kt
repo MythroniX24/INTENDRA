@@ -1504,7 +1504,7 @@ private fun providerStatusColor(p: ProviderConfig): Color = when (p.status) {
     ProviderStatus.CONNECTED, ProviderStatus.CONFIGURED -> SuccessGreen
     ProviderStatus.NOT_CONFIGURED -> Amber
     ProviderStatus.INVALID_API_KEY, ProviderStatus.AUTHENTICATION_FAILED -> DestructiveRed
-    else -> MaterialTheme.colorScheme.onSurfaceVariant
+    else -> Color(0xFF636366)
 }
 
 // ── Welcome state ───────────────────────────────────────────────────────────
