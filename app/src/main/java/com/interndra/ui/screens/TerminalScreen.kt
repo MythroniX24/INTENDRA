@@ -188,13 +188,14 @@ fun TerminalScreen(vm: HybridAgentViewModel) {
     LaunchedEffect(Unit) {
         while (true) {
             val pty = vm.terminalAgent.getPtySession()
-            val running = pty?.isRunning == true
-            ptyActive = running
-            if (running) {
+            if (pty != null && pty.isRunning) {
+                ptyActive = true
                 screenChars = pty.emulator.getScreenChars()
                 screenStyles = pty.emulator.getScreenStyles()
                 cursorRow = pty.emulator.cursorRow
                 cursorCol = pty.emulator.cursorCol
+            } else {
+                ptyActive = false
             }
             delay(50)
         }
@@ -806,7 +807,7 @@ private fun StreamingView(
             item(key = "banner") {
                 if (!envChecked) {
                     Text("Checking Linux environment…", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = TermYellow)
-                } else if (linuxInstalled && !ptyActive) {
+                } else if (linuxInstalled) {
                     Text("Shell ready — type a command below.", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = TermGreen)
                 }
             }
@@ -1258,7 +1259,7 @@ private fun styleCodeToSpan(styleCode: Int): SpanStyle? {
     if (color == null && !bold && !italic && !underline && !reverse) return null
     return SpanStyle(
         color = if (reverse) TermBg else (color ?: TermFg),
-        background = if (reverse) TermFg else null,
+        background = if (reverse) TermFg else Color.Unspecified,
         fontWeight = if (bold) FontWeight.Bold else null,
         fontStyle = if (italic) FontStyle.Italic else null,
         textDecoration = if (underline) TextDecoration.Underline else null
