@@ -675,7 +675,8 @@ private fun MessageList(
     onTaskCancel: () -> Unit,
     onTaskRetryStep: (Int) -> Unit
 ) {
-    val listState = rememberLazyListState()    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     var userScrolledUp by remember { mutableStateOf(false) }
 
