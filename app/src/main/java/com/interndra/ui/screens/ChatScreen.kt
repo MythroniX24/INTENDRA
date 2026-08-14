@@ -19,6 +19,8 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -778,11 +780,19 @@ private fun MessageRow(
     onRegenerate: () -> Unit,
     onShare: (String) -> Unit
 ) {
-    val colors = LocalInterndraColors.current
-    val context = LocalContext.current
+    var showActions by remember(msg.id) { mutableStateOf(false) }
+    var appeared by remember(msg.id) { mutableStateOf(false) }
+    LaunchedEffect(msg.id) { appeared = true }
+    val reveal = Modifier.combinedClickable(
+        interactionSource = remember(msg.id) { MutableInteractionSource() },
+        indication = null,
+        onClick = { showActions = false },
+        onLongClick = { showActions = !showActions }
+    )
 
-    if (msg.role == MessageRole.USER) {
-        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+    AnimatedVisibility(visible = appeared, enter = fadeIn(tween(160))) {
+        if (msg.role == MessageRole.USER) {
+            Column(Modifier.fillMaxWidth().then(reveal), horizontalAlignment = Alignment.End) {
             Surface(
                 shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp),
                 color = Color(0xFFF0F0F2),
@@ -796,13 +806,15 @@ private fun MessageRow(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                 )
             }
-            MessageActions(
-                onCopy = { onCopy(msg.content) },
-                onDelete = { onDelete(msg) }
-            )
+            AnimatedVisibility(visible = showActions) {
+                MessageActions(
+                    onCopy = { onCopy(msg.content) },
+                    onDelete = { onDelete(msg) }
+                )
+            }
         }
     } else {
-        Column(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().then(reveal)) {
             if (msg.isLoading && msg.content.isBlank()) {
                 ThinkingIndicator()
             } else {
@@ -829,14 +841,17 @@ private fun MessageRow(
             }
             if (!msg.isLoading) {
                 val clean = ThinkingMarker.strip(SourceMarker.strip(msg.content))
-                MessageActions(
-                    onCopy = { onCopy(clean) },
-                    onRegenerate = onRegenerate,
-                    onShare = { onShare(clean) },
-                    onDelete = { onDelete(msg) }
-                )
+                AnimatedVisibility(visible = showActions) {
+                    MessageActions(
+                        onCopy = { onCopy(clean) },
+                        onRegenerate = onRegenerate,
+                        onShare = { onShare(clean) },
+                        onDelete = { onDelete(msg) }
+                    )
+                }
             }
         }
+    }
     }
 }
 
@@ -912,7 +927,7 @@ private fun ThinkingBlock(episodes: List<ThinkingEpisode>, messageId: Long) {
                 )
                 if (episodes.size > 1) {
                     Spacer(Modifier.width(6.dp))
-                    Text("${episodes.size}", color = Color(0xFF3578E4), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("${episodes.size} thoughts", color = Color(0xFF3578E4), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.weight(1f))
                 Text(if (expanded) "Hide" else "View", color = Color(0xFF3578E4), fontSize = 11.sp)
